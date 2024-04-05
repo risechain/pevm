@@ -1,0 +1,11 @@
+[package]
+name = "block-stm-revm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dashmap = "5.5.3"
+revm = "8.0.0"
+
+[profile.release]
+debug = true
