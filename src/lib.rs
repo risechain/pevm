@@ -104,6 +104,7 @@ mod block_stm;
 pub use block_stm::BlockSTM;
 mod mv_memory;
 mod scheduler;
-mod storage;
+pub mod storage;
 use storage::Storage;
+pub mod examples;
 mod vm;

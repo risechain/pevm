@@ -274,6 +274,7 @@ name = "block-stm-revm"
 version = "0.1.0"
 dependencies = [
  "dashmap",
+ "rand",
  "revm",
 ]
 

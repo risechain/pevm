@@ -8,14 +8,15 @@ use revm::{
 use crate::{MemoryLocation, MemoryValue, ReadError};
 
 // TODO: Populate the remaining missing pieces like logs, etc.
-pub(crate) struct Storage {
-    accounts: HashMap<Address, DbAccount>,
-    contracts: HashMap<B256, Bytecode>,
-    block_hashes: HashMap<U256, B256>,
+#[derive(Clone)]
+pub struct Storage {
+    pub accounts: HashMap<Address, DbAccount>,
+    pub contracts: HashMap<B256, Bytecode>,
+    pub block_hashes: HashMap<U256, B256>,
 }
 
 impl Storage {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             accounts: HashMap::new(),
             contracts: HashMap::new(),

@@ -1,6 +1,5 @@
+use block_stm_revm::storage::Storage;
 use block_stm_revm::BlockSTM;
-use revm::primitives::alloy_primitives::U160;
-use revm::primitives::Address;
 use revm::primitives::{env::TxEnv, ResultAndState};
 use revm::{Evm, InMemoryDB};
 use std::num::NonZeroUsize;
@@ -9,8 +8,15 @@ use std::thread;
 use std::time::SystemTime;
 
 // The source-of-truth execution result that BlockSTM must match.
-fn execute_sequential(txs: Arc<Vec<TxEnv>>) -> Vec<ResultAndState> {
-    let mut db = InMemoryDB::default();
+fn execute_sequential(storage: Storage, txs: Arc<Vec<TxEnv>>) -> Vec<ResultAndState> {
+    let mut db = InMemoryDB {
+        accounts: storage.accounts,
+        contracts: storage.contracts,
+        logs: Default::default(),
+        block_hashes: storage.block_hashes,
+        db: Default::default(),
+    };
+
     txs.iter()
         .map(|tx| {
             let result_and_state = Evm::builder()
@@ -26,25 +32,19 @@ fn execute_sequential(txs: Arc<Vec<TxEnv>>) -> Vec<ResultAndState> {
 }
 
 fn main() {
-    // TODO: Populate real-er transactions please!
-    let block_size = 100_000; // number of transactions
-    let txs: Arc<Vec<TxEnv>> = Arc::new(
-        (0..block_size)
-            .map(|idx| TxEnv {
-                // Avoid Address::ZERO
-                caller: Address::from(U160::from(idx + 1)),
-                ..TxEnv::default()
-            })
-            .collect(),
-    );
+    let (erc20_example_storage, erc20_example_txs) = block_stm_revm::examples::erc20::generate();
 
     let start_time = SystemTime::now();
-    let result_sequential = execute_sequential(txs.clone());
+    let result_sequential = execute_sequential(
+        erc20_example_storage.clone(),
+        Arc::new(erc20_example_txs.clone()),
+    );
     println!("Executed sequentially in {:?}", start_time.elapsed());
 
     let start_time = SystemTime::now();
     let result_block_stm = BlockSTM::run(
-        txs,
+        erc20_example_storage.clone(),
+        Arc::new(erc20_example_txs.clone()),
         thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
     );
     println!("Executed Block-STM in {:?}", start_time.elapsed());

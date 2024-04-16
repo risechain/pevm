@@ -9,6 +9,7 @@ use revm::primitives::{ResultAndState, TxEnv};
 use crate::{
     mv_memory::MvMemory,
     scheduler::Scheduler,
+    storage::Storage,
     vm::{Vm, VmExecutionResult},
     ExecutionTask, Task, TxVersion, ValidationTask,
 };
@@ -18,11 +19,15 @@ pub struct BlockSTM;
 
 impl BlockSTM {
     // TODO: Better concurrency control
-    pub fn run(txs: Arc<Vec<TxEnv>>, concurrency_level: NonZeroUsize) -> Vec<ResultAndState> {
+    pub fn run(
+        storage: Storage,
+        txs: Arc<Vec<TxEnv>>,
+        concurrency_level: NonZeroUsize,
+    ) -> Vec<ResultAndState> {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
         let mv_memory = Arc::new(MvMemory::new(block_size));
-        let vm = Vm::new(txs.clone(), mv_memory.clone());
+        let vm = Vm::new(Arc::new(storage), txs.clone(), mv_memory.clone());
         let execution_results = Mutex::new(vec![None; txs.len()]);
         // TODO: Better thread handling
         thread::scope(|scope| {
