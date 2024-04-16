@@ -9,10 +9,11 @@ use revm::{
 use crate::ReadError;
 
 // TODO: Populate the remaining missing pieces like logs, etc.
+#[derive(Clone)]
 pub struct Storage {
-    accounts: HashMap<Address, DbAccount>,
-    contracts: HashMap<B256, Bytecode>,
-    block_hashes: HashMap<U256, B256>,
+    pub accounts: HashMap<Address, DbAccount>,
+    pub contracts: HashMap<B256, Bytecode>,
+    pub block_hashes: HashMap<U256, B256>,
 }
 
 impl Storage {

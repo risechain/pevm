@@ -105,9 +105,9 @@ pub(crate) struct Vm {
 }
 
 impl Vm {
-    pub fn new(txs: Arc<Vec<TxEnv>>, mv_memory: Arc<MvMemory>) -> Self {
+    pub fn new(storage: Arc<Storage>, txs: Arc<Vec<TxEnv>>, mv_memory: Arc<MvMemory>) -> Self {
         Self {
-            storage: Arc::new(Storage::new()),
+            storage,
             txs,
             mv_memory,
         }
