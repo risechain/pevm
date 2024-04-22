@@ -10,7 +10,7 @@ use crate::{
     mv_memory::MvMemory,
     scheduler::Scheduler,
     vm::{Vm, VmExecutionResult},
-    ExecutionTask, Storage, Task, TxVersion, ValidationTask,
+    ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TxVersion, ValidationTask,
 };
 
 /// An interface to execute Block-STM.
@@ -30,8 +30,16 @@ impl BlockSTM {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
         let mv_memory = Arc::new(MvMemory::new(block_size));
-        let vm = Vm::new(storage.clone(), block_env, txs.clone(), mv_memory.clone());
-        let execution_results = Mutex::new(vec![None; txs.len()]);
+        let vm = Vm::new(
+            storage.clone(),
+            block_env.clone(),
+            txs.clone(),
+            mv_memory.clone(),
+        );
+        // TODO: Better error handling
+        let mut beneficiary_account_info = storage.basic(block_env.coinbase).unwrap();
+        // TODO: Should we move this to `Vm`?
+        let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
         // TODO: Better thread handling
         thread::scope(|scope| {
             for _ in 0..concurrency_level.into() {
@@ -76,17 +84,31 @@ impl BlockSTM {
             }
         });
 
-        println!("MV Memory snapshot length: {}", mv_memory.snapshot().len());
-
-        // TODO: Better error handling
-        let execution_results = execution_results.lock().unwrap();
+        // We lazily evaluate the final beneficiary account's balance at the end of each transaction
+        // to avoid "implicit" dependency among consecutive transactions that read & write there.
+        // TODO: Refactor, improve speed & error handling.
         execution_results
             .iter()
-            .cloned()
-            // TODO: Better error handling
-            // Scheduler shouldn't claim `done` when
-            // there is still a `None`` result.
-            .map(|r| r.unwrap())
+            .map(|m| m.lock().unwrap().clone().unwrap())
+            .enumerate()
+            .map(|(tx_idx, mut result_and_state)| {
+                // TODO: Support pre-EIP-3651 when the beneficiary account may not be loaded and be
+                // present in the state changes map.
+                let beneficiary_account =
+                    result_and_state.state.get_mut(&block_env.coinbase).unwrap();
+                beneficiary_account.mark_touch();
+                match mv_memory.read_absolute(&MemoryLocation::Basic(block_env.coinbase), tx_idx) {
+                    MemoryValue::Basic(account) => {
+                        beneficiary_account_info = account;
+                    }
+                    MemoryValue::LazyBeneficiaryBalance(addition) => {
+                        beneficiary_account_info.balance += addition;
+                    }
+                    _ => unreachable!(),
+                }
+                beneficiary_account.info = beneficiary_account_info.clone();
+                result_and_state
+            })
             .collect()
     }
 }
@@ -102,7 +124,7 @@ fn try_execute(
     mv_memory: &Arc<MvMemory>,
     vm: &Vm,
     scheduler: &Scheduler,
-    execution_results: &Mutex<Vec<Option<ResultAndState>>>,
+    execution_results: &Vec<Mutex<Option<ResultAndState>>>,
     tx_version: &TxVersion,
 ) -> Option<ValidationTask> {
     match vm.execute(tx_version.tx_idx) {
@@ -119,7 +141,7 @@ fn try_execute(
             read_set,
             write_set,
         } => {
-            execution_results.lock().unwrap()[tx_version.tx_idx] = Some(result_and_state);
+            *execution_results[tx_version.tx_idx].lock().unwrap() = Some(result_and_state);
             let wrote_new_location = mv_memory.record(tx_version, read_set, write_set);
             scheduler.finish_execution(tx_version, wrote_new_location)
         }

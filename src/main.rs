@@ -6,7 +6,7 @@ use revm::primitives::{
     alloy_primitives::U160, env::TxEnv, AccountInfo, Address, BlockEnv, ResultAndState, TransactTo,
     U256,
 };
-use revm::{Evm, InMemoryDB};
+use revm::{DatabaseCommit, Evm, InMemoryDB};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::thread;
@@ -23,7 +23,7 @@ fn execute_sequential(mut db: InMemoryDB, txs: Arc<Vec<TxEnv>>) -> Vec<ResultAnd
                 .transact()
                 // TODO: Proper error handling
                 .unwrap();
-            // TODO: Commit db
+            db.commit(result_and_state.state.clone());
             result_and_state
         })
         .collect()
@@ -45,13 +45,14 @@ fn main() {
     }
 
     // Mock `block_size` transactions sending some tokens to itself.
-    // Avoiding `Address:ZERO` to act as the beneficiary account.
     let txs: Arc<Vec<TxEnv>> = Arc::new(
         (1..=block_size)
             .map(|i| {
                 let address = Address::from(U160::from(i));
                 TxEnv {
-                    caller: address,
+                    // The beneficiary account spending mid-block to test
+                    // beneficiary handling.
+                    caller: if i == 100 { Address::ZERO } else { address },
                     transact_to: TransactTo::Call(address),
                     value: U256::from(1),
                     gas_price: U256::from(1),
@@ -74,6 +75,7 @@ fn main() {
     );
     println!("Executed Block-STM in {:?}", start_time.elapsed());
 
+    // TODO: Only print the differences for easier debugging
     assert_eq!(
         result_sequential, result_block_stm,
         "Block-STM's execution result doesn't match Sequential's"

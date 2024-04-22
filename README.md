@@ -26,8 +26,6 @@ Finally, while Aptos and Polygon embed their Block-STM implementation directly i
 
 ### V1 TODO
 
-- Properly handle the block's beneficiary account, which makes all transactions interdependent when paying gas. We should distinguish beneficiary reads from execution reads (like `address` and `balance` opcodes) so we can defer or atomically update the beneficiary balance. We may pass in a custom `PostExecutionHandler::reward_beneficiary` to solve this.
-- Properly check for changed account infos in `revm`'s `ResultAndState` before adding them to the write set.
 - Complete a robust version that passes all the relevant [ethereum/tests](https://github.com/ethereum/tests).
 - Design more tests for larger blocks with complex state transitions and dependencies (ERC-20 and Uniswap transactions, etc.); contribute upstream if appropriate.
 - Provide deep benchmarks, including a [Reth](https://github.com/paradigmxyz/reth) integration for syncing & building blocks.

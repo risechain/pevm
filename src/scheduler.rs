@@ -181,7 +181,7 @@ impl Scheduler {
     // gets re-executed before the dependency can be added.
     // TODO: Better error handling, including asserting that both indices are in range.
     pub(crate) fn add_dependency(&self, tx_idx: TxIdx, blocking_tx_idx: TxIdx) -> bool {
-        // NOTE: This is an important lock to prevent a race condition where the blocking
+        // This is an important lock to prevent a race condition where the blocking
         // transaction completes re-execution before this dependecy can be added.
         let blocking_transaction_status = self.transactions_status[blocking_tx_idx].lock().unwrap();
         if let TxIncarnationStatus::Executed(_) = *blocking_transaction_status {

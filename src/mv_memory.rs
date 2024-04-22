@@ -1,13 +1,13 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::sync::Mutex;
 
-// NOTE: ~x2 performance gain over a naive `RwLock<HashMap>`!
-use dashmap::DashMap;
+// ~x2 performance gain over a naive `RwLock<HashMap>`!
+use dashmap::{mapref::entry::Entry, DashMap};
 
 use crate::{
     MemoryLocation, MemoryValue, ReadOrigin, ReadSet, TxIdx, TxIncarnation, TxVersion, WriteSet,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 enum MemoryEntry {
     Data(TxIncarnation, MemoryValue),
     // When an incarnation is aborted due to a validation failure, the
@@ -58,24 +58,6 @@ impl MvMemory {
         }
     }
 
-    // Return the value written by the highest transaction for every location
-    // that was written to by some transaction.
-    //
-    // TODO: More properly type this, especially depending on who needs it.
-    // TODO: We can easily parallize this.
-    pub(crate) fn snapshot(&self) -> HashMap<MemoryLocation, MemoryValue> {
-        let mut ret = HashMap::new();
-        for entry in self.data.iter() {
-            let location = entry.key();
-            // TODO: Replace MAX with no. transactions?
-            // TODO: Inline the relevant part from `self.read`?
-            if let ReadMemoryResult::Ok { value, .. } = self.read(location, std::usize::MAX) {
-                ret.insert(location.clone(), value);
-            }
-        }
-        ret
-    }
-
     // Apply a new pair of read & write sets to the multi-version data structure.
     // Return whether a write occurred to a memory location not written to by
     // the previous incarnation of the same transaction. This determines whether
@@ -90,17 +72,19 @@ impl MvMemory {
         *self.last_read_set[tx_version.tx_idx].lock().unwrap() = read_set;
 
         for (location, value) in write_set.iter() {
-            // TODO: Cleaner insert/upsert here
             let entry = MemoryEntry::Data(tx_version.tx_incarnation, value.clone());
-            match self.data.get_mut(location) {
-                Some(location_map) => {
-                    location_map.insert(tx_version.tx_idx, entry);
+            // We must not use `get_mut` here, else there's a race condition where
+            // two threads get `None` first, then the latter's `insert` overwrote
+            // the former's.
+            match self.data.entry(location.clone()) {
+                Entry::Occupied(location_map) => {
+                    location_map.get().insert(tx_version.tx_idx, entry);
                 }
-                _ => {
+                Entry::Vacant(vacant) => {
                     // TODO: Fine-tune the number of shards
                     let location_map = DashMap::with_shard_amount(2);
                     location_map.insert(tx_version.tx_idx, entry);
-                    self.data.insert(location.clone(), location_map);
+                    vacant.insert(location_map);
                 }
             }
         }
@@ -160,8 +144,9 @@ impl MvMemory {
                 }
                 ReadMemoryResult::Ok { version, .. } => match prior_origin {
                     // TODO: Verify this logic as it's not explicitly described
-                    // in the paper
-                    ReadOrigin::Storage => return false,
+                    // in the paper. We're setting `true` here to at least accept
+                    // lazily loading beneficiary account all the way to storage.
+                    ReadOrigin::Storage => return true,
                     ReadOrigin::MvMemory(v) => {
                         if *v != version {
                             return false;
@@ -225,6 +210,15 @@ impl MvMemory {
                 },
                 value,
             },
+        }
+    }
+
+    // Mainly for post-processing like fully evaluating benficiary accounts
+    // TODO: Better error handling
+    pub(crate) fn read_absolute(&self, location: &MemoryLocation, tx_idx: TxIdx) -> MemoryValue {
+        match self.data.get(location).unwrap().get(&tx_idx).as_deref() {
+            Some(MemoryEntry::Data(_, value)) => value.clone(),
+            _ => todo!(),
         }
     }
 }
