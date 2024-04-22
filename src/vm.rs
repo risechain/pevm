@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use revm::{
-    primitives::{AccountInfo, Address, Bytecode, EVMError, ResultAndState, TxEnv, B256, U256},
+    primitives::{
+        AccountInfo, Address, BlockEnv, Bytecode, EVMError, ResultAndState, TxEnv, B256, U256,
+    },
     Database, DatabaseRef, Evm,
 };
 
@@ -100,15 +102,17 @@ impl Database for VmDb {
 // captures the read & write sets of each execution.
 pub(crate) struct Vm {
     storage: Arc<Storage>,
+    block_env: BlockEnv,
     txs: Arc<Vec<TxEnv>>,
     mv_memory: Arc<MvMemory>,
 }
 
 impl Vm {
-    pub(crate) fn new(txs: Arc<Vec<TxEnv>>, mv_memory: Arc<MvMemory>) -> Self {
+    pub(crate) fn new(block_env: BlockEnv, txs: Arc<Vec<TxEnv>>, mv_memory: Arc<MvMemory>) -> Self {
         Self {
             // TODO: Initialize proper storage
             storage: Arc::new(Storage::default()),
+            block_env,
             txs,
             mv_memory,
         }
@@ -136,6 +140,7 @@ impl Vm {
 
         let mut evm = Evm::builder()
             .with_db(&mut db)
+            .with_block_env(self.block_env.clone())
             .with_tx_env(self.txs.get(tx_idx).unwrap().clone())
             .build();
 
