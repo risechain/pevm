@@ -6,7 +6,7 @@ Blazingly fast [Block-STM](https://arxiv.org/abs/2203.06871) implementation for 
 
 :warning: This repository is a **work in progress** and is **not production ready** :construction:
 
----
+![Banner](./assets/banner.png)
 
 Block-STM is **a parallel execution engine for Blockchain transactions** built on the principles of Software Transactional Memory. Since Blockchain transactions are inherently sequential, a parallel execution engine must detect dependencies and avoid conflicts to guarantee the same deterministic outcome with sequential execution. Block-STM optimistically executes transactions and re-executes when conflicts arise using a collaborative scheduler and a multi-version shared data structure. Since it does not require prior knowledge or constraints on the input transactions, **replacing an existing sequential executor with Block-STM is easy for substantial performance boosts**.
 
