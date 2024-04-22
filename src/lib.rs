@@ -4,9 +4,10 @@
 
 use revm::primitives::{AccountInfo, Address, U256};
 
-// For simplicity, we first stop at the address & storage level. We
-// can still break an address into smaller memory locations to
-// minimize re-executions on "broad" state conflicts?
+// TODO: More granularity here, for instance, to separate an account's
+// balance, nonce, etc. instead of marking conflict at the whole account.
+// That way we may also generalize beneficiary balance's lazy update
+// behaviour into `MemoryValue` for more use cases.
 // TODO: It would be nice if we could tie the different cases of
 // memory locations & values at the type level, to prevent lots of
 // matches & potentially dangerous mismatch mistakes.
@@ -17,9 +18,18 @@ enum MemoryLocation {
     Storage((Address, U256)),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 enum MemoryValue {
     Basic(AccountInfo),
+    // We lazily update the beneficiary balance to avoid continuous
+    // dependencies as all transactions read and write to it. We
+    // either evaluate all these beneficiary account states at the
+    // end of BlockSTM, or when there is an explicit read.
+    // Important: The value of this lazy (update) balance is the gas
+    // it receives in the transaction, to be added to the absolute
+    // balance at the end of the previous transaction.
+    // We can probably generalize this to `AtomicBalanceAddition`.
+    LazyBeneficiaryBalance(U256),
     Storage(U256),
 }
 
@@ -47,7 +57,7 @@ struct TxVersion {
 
 // The origin of a memory read. It could be from the live multi-version
 // data structure or from storage (chain state before block execution).
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum ReadOrigin {
     // The previous transaction version that wrote the value.
     MvMemory(TxVersion),

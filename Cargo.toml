@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 dashmap = "5.5.3"
-revm = "8.0.0"
+# TODO: Let's do our best to port needed changes upstream
+revm = { git = "https://github.com/risechain/revm", rev = "3c046a6aa734d914dc37bcade8ac5932a9599a23" }
 
 [lints]
 rust.missing_debug_implementations = "warn"
