@@ -3,8 +3,8 @@
 
 use block_stm_revm::{BlockSTM, Storage};
 use revm::primitives::alloy_primitives::U160;
-use revm::primitives::Address;
 use revm::primitives::{env::TxEnv, ResultAndState};
+use revm::primitives::{Address, BlockEnv};
 use revm::Evm;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -47,6 +47,7 @@ fn main() {
 
     let start_time = SystemTime::now();
     let result_block_stm = BlockSTM::run(
+        BlockEnv::default(),
         txs,
         thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
     );
