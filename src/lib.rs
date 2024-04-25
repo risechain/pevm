@@ -19,8 +19,7 @@ enum MemoryLocation {
 
 #[derive(Clone)]
 enum MemoryValue {
-    // TODO: Remove the Option here?
-    Basic(Option<AccountInfo>),
+    Basic(AccountInfo),
     Storage(U256),
 }
 
