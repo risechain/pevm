@@ -4,7 +4,7 @@ use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, EVMError, ResultAndState, TxEnv, B256, U256,
     },
-    Database, DatabaseRef, Evm,
+    Database, Evm,
 };
 
 use crate::{
@@ -53,11 +53,11 @@ impl VmDb {
                 self.read_set.push((location.clone(), ReadOrigin::Storage));
                 match location {
                     MemoryLocation::Basic(address) => {
-                        self.storage.basic_ref(address).map(MemoryValue::Basic)
+                        self.storage.basic(address).map(MemoryValue::Basic)
                     }
                     MemoryLocation::Storage((address, index)) => self
                         .storage
-                        .storage_ref(address, index)
+                        .storage(address, index)
                         .map(MemoryValue::Storage),
                 }
             }
@@ -75,14 +75,14 @@ impl Database for VmDb {
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         match self.read(MemoryLocation::Basic(address)) {
-            Ok(MemoryValue::Basic(value)) => Ok(value),
+            Ok(MemoryValue::Basic(value)) => Ok(Some(value)),
             Ok(MemoryValue::Storage(_)) => Err(ReadError::InvalidMemoryLocationType),
             Err(err) => Err(err),
         }
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.storage.code_by_hash_ref(code_hash)
+        self.storage.code_by_hash(code_hash)
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
@@ -94,7 +94,7 @@ impl Database for VmDb {
     }
 
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
-        self.storage.block_hash_ref(number)
+        self.storage.block_hash(number)
     }
 }
 
@@ -108,10 +108,14 @@ pub(crate) struct Vm {
 }
 
 impl Vm {
-    pub(crate) fn new(block_env: BlockEnv, txs: Arc<Vec<TxEnv>>, mv_memory: Arc<MvMemory>) -> Self {
+    pub(crate) fn new(
+        storage: Arc<Storage>,
+        block_env: BlockEnv,
+        txs: Arc<Vec<TxEnv>>,
+        mv_memory: Arc<MvMemory>,
+    ) -> Self {
         Self {
-            // TODO: Initialize proper storage
-            storage: Arc::new(Storage::default()),
+            storage,
             block_env,
             txs,
             mv_memory,
@@ -169,12 +173,12 @@ impl Vm {
                         // sender & balance opcode reads so we can defer or atomically
                         // update the beneficiary account's balance. We probably want to
                         // pass in a custom `PostExecutionHandler::reward_beneficiary`.
-                        if !account.is_empty() {
+                        if address != &self.block_env.coinbase {
                             // TODO: Checking if the account's basic info is changed
                             // before registering it as a new write.
                             writes.push((
                                 MemoryLocation::Basic(*address),
-                                MemoryValue::Basic(Some(account.info.clone())),
+                                MemoryValue::Basic(account.info.clone()),
                             ));
                             for (slot, value) in account.changed_storage_slots() {
                                 writes.push((

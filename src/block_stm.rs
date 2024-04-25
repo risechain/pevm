@@ -10,7 +10,7 @@ use crate::{
     mv_memory::MvMemory,
     scheduler::Scheduler,
     vm::{Vm, VmExecutionResult},
-    ExecutionTask, Task, TxVersion, ValidationTask,
+    ExecutionTask, Storage, Task, TxVersion, ValidationTask,
 };
 
 /// An interface to execute Block-STM.
@@ -22,6 +22,7 @@ impl BlockSTM {
     /// Run a list of REVM transactions through Block-STM.
     /// TODO: Better concurrency control
     pub fn run(
+        storage: Arc<Storage>,
         block_env: BlockEnv,
         txs: Arc<Vec<TxEnv>>,
         concurrency_level: NonZeroUsize,
@@ -29,7 +30,7 @@ impl BlockSTM {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
         let mv_memory = Arc::new(MvMemory::new(block_size));
-        let vm = Vm::new(block_env, txs.clone(), mv_memory.clone());
+        let vm = Vm::new(storage.clone(), block_env, txs.clone(), mv_memory.clone());
         let execution_results = Mutex::new(vec![None; txs.len()]);
         // TODO: Better thread handling
         thread::scope(|scope| {
