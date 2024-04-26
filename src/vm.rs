@@ -190,7 +190,8 @@ impl Database for VmDb {
 }
 
 // The VM describes how to read values to execute transactions. Also, it
-// captures the read & write sets of each execution.
+// captures the read & write sets of each execution. Note that a single
+// `Vm` can be shared among threads.
 pub(crate) struct Vm {
     storage: Arc<Storage>,
     block_env: BlockEnv,
@@ -200,15 +201,16 @@ pub(crate) struct Vm {
 
 impl Vm {
     pub(crate) fn new(
-        storage: Arc<Storage>,
+        storage: Storage,
         block_env: BlockEnv,
-        txs: Arc<Vec<TxEnv>>,
+        txs: Vec<TxEnv>,
+        // TODO: Make `Vm` own `MvMemory` away from `BlockSTM::run`?
         mv_memory: Arc<MvMemory>,
     ) -> Self {
         Self {
-            storage,
+            storage: Arc::new(storage),
             block_env,
-            txs,
+            txs: Arc::new(txs),
             mv_memory,
         }
     }

@@ -22,22 +22,17 @@ impl BlockSTM {
     /// Run a list of REVM transactions through Block-STM.
     /// TODO: Better concurrency control
     pub fn run(
-        storage: Arc<Storage>,
+        storage: Storage,
         block_env: BlockEnv,
-        txs: Arc<Vec<TxEnv>>,
+        txs: Vec<TxEnv>,
         concurrency_level: NonZeroUsize,
     ) -> Vec<ResultAndState> {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
         let mv_memory = Arc::new(MvMemory::new(block_size));
-        let vm = Vm::new(
-            storage.clone(),
-            block_env.clone(),
-            txs.clone(),
-            mv_memory.clone(),
-        );
         // TODO: Better error handling
         let mut beneficiary_account_info = storage.basic(block_env.coinbase).unwrap();
+        let vm = Vm::new(storage, block_env.clone(), txs, mv_memory.clone());
         // TODO: Should we move this to `Vm`?
         let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
         // TODO: Better thread handling
