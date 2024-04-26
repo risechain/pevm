@@ -7,11 +7,14 @@ use crate::ReadError;
 /// An interface to provide chain state to BlockSTM for transaction execution.
 /// TODO: Populate the remaining missing pieces like logs, etc.
 /// TODO: Better API for third-pary integration.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Storage {
-    accounts: HashMap<Address, Account>,
-    contracts: HashMap<B256, Bytecode>,
-    block_hashes: HashMap<U256, B256>,
+    /// A map of account addresses to their corresponding account information.
+    pub accounts: HashMap<Address, Account>,
+    /// A map of contract hashes to their corresponding bytecode.
+    pub contracts: HashMap<B256, Bytecode>,
+    /// A map of block numbers to their corresponding block hashes.
+    pub block_hashes: HashMap<U256, B256>,
 }
 
 impl Storage {
@@ -30,13 +33,15 @@ impl Storage {
         self.accounts.insert(address, Account::from(info));
     }
 
-    pub(crate) fn basic(&self, address: Address) -> Result<AccountInfo, ReadError> {
+    /// Get the basic account information for a given address.
+    pub fn basic(&self, address: Address) -> Result<AccountInfo, ReadError> {
         match self.accounts.get(&address) {
             Some(account) => Ok(account.info.clone()),
             None => Err(ReadError::NotFound),
         }
     }
 
+    /// Get the bytecode for a contract given its code hash.
     pub(crate) fn code_by_hash(&self, code_hash: B256) -> Result<Bytecode, ReadError> {
         match self.contracts.get(&code_hash) {
             Some(byte_code) => Ok(byte_code.clone()),
@@ -44,6 +49,7 @@ impl Storage {
         }
     }
 
+    /// Get the storage value at a specific index for a given address.
     pub(crate) fn storage(&self, address: Address, index: U256) -> Result<U256, ReadError> {
         Ok(self
             .accounts
@@ -52,6 +58,7 @@ impl Storage {
             .unwrap_or(U256::ZERO))
     }
 
+    /// Get the block hash for a given block number.
     pub(crate) fn block_hash(&self, number: U256) -> Result<B256, ReadError> {
         match self.block_hashes.get(&number) {
             Some(block_hash) => Ok(*block_hash),
