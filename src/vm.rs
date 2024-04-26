@@ -3,8 +3,9 @@ use std::{cell::RefCell, sync::Arc, thread};
 
 use revm::{
     primitives::{
-        AccountInfo, Address, BlockEnv, Bytecode, EVMError, ResultAndState, SpecId, TxEnv, B256,
-        U256,
+        AccountInfo, Address, BlockEnv, Bytecode, EVMError, ResultAndState,
+        SpecId::{self, LONDON},
+        TxEnv, B256, U256,
     },
     Database, Evm, Handler,
 };
@@ -250,12 +251,12 @@ impl Vm {
         let mut handler = Handler::mainnet_with_spec(self.spec_id);
         // TODO: Bring to `self` instead of constructing every call?
         handler.post_execution.reward_beneficiary = Arc::new(|context, gas| {
-            *gas_payment.borrow_mut() = context
-                .evm
-                .env
-                .effective_gas_price()
-                .saturating_sub(context.evm.env.block.basefee)
-                * U256::from(gas.spent() - gas.refunded() as u64);
+            let mut gas_price = context.evm.env.effective_gas_price();
+            if self.spec_id.is_enabled_in(LONDON) {
+                gas_price = gas_price.saturating_sub(context.evm.env.block.basefee);
+            }
+
+            *gas_payment.borrow_mut() = gas_price * U256::from(gas.spent() - gas.refunded() as u64);
             Ok(())
         });
 
