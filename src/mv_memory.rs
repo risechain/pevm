@@ -135,7 +135,9 @@ impl MvMemory {
     pub(crate) fn validate_read_set(&self, tx_idx: TxIdx) -> bool {
         // TODO: Better error handling
         for (location, prior_origin) in self.last_read_set[tx_idx].lock().unwrap().iter() {
-            match self.read(location, tx_idx) {
+            // TODO: Do we need to check for the beneficiary account to use
+            // `read_absolute` instead?
+            match self.read_closest(location, tx_idx) {
                 ReadMemoryResult::ReadError { .. } => return false,
                 ReadMemoryResult::NotFound => {
                     if *prior_origin != ReadOrigin::Storage {
@@ -185,7 +187,11 @@ impl MvMemory {
     // transactions. The caller can then complete the speculative read by reading
     // from storage.
     // TODO: Refactor & make this much faster
-    pub(crate) fn read(&self, location: &MemoryLocation, tx_idx: TxIdx) -> ReadMemoryResult {
+    pub(crate) fn read_closest(
+        &self,
+        location: &MemoryLocation,
+        tx_idx: TxIdx,
+    ) -> ReadMemoryResult {
         let mut result: Option<(usize, MemoryEntry)> = None;
         if let Some(location_map) = self.data.get(location) {
             for entry in location_map.iter() {
@@ -213,12 +219,29 @@ impl MvMemory {
         }
     }
 
-    // Mainly for post-processing like fully evaluating benficiary accounts
-    // TODO: Better error handling
-    pub(crate) fn read_absolute(&self, location: &MemoryLocation, tx_idx: TxIdx) -> MemoryValue {
-        match self.data.get(location).unwrap().get(&tx_idx).as_deref() {
-            Some(MemoryEntry::Data(_, value)) => value.clone(),
-            _ => todo!(),
+    // Things like fully evaluating benficiary accounts need to read absolute indices
+    // like the exact previous transaction index, instead of reading the cloest one.
+    pub(crate) fn read_absolute(
+        &self,
+        location: &MemoryLocation,
+        tx_idx: TxIdx,
+    ) -> ReadMemoryResult {
+        match self
+            .data
+            .get(location)
+            .unwrap()
+            .get(&tx_idx)
+            .as_deref()
+            .cloned()
+        {
+            Some(MemoryEntry::Data(tx_incarnation, value)) => ReadMemoryResult::Ok {
+                version: TxVersion {
+                    tx_idx,
+                    tx_incarnation,
+                },
+                value,
+            },
+            _ => ReadMemoryResult::NotFound,
         }
     }
 }

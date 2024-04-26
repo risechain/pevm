@@ -1,4 +1,5 @@
-use std::{cell::RefCell, sync::Arc};
+use core::time;
+use std::{cell::RefCell, sync::Arc, thread};
 
 use revm::{
     primitives::{
@@ -70,7 +71,7 @@ impl VmDb {
                     }
                     return self.storage.basic(address).map(MemoryValue::Basic);
                 }
-                match self.mv_memory.read(location, tx_idx) {
+                match self.mv_memory.read_absolute(location, tx_idx - 1) {
                     ReadMemoryResult::Ok { version, value } => {
                         if update_read_set {
                             self.read_set
@@ -80,7 +81,6 @@ impl VmDb {
                             MemoryValue::Basic(account) => return Ok(MemoryValue::Basic(account)),
                             MemoryValue::LazyBeneficiaryBalance(addition) => {
                                 // TODO: Better error handling
-                                // TODO: Handle stack overflow when recursing at a very high tx idx
                                 match self.read(location, tx_idx - 1, false) {
                                     Ok(MemoryValue::Basic(mut beneficiary_account)) => {
                                         // TODO: Write this new absolute value to MvMemory
@@ -98,7 +98,9 @@ impl VmDb {
                         // Wait for the previous transaction to complete processing
                         // the beneficiary account.
                         // TODO: Ideally, we can detect and abort if the wait is
-                        // expected to be long. Sleep a bit here if needed?
+                        // expected to be long, like via recursion depth.
+                        // Sad: Bump delay time when facing stack overflow..
+                        thread::sleep(time::Duration::from_nanos(8));
                         return self.read(location, tx_idx, update_read_set);
                     }
                 }
@@ -106,7 +108,7 @@ impl VmDb {
         }
 
         // Main handling for BlockSTM
-        match self.mv_memory.read(location, tx_idx) {
+        match self.mv_memory.read_closest(location, tx_idx) {
             ReadMemoryResult::ReadError { blocking_tx_idx } => {
                 Err(ReadError::BlockingIndex(blocking_tx_idx))
             }

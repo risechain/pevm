@@ -7,7 +7,7 @@ use std::{
 use revm::primitives::{BlockEnv, ResultAndState, TxEnv};
 
 use crate::{
-    mv_memory::MvMemory,
+    mv_memory::{MvMemory, ReadMemoryResult},
     scheduler::Scheduler,
     vm::{Vm, VmExecutionResult},
     ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TxVersion, ValidationTask,
@@ -98,10 +98,16 @@ impl BlockSTM {
                     result_and_state.state.get_mut(&block_env.coinbase).unwrap();
                 beneficiary_account.mark_touch();
                 match mv_memory.read_absolute(&MemoryLocation::Basic(block_env.coinbase), tx_idx) {
-                    MemoryValue::Basic(account) => {
+                    ReadMemoryResult::Ok {
+                        value: MemoryValue::Basic(account),
+                        ..
+                    } => {
                         beneficiary_account_info = account;
                     }
-                    MemoryValue::LazyBeneficiaryBalance(addition) => {
+                    ReadMemoryResult::Ok {
+                        value: MemoryValue::LazyBeneficiaryBalance(addition),
+                        ..
+                    } => {
                         beneficiary_account_info.balance += addition;
                     }
                     _ => unreachable!(),
