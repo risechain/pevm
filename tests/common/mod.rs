@@ -3,7 +3,7 @@ use std::{num::NonZeroUsize, thread};
 use block_stm_revm::{BlockSTM, Storage};
 use revm::{
     primitives::{
-        alloy_primitives::U160, AccountInfo, Address, BlockEnv, ResultAndState, TxEnv, U256,
+        alloy_primitives::U160, AccountInfo, Address, BlockEnv, ResultAndState, SpecId, TxEnv, U256,
     },
     DatabaseCommit, Evm, InMemoryDB,
 };
@@ -31,6 +31,7 @@ fn mock_dbs(num_prefilled_accounts: usize) -> (InMemoryDB, Storage) {
 // The source-of-truth sequential execution result that BlockSTM must match.
 fn execute_sequential(
     mut db: InMemoryDB,
+    spec_id: SpecId,
     block_env: BlockEnv,
     txs: &[TxEnv],
 ) -> Vec<ResultAndState> {
@@ -38,6 +39,7 @@ fn execute_sequential(
         .map(|tx| {
             let result_and_state = Evm::builder()
                 .with_ref_db(&mut db)
+                .with_spec_id(spec_id)
                 .with_block_env(block_env.clone())
                 .with_tx_env(tx.clone())
                 .build()
@@ -52,12 +54,13 @@ fn execute_sequential(
 
 // Execute a list of transactions sequentially & with BlockSTM and assert that
 // the execution results match.
-pub(crate) fn test_txs(block_env: BlockEnv, txs: Vec<TxEnv>) {
+pub(crate) fn test_txs(spec_id: SpecId, block_env: BlockEnv, txs: Vec<TxEnv>) {
     // TODO: Decouple the (number of) prefilled accounts with the number of transactions.
     let (sequential_db, block_stm_storage) = mock_dbs(txs.len());
-    let result_sequential = execute_sequential(sequential_db, block_env.clone(), &txs);
+    let result_sequential = execute_sequential(sequential_db, spec_id, block_env.clone(), &txs);
     let result_block_stm = BlockSTM::run(
         block_stm_storage,
+        spec_id,
         block_env,
         txs,
         thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
