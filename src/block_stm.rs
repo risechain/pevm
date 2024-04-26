@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use revm::primitives::{BlockEnv, ResultAndState, SpecId, TxEnv};
+use revm::primitives::{Account, BlockEnv, ResultAndState, SpecId, TxEnv};
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
@@ -88,11 +88,6 @@ impl BlockSTM {
             .map(|m| m.lock().unwrap().clone().unwrap())
             .enumerate()
             .map(|(tx_idx, mut result_and_state)| {
-                // TODO: Support pre-EIP-3651 when the beneficiary account may not be loaded and be
-                // present in the state changes map.
-                let beneficiary_account =
-                    result_and_state.state.get_mut(&block_env.coinbase).unwrap();
-                beneficiary_account.mark_touch();
                 match mv_memory.read_absolute(&MemoryLocation::Basic(block_env.coinbase), tx_idx) {
                     ReadMemoryResult::Ok {
                         value: MemoryValue::Basic(account),
@@ -108,7 +103,11 @@ impl BlockSTM {
                     }
                     _ => unreachable!(),
                 }
-                beneficiary_account.info = beneficiary_account_info.clone();
+                let mut beneficiary_account = Account::from(beneficiary_account_info.clone());
+                beneficiary_account.mark_touch();
+                result_and_state
+                    .state
+                    .insert(block_env.coinbase, beneficiary_account);
                 result_and_state
             })
             .collect()
