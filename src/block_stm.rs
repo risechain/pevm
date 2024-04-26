@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use revm::primitives::{BlockEnv, ResultAndState, TxEnv};
+use revm::primitives::{BlockEnv, ResultAndState, SpecId, TxEnv};
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
@@ -23,6 +23,7 @@ impl BlockSTM {
     /// TODO: Better concurrency control
     pub fn run(
         storage: Storage,
+        spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         concurrency_level: NonZeroUsize,
@@ -32,7 +33,7 @@ impl BlockSTM {
         let mv_memory = Arc::new(MvMemory::new(block_size));
         // TODO: Better error handling
         let mut beneficiary_account_info = storage.basic(block_env.coinbase).unwrap();
-        let vm = Vm::new(storage, block_env.clone(), txs, mv_memory.clone());
+        let vm = Vm::new(storage, spec_id, block_env.clone(), txs, mv_memory.clone());
         // TODO: Should we move this to `Vm`?
         let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
         // TODO: Better thread handling

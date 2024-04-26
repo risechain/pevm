@@ -3,8 +3,8 @@ use std::{cell::RefCell, sync::Arc, thread};
 
 use revm::{
     primitives::{
-        AccountInfo, Address, BlockEnv, Bytecode, CancunSpec, EVMError, ResultAndState, TxEnv,
-        B256, U256,
+        AccountInfo, Address, BlockEnv, Bytecode, CancunSpec, EVMError, ResultAndState, SpecId,
+        TxEnv, B256, U256,
     },
     Database, Evm, Handler,
 };
@@ -194,6 +194,7 @@ impl Database for VmDb {
 // `Vm` can be shared among threads.
 pub(crate) struct Vm {
     storage: Arc<Storage>,
+    spec_id: SpecId,
     block_env: BlockEnv,
     txs: Arc<Vec<TxEnv>>,
     mv_memory: Arc<MvMemory>,
@@ -202,6 +203,7 @@ pub(crate) struct Vm {
 impl Vm {
     pub(crate) fn new(
         storage: Storage,
+        spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         // TODO: Make `Vm` own `MvMemory` away from `BlockSTM::run`?
@@ -209,6 +211,7 @@ impl Vm {
     ) -> Self {
         Self {
             storage: Arc::new(storage),
+            spec_id,
             block_env,
             txs: Arc::new(txs),
             mv_memory,
@@ -258,9 +261,10 @@ impl Vm {
 
         let mut evm = Evm::builder()
             .with_db(&mut db)
-            .with_handler(handler)
+            .with_spec_id(self.spec_id)
             .with_block_env(self.block_env.clone())
             .with_tx_env(self.txs.get(tx_idx).unwrap().clone())
+            .with_handler(handler)
             .build();
 
         let evm_result = evm.transact();
