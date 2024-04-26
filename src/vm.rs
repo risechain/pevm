@@ -3,8 +3,8 @@ use std::{cell::RefCell, sync::Arc, thread};
 
 use revm::{
     primitives::{
-        AccountInfo, Address, BlockEnv, Bytecode, CancunSpec, EVMError, ResultAndState, SpecId,
-        TxEnv, B256, U256,
+        AccountInfo, Address, BlockEnv, Bytecode, EVMError, ResultAndState, SpecId, TxEnv, B256,
+        U256,
     },
     Database, Evm, Handler,
 };
@@ -246,8 +246,8 @@ impl Vm {
         // The amount this transaction needs to pay to the beneficiary account for
         // atomic update.
         let gas_payment = RefCell::new(U256::ZERO);
-        // TODO: Support OP & receive Spec as a BlockSTM input.
-        let mut handler = Handler::mainnet::<CancunSpec>();
+        // TODO: Support OP handlers
+        let mut handler = Handler::mainnet_with_spec(self.spec_id);
         // TODO: Bring to `self` instead of constructing every call?
         handler.post_execution.reward_beneficiary = Arc::new(|context, gas| {
             *gas_payment.borrow_mut() = context
