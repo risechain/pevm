@@ -31,8 +31,7 @@ impl BlockSTM {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
         let mv_memory = Arc::new(MvMemory::new(block_size));
-        // TODO: Better error handling
-        let mut beneficiary_account_info = storage.basic(block_env.coinbase).unwrap();
+        let mut beneficiary_account_info = storage.basic(block_env.coinbase).unwrap_or_default();
         let vm = Vm::new(storage, spec_id, block_env.clone(), txs, mv_memory.clone());
         // TODO: Should we move this to `Vm`?
         let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
