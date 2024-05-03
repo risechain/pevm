@@ -1,27 +1,19 @@
+// Basing this off REVM's bins/revme/src/cmd/statetest/runner.rs
+
 use block_stm_revm::{BlockSTM, Storage};
 use revm::db::PlainAccount;
 use revm::primitives::{
     calc_excess_blob_gas, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode,
     ResultAndState, TransactTo, TxEnv, U256,
 };
-use revme::cmd::statetest::merkle_trie::{log_rlp_hash, state_merkle_trie_root};
-use revme::cmd::statetest::{models as smodels, utils::recover_address};
+use revme::cmd::statetest::{
+    merkle_trie::{log_rlp_hash, state_merkle_trie_root},
+    models as smodels,
+    utils::recover_address,
+};
 use std::{collections::HashMap, fs, num::NonZeroUsize, path::Path};
 
 fn build_block_env(env: &smodels::Env) -> BlockEnv {
-    let resolved_blob_excess_gas_and_price = {
-        if let Some(t) = env.current_excess_blob_gas {
-            Some(BlobExcessGasAndPrice::new(t.to()))
-        } else if let (Some(x), Some(y)) = (env.parent_blob_gas_used, env.parent_excess_blob_gas) {
-            Some(BlobExcessGasAndPrice::new(calc_excess_blob_gas(
-                x.to(),
-                y.to(),
-            )))
-        } else {
-            None
-        }
-    };
-
     BlockEnv {
         number: env.current_number,
         coinbase: env.current_coinbase,
@@ -30,41 +22,63 @@ fn build_block_env(env: &smodels::Env) -> BlockEnv {
         basefee: env.current_base_fee.unwrap_or_default(),
         difficulty: env.current_difficulty,
         prevrandao: env.current_random,
-        blob_excess_gas_and_price: resolved_blob_excess_gas_and_price,
+        blob_excess_gas_and_price: if let Some(current_excess_blob_gas) =
+            env.current_excess_blob_gas
+        {
+            Some(BlobExcessGasAndPrice::new(current_excess_blob_gas.to()))
+        } else if let (Some(parent_blob_gas_used), Some(parent_excess_blob_gas)) =
+            (env.parent_blob_gas_used, env.parent_excess_blob_gas)
+        {
+            Some(BlobExcessGasAndPrice::new(calc_excess_blob_gas(
+                parent_blob_gas_used.to(),
+                parent_excess_blob_gas.to(),
+            )))
+        } else {
+            None
+        },
     }
 }
 
-fn build_tx_env(tx: &smodels::TransactionParts, indices: &smodels::TxPartIndices) -> TxEnv {
+fn build_tx_env(tx: &smodels::TransactionParts, indexes: &smodels::TxPartIndices) -> TxEnv {
     TxEnv {
-        caller: if let Some(sender) = tx.sender {
-            sender
-        } else if let Some(addr) = recover_address(tx.secret_key.as_slice()) {
-            addr
+        caller: if let Some(address) = tx.sender {
+            address
+        } else if let Some(address) = recover_address(tx.secret_key.as_slice()) {
+            address
         } else {
-            panic!("unknown private key")
+            panic!("Failed to parse caller") // TODO: Report test name
         },
-        gas_limit: tx.gas_limit[indices.gas].saturating_to(),
-        gas_price: if let Some(gas_price) = tx.gas_price {
-            gas_price
-        } else if let Some(max_fee_per_gas) = tx.max_fee_per_gas {
-            max_fee_per_gas
-        } else {
-            U256::default()
-        },
+        gas_limit: tx.gas_limit[indexes.gas].saturating_to(),
+        gas_price: tx.gas_price.or(tx.max_fee_per_gas).unwrap_or_default(),
         transact_to: match tx.to {
-            Some(add) => TransactTo::Call(add),
+            Some(address) => TransactTo::Call(address),
             None => TransactTo::Create,
         },
-        value: tx.value[indices.value],
-        data: tx.data[indices.data].clone(),
-        nonce: None,
-        chain_id: None,
-        access_list: Vec::default(),
+        value: tx.value[indexes.value],
+        data: tx.data[indexes.data].clone(),
+        nonce: Some(tx.nonce.saturating_to()),
+        chain_id: Some(1), // Ethereum mainnet
+        access_list: tx
+            .access_lists
+            .get(indexes.data)
+            .and_then(Option::as_deref)
+            .unwrap_or_default()
+            .iter()
+            .map(|item| {
+                (
+                    item.address,
+                    item.storage_keys
+                        .iter()
+                        .map(|key| U256::from_be_bytes(key.0))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect(),
         gas_priority_fee: tx.max_priority_fee_per_gas,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-        eof_initcodes: Vec::default(),
-        eof_initcodes_hashed: HashMap::default(),
+        eof_initcodes: Vec::new(),
+        eof_initcodes_hashed: HashMap::new(),
     }
 }
 
@@ -79,7 +93,7 @@ fn run_test_unit(unit: smodels::TestUnit) {
 
         for test in tests {
             let mut chain_state: HashMap<Address, PlainAccount> = HashMap::new();
-            let mut storage = Storage::default();
+            let mut block_stm_storage = Storage::default();
 
             // Shouldn't we parse accounts as `Account` instead of `AccountInfo`
             // to have initial storage states?
@@ -87,14 +101,17 @@ fn run_test_unit(unit: smodels::TestUnit) {
                 let code = Bytecode::new_raw(raw_info.code.clone());
                 let info =
                     AccountInfo::new(raw_info.balance, raw_info.nonce, code.hash_slow(), code);
-                storage.insert_account_info(*address, info.clone());
-                chain_state.insert(*address, info.into());
+                chain_state.insert(*address, info.clone().into());
+                block_stm_storage.insert_account_info(*address, info);
             }
 
-            let block_env = build_block_env(&unit.env);
-            let tx_env = build_tx_env(&unit.transaction, &test.indexes);
-            let exec_results =
-                BlockSTM::run(storage, spec_id, block_env, vec![tx_env], NonZeroUsize::MIN);
+            let exec_results = BlockSTM::run(
+                block_stm_storage,
+                spec_id,
+                build_block_env(&unit.env),
+                vec![build_tx_env(&unit.transaction, &test.indexes)],
+                NonZeroUsize::MIN,
+            );
 
             // TODO: We really should test with blocks with more than 1 tx
             assert!(exec_results.len() == 1);
