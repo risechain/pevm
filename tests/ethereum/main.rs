@@ -12,17 +12,8 @@ use revm::DatabaseCommit;
 use revme::cmd::statetest::merkle_trie::{log_rlp_hash, state_merkle_trie_root};
 use revme::cmd::statetest::{models as smodels, utils::recover_address};
 use std::{collections::HashMap, fs, num::NonZeroUsize, path::Path};
-use thiserror::Error;
 
 use crate::coercion::{to_plain_account, to_storage};
-
-#[derive(Debug, Error)]
-pub(crate) enum StateTestError {
-    #[error(transparent)]
-    StdIo(#[from] std::io::Error),
-    #[error(transparent)]
-    SerdeJson(#[from] serde_json::Error),
-}
 
 fn build_storage(pre: &HashMap<Address, smodels::AccountInfo>) -> Storage {
     let mut storage = Storage::default();
@@ -96,7 +87,7 @@ fn build_tx_env(tx: &smodels::TransactionParts, indices: &smodels::TxPartIndices
     }
 }
 
-fn run_test_unit(unit: smodels::TestUnit) -> Result<(), StateTestError> {
+fn run_test_unit(unit: smodels::TestUnit) {
     for (spec_name, tests) in unit.post {
         if matches!(
             spec_name,
@@ -137,11 +128,10 @@ fn run_test_unit(unit: smodels::TestUnit) -> Result<(), StateTestError> {
             assert_eq!(state_root, test.hash);
         }
     }
-    Ok(())
 }
 
 #[test]
-fn ethereum_tests() -> Result<(), StateTestError> {
+fn ethereum_tests() {
     // TODO: Run the whole suite.
     // Skip tests like REVM does when it makes sense.
     // Let's document clearly why for each test that we skip.
@@ -149,11 +139,12 @@ fn ethereum_tests() -> Result<(), StateTestError> {
     let state_tests = ["stExample/add11.json"];
     for test in state_tests {
         let path = path_prefix.clone() + test;
-        let suite: smodels::TestSuite =
-            serde_json::from_str(&fs::read_to_string(Path::new(&path))?)?;
-        for (_, unit) in suite.0 {
-            run_test_unit(unit)?;
+        let raw_content = fs::read_to_string(Path::new(&path))
+            .unwrap_or_else(|_| panic!("Cannot read suite: {:?}", test));
+        let parsed_suite: smodels::TestSuite = serde_json::from_str(&raw_content)
+            .unwrap_or_else(|_| panic!("Cannot parse suite: {:?}", test));
+        for (_, unit) in parsed_suite.0 {
+            run_test_unit(unit)
         }
     }
-    Ok(())
 }

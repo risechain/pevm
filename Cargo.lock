@@ -388,7 +388,6 @@ dependencies = [
  "revme",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
