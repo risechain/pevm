@@ -7,12 +7,9 @@ edition = "2021"
 dashmap = "5.5.3"
 rand = "0.8.5"
 # TODO: Let's do our best to port needed changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "3c046a6aa734d914dc37bcade8ac5932a9599a23", features = [
-    "serde-json",
-] }
+revm = { git = "https://github.com/risechain/revm", rev = "3c046a6aa734d914dc37bcade8ac5932a9599a23" }
 revme = { git = "https://github.com/risechain/revm", rev = "3c046a6aa734d914dc37bcade8ac5932a9599a23" }
-serde = { version = "1.0.198", features = ["derive"] }
-serde_json = { version = "1.0.116", features = ["preserve_order"] }
+serde_json = { version = "1.0.116" }
 
 [lints]
 rust.missing_debug_implementations = "warn"
