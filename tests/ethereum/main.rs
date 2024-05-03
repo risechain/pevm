@@ -1,31 +1,12 @@
-//! Run tests against GeneralStateTests/
-
-mod coercion;
-
 use block_stm_revm::{BlockSTM, Storage};
-use coercion::from_storage;
+use revm::db::PlainAccount;
 use revm::primitives::{
     calc_excess_blob_gas, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode,
     ResultAndState, TransactTo, TxEnv, U256,
 };
-use revm::DatabaseCommit;
 use revme::cmd::statetest::merkle_trie::{log_rlp_hash, state_merkle_trie_root};
 use revme::cmd::statetest::{models as smodels, utils::recover_address};
 use std::{collections::HashMap, fs, num::NonZeroUsize, path::Path};
-
-use crate::coercion::{to_plain_account, to_storage};
-
-fn build_storage(pre: &HashMap<Address, smodels::AccountInfo>) -> Storage {
-    let mut storage = Storage::default();
-
-    for (k, v) in pre.iter() {
-        let code = Bytecode::new_raw(v.code.clone());
-        let info = AccountInfo::new(v.balance, v.nonce, code.hash_slow(), code.clone());
-        storage.insert_account_info(*k, info);
-    }
-
-    storage
-}
 
 fn build_block_env(env: &smodels::Env) -> BlockEnv {
     let resolved_blob_excess_gas_and_price = {
@@ -89,42 +70,53 @@ fn build_tx_env(tx: &smodels::TransactionParts, indices: &smodels::TxPartIndices
 
 fn run_test_unit(unit: smodels::TestUnit) {
     for (spec_name, tests) in unit.post {
-        if matches!(
-            spec_name,
-            smodels::SpecName::ByzantiumToConstantinopleAt5
-                | smodels::SpecName::Constantinople
-                | smodels::SpecName::Unknown
-        ) {
+        // Should REVM know and handle these better, or it is
+        // truly fine to just skip them?
+        if matches!(spec_name, smodels::SpecName::Unknown) {
             continue;
         }
+        let spec_id = spec_name.to_spec_id();
 
         for test in tests {
-            let spec_id = spec_name.to_spec_id();
-            let mut db = from_storage(build_storage(&unit.pre));
+            let mut chain_state: HashMap<Address, PlainAccount> = HashMap::new();
+            let mut storage = Storage::default();
+
+            // Shouldn't we parse accounts as `Account` instead of `AccountInfo`
+            // to have initial storage states?
+            for (address, raw_info) in unit.pre.iter() {
+                let code = Bytecode::new_raw(raw_info.code.clone());
+                let info =
+                    AccountInfo::new(raw_info.balance, raw_info.nonce, code.hash_slow(), code);
+                storage.insert_account_info(*address, info.clone());
+                chain_state.insert(*address, info.into());
+            }
+
             let block_env = build_block_env(&unit.env);
             let tx_env = build_tx_env(&unit.transaction, &test.indexes);
+            let exec_results =
+                BlockSTM::run(storage, spec_id, block_env, vec![tx_env], NonZeroUsize::MIN);
 
-            let result_block_stm = BlockSTM::run(
-                to_storage(db.clone()),
-                spec_id,
-                block_env,
-                Vec::from([tx_env]),
-                NonZeroUsize::MIN,
-            );
-
-            assert!(result_block_stm.len() == 1);
-            let ResultAndState { result, state } = result_block_stm[0].clone();
-            db.commit(state);
+            // TODO: We really should test with blocks with more than 1 tx
+            assert!(exec_results.len() == 1);
+            let ResultAndState { result, state } = exec_results[0].clone();
 
             let logs_root = log_rlp_hash(result.logs());
             assert_eq!(logs_root, test.logs);
 
-            let plain_accounts: Vec<_> = db
-                .accounts
-                .iter()
-                .map(|(k, v)| (*k, to_plain_account(v)))
-                .collect();
-            let state_root = state_merkle_trie_root(plain_accounts.iter().map(|(k, v)| (*k, v)));
+            for (address, account) in state {
+                chain_state.insert(
+                    address,
+                    PlainAccount {
+                        info: account.info,
+                        storage: account
+                            .storage
+                            .iter()
+                            .map(|(k, v)| (*k, v.present_value))
+                            .collect(),
+                    },
+                );
+            }
+            let state_root = state_merkle_trie_root(chain_state.iter().map(|(k, v)| (*k, v)));
             assert_eq!(state_root, test.hash);
         }
     }
