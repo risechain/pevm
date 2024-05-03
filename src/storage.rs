@@ -30,6 +30,11 @@ impl Storage {
         self.accounts.insert(address, Account::from(info));
     }
 
+    /// Insert an account into the storage.
+    pub fn insert_account(&mut self, address: Address, account: Account) {
+        self.accounts.insert(address, account);
+    }
+
     pub(crate) fn basic(&self, address: Address) -> Result<AccountInfo, ReadError> {
         match self.accounts.get(&address) {
             Some(account) => Ok(account.info.clone()),
