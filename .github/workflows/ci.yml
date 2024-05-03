@@ -17,17 +17,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: cargo clippy --all-targets --all-features
 
-  local-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo test --release
-
-  # TODO: Run the whole suit
-  ethereum-tests:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: |
           git submodule update --init
-          cargo run --bin statetest -- tests/ethereum/tests/GeneralStateTests/stExample/add11.json
+          cargo test --release

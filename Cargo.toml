@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.5.4", features = ["derive"] }
 dashmap = "5.5.3"
 rand = "0.8.5"
 # TODO: Let's do our best to port needed changes upstream
@@ -20,6 +19,3 @@ thiserror = "1.0.59"
 rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
 rust.unreachable_pub = "warn"
-
-[profile.release]
-debug = true

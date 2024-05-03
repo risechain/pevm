@@ -42,15 +42,7 @@ Finally, while Aptos and Polygon embed their Block-STM implementation directly i
 
 ### Testing
 
-- Local tests:
-
-```
-$ cargo test --release
-```
-
-- Ethereum tests:
-
 ```
 $ git submodule update --init
-$ cargo run --bin statetest -- tests/ethereum/tests/GeneralStateTests/stExample/add11.json
+$ cargo test --release
 ```

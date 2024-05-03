@@ -3,7 +3,6 @@
 mod coercion;
 
 use block_stm_revm::{BlockSTM, Storage};
-use clap::Parser;
 use coercion::from_storage;
 use revm::primitives::{
     calc_excess_blob_gas, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode,
@@ -12,15 +11,10 @@ use revm::primitives::{
 use revm::DatabaseCommit;
 use revme::cmd::statetest::merkle_trie::{log_rlp_hash, state_merkle_trie_root};
 use revme::cmd::statetest::{models as smodels, utils::recover_address};
-use std::{collections::HashMap, fs, num::NonZeroUsize, path::Path, process::ExitCode};
+use std::{collections::HashMap, fs, num::NonZeroUsize, path::Path};
 use thiserror::Error;
 
 use crate::coercion::{to_plain_account, to_storage};
-
-#[derive(Parser)]
-struct Args {
-    paths: Vec<String>,
-}
 
 #[derive(Debug, Error)]
 pub(crate) enum StateTestError {
@@ -143,39 +137,23 @@ fn run_test_unit(unit: smodels::TestUnit) -> Result<(), StateTestError> {
             assert_eq!(state_root, test.hash);
         }
     }
-
     Ok(())
 }
 
-fn run_test_suite(suite: smodels::TestSuite) -> Result<(), StateTestError> {
-    for (k, v) in suite.0 {
-        println!("Running: {}", k);
-        run_test_unit(v)?;
-    }
-    Ok(())
-}
-
-fn run_test(path: &Path) -> Result<(), StateTestError> {
-    let text = fs::read_to_string(path)?;
-    let suite: smodels::TestSuite = serde_json::from_str(&text)?;
-    run_test_suite(suite)
-}
-
-fn main() -> ExitCode {
-    let args = Args::parse();
-
-    if args.paths.is_empty() {
-        println!("No tests provided. Did you forget to pass the arguments?");
-        return ExitCode::SUCCESS;
-    }
-
-    for path in args.paths {
-        let result = run_test(Path::new(&path));
-        if let Err(error) = result {
-            eprintln!("{:?}", error);
-            return ExitCode::FAILURE;
+#[test]
+fn ethereum_tests() -> Result<(), StateTestError> {
+    // TODO: Run the whole suite.
+    // Skip tests like REVM does when it makes sense.
+    // Let's document clearly why for each test that we skip.
+    let path_prefix = String::from("tests/ethereum/tests/GeneralStateTests/");
+    let state_tests = ["stExample/add11.json"];
+    for test in state_tests {
+        let path = path_prefix.clone() + test;
+        let suite: smodels::TestSuite =
+            serde_json::from_str(&fs::read_to_string(Path::new(&path))?)?;
+        for (_, unit) in suite.0 {
+            run_test_unit(unit)?;
         }
     }
-
-    ExitCode::SUCCESS
+    Ok(())
 }
