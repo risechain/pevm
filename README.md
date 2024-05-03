@@ -40,22 +40,17 @@ Finally, while Aptos and Polygon embed their Block-STM implementation directly i
 - Track read checkpoints to re-execute from there instead of re-executing the whole transaction upon conflicts.
 - Hyper-optimise the implementation at low system levels.
 
-### Profiling
+### Testing
+
+- Local tests:
 
 ```
-$ cargo install flamegraph
-$ cargo flamegraph
+$ cargo test --release
 ```
 
-- 500k independent raw transfers:
+- Ethereum tests:
 
-![Flamegraph](./assets/flamegraph_500k_raw_transfers.svg)
-
-- 500k independent ERC-20 transfers on an Intel i9 with 24 CPUs:
-
-|                | Execution Time                    |
-| -------------- | --------------------------------- |
-| **Sequential** | 3.40770298s                       |
-| **BlockSTM**   | 979.707789ms (~3.48 times faster) |
-
-![Flamegraph](./assets/flamegraph_500k_erc20_transfers.svg)
+```
+$ git submodule update --init
+$ cargo run --bin statetest -- tests/ethereum/tests/GeneralStateTests/stExample/add11.json
+```
