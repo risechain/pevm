@@ -7,8 +7,8 @@ edition = "2021"
 dashmap = "5.5.3"
 rand = "0.8.5"
 # TODO: Let's do our best to port needed changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "3c046a6aa734d914dc37bcade8ac5932a9599a23" }
-revme = { git = "https://github.com/risechain/revm", rev = "3c046a6aa734d914dc37bcade8ac5932a9599a23" }
+revm = { git = "https://github.com/risechain/revm", rev = "b3c7ef930bf7fbb5ed08ba3dc69070bdb50c614c" }
+revme = { git = "https://github.com/risechain/revm", rev = "b3c7ef930bf7fbb5ed08ba3dc69070bdb50c614c" }
 serde_json = { version = "1.0.116" }
 
 [lints]

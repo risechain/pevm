@@ -279,8 +279,7 @@ impl Vm {
                     .iter()
                     .flat_map(|(address, account)| {
                         let mut writes = Vec::new();
-                        // TODO: Verify that depending on this touched status is correct!
-                        if account.is_touched() {
+                        if account.is_info_changed() {
                             // TODO: More granularity here to ensure we only notify new
                             // memory writes, for instance, only an account's balance instead
                             // of the whole account. That way we may also generalize beneficiary
@@ -295,12 +294,12 @@ impl Vm {
                                 MemoryLocation::Basic(*address),
                                 MemoryValue::Basic(account_info),
                             ));
-                            for (slot, value) in account.changed_storage_slots() {
-                                writes.push((
-                                    MemoryLocation::Storage((*address, *slot)),
-                                    MemoryValue::Storage(value.present_value),
-                                ));
-                            }
+                        }
+                        for (slot, value) in account.changed_storage_slots() {
+                            writes.push((
+                                MemoryLocation::Storage((*address, *slot)),
+                                MemoryValue::Storage(value.present_value),
+                            ));
                         }
                         writes
                     })
