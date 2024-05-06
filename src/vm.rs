@@ -323,7 +323,7 @@ impl Vm {
                 VmExecutionResult::ReadError { blocking_tx_idx }
             }
             // TODO: More error handling here
-            error => panic!("{:?}", error),
+            _ => todo!(),
         }
     }
 }
