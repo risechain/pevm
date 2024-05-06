@@ -3,7 +3,8 @@ use std::{num::NonZeroUsize, thread};
 use block_stm_revm::{BlockSTM, Storage};
 use revm::{
     primitives::{
-        alloy_primitives::U160, AccountInfo, Address, BlockEnv, ResultAndState, SpecId, TxEnv, U256,
+        alloy_primitives::U160, Account, AccountInfo, Address, BlockEnv, ResultAndState, SpecId,
+        TxEnv, U256,
     },
     DatabaseCommit, Evm, InMemoryDB,
 };
@@ -22,7 +23,7 @@ fn mock_dbs(num_prefilled_accounts: usize) -> (InMemoryDB, Storage) {
     for i in 0..=num_prefilled_accounts {
         let address = Address::from(U160::from(i));
         sequential_db.insert_account_info(address, mock_account.clone());
-        block_stm_storage.insert_account_info(address, mock_account.clone());
+        block_stm_storage.insert_account(address, Account::from(mock_account.clone()));
     }
 
     (sequential_db, block_stm_storage)
