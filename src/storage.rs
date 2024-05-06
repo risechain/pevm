@@ -25,9 +25,9 @@ impl Storage {
         }
     }
 
-    /// Insert a new account into the storage. Useful for mocking.
-    pub fn insert_account_info(&mut self, address: Address, info: AccountInfo) {
-        self.accounts.insert(address, Account::from(info));
+    /// Insert an account into the storage.
+    pub fn insert_account(&mut self, address: Address, account: Account) {
+        self.accounts.insert(address, account);
     }
 
     pub(crate) fn basic(&self, address: Address) -> Result<AccountInfo, ReadError> {

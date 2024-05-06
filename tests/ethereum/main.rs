@@ -3,7 +3,7 @@
 use block_stm_revm::{BlockSTM, Storage};
 use revm::db::PlainAccount;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode,
+    calc_excess_blob_gas, Account, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode,
     ResultAndState, TransactTo, TxEnv, U256,
 };
 use revme::cmd::statetest::{
@@ -102,7 +102,7 @@ fn run_test_unit(unit: smodels::TestUnit) {
                 let info =
                     AccountInfo::new(raw_info.balance, raw_info.nonce, code.hash_slow(), code);
                 chain_state.insert(*address, info.clone().into());
-                block_stm_storage.insert_account_info(*address, info);
+                block_stm_storage.insert_account(*address, Account::from(info));
             }
 
             let exec_results = BlockSTM::run(

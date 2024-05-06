@@ -5,7 +5,7 @@
 
 use rand::random;
 use revm::primitives::{
-    alloy_primitives::U160, env::TxEnv, Address, BlockEnv, SpecId, TransactTo, U256,
+    alloy_primitives::U160, env::TxEnv, Account, Address, BlockEnv, SpecId, TransactTo, U256,
 };
 
 mod common;
@@ -16,7 +16,11 @@ fn beneficiary() {
     let block_env = BlockEnv::default();
     let block_size = 100_000; // number of transactions
 
+    // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
+    let accounts: Vec<(Address, Account)> = (0..=block_size).map(common::mock_account).collect();
+
     common::test_txs(
+        &accounts,
         spec_id,
         block_env,
         // Mock `block_size` transactions sending some tokens to itself.
