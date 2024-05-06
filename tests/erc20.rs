@@ -114,7 +114,7 @@ fn erc20() {
                         // MethodID: transfer
                         fixed_bytes!("a9059cbb").as_slice(),
                         // address _to
-                        B256::right_padding_from(address.as_slice()).as_slice(),
+                        B256::left_padding_from(address.as_slice()).as_slice(),
                         // uint256 value
                         B256::from(U256::from(1)).as_slice(),
                     ]
