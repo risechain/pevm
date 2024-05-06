@@ -15,10 +15,15 @@ use crate::{
     MemoryLocation, MemoryValue, ReadError, ReadOrigin, ReadSet, Storage, TxIdx, WriteSet,
 };
 
+/// The execution error from the underlying EVM executor.
+// Will there be DB errors outside of read?
+pub type ExecutionError = EVMError<ReadError>;
+
 pub(crate) enum VmExecutionResult {
     ReadError {
         blocking_tx_idx: TxIdx,
     },
+    ExecutionError(ExecutionError),
     Ok {
         result_and_state: ResultAndState,
         read_set: ReadSet,
@@ -157,8 +162,9 @@ impl Database for VmDb {
             return Ok(Some(AccountInfo::default()));
         }
         match self.read(&MemoryLocation::Basic(address), self.tx_idx, !is_preload) {
-            Err(err) => Err(err),
             Ok(MemoryValue::Basic(value)) => Ok(Some(value)),
+            Err(ReadError::NotFound) => Ok(None),
+            Err(err) => Err(err),
             _ => Err(ReadError::InvalidMemoryLocationType),
         }
     }
@@ -167,17 +173,11 @@ impl Database for VmDb {
         self.storage.code_by_hash(code_hash)
     }
 
-    fn storage(
-        &mut self,
-        address: Address,
-        index: U256,
-        // TODO: Better way for REVM to notifiy explicit reads
-        is_preload: bool,
-    ) -> Result<U256, Self::Error> {
+    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         match self.read(
             &MemoryLocation::Storage((address, index)),
             self.tx_idx,
-            !is_preload,
+            false,
         ) {
             Err(err) => Err(err),
             Ok(MemoryValue::Storage(value)) => Ok(value),
@@ -321,8 +321,7 @@ impl Vm {
             Err(EVMError::Database(ReadError::BlockingIndex(blocking_tx_idx))) => {
                 VmExecutionResult::ReadError { blocking_tx_idx }
             }
-            // TODO: More error handling here
-            _ => todo!(),
+            Err(err) => VmExecutionResult::ExecutionError(err),
         }
     }
 }

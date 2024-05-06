@@ -4,16 +4,18 @@ use block_stm_revm::{BlockSTM, Storage};
 use revm::db::PlainAccount;
 use revm::primitives::{
     calc_excess_blob_gas, Account, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode,
-    ResultAndState, TransactTo, TxEnv, U256,
+    EVMError, InvalidTransaction, ResultAndState, TransactTo, TxEnv, U256,
+};
+use revme::cmd::statetest::models::{
+    Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
 };
 use revme::cmd::statetest::{
     merkle_trie::{log_rlp_hash, state_merkle_trie_root},
-    models as smodels,
     utils::recover_address,
 };
 use std::{collections::HashMap, fs, num::NonZeroUsize, path::Path};
 
-fn build_block_env(env: &smodels::Env) -> BlockEnv {
+fn build_block_env(env: &Env) -> BlockEnv {
     BlockEnv {
         number: env.current_number,
         coinbase: env.current_coinbase,
@@ -39,7 +41,7 @@ fn build_block_env(env: &smodels::Env) -> BlockEnv {
     }
 }
 
-fn build_tx_env(tx: &smodels::TransactionParts, indexes: &smodels::TxPartIndices) -> TxEnv {
+fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> TxEnv {
     TxEnv {
         caller: if let Some(address) = tx.sender {
             address
@@ -82,11 +84,14 @@ fn build_tx_env(tx: &smodels::TransactionParts, indexes: &smodels::TxPartIndices
     }
 }
 
-fn run_test_unit(unit: smodels::TestUnit) {
+fn run_test_unit(unit: TestUnit) {
     for (spec_name, tests) in unit.post {
         // Should REVM know and handle these better, or it is
         // truly fine to just skip them?
-        if matches!(spec_name, smodels::SpecName::Unknown) {
+        if matches!(
+            spec_name,
+            SpecName::ByzantiumToConstantinopleAt5 | SpecName::Constantinople | SpecName::Unknown
+        ) {
             continue;
         }
         let spec_id = spec_name.to_spec_id();
@@ -105,36 +110,57 @@ fn run_test_unit(unit: smodels::TestUnit) {
                 block_stm_storage.insert_account(*address, Account::from(info));
             }
 
-            let exec_results = BlockSTM::run(
-                block_stm_storage,
-                spec_id,
-                build_block_env(&unit.env),
-                vec![build_tx_env(&unit.transaction, &test.indexes)],
-                NonZeroUsize::MIN,
-            );
+            match (
+                test.expect_exception,
+                BlockSTM::run(
+                    block_stm_storage,
+                    spec_id,
+                    build_block_env(&unit.env),
+                    vec![build_tx_env(&unit.transaction, &test.indexes)],
+                    NonZeroUsize::MIN,
+                ),
+            ) {
+                // Tests that expect execution to fail -> match error
+                (Some(exception), Err(error)) => assert!(matches!(
+                    (exception.as_str(), error),
+                    (
+                        "TR_TypeNotSupported",
+                        EVMError::Transaction(InvalidTransaction::AccessListNotSupported),
+                    )
+                )),
+                // Tests that exepect execution to succeed -> match post state root
+                (None, Ok(exec_results)) => {
+                    // TODO: We really should test with blocks with more than 1 tx
+                    assert!(exec_results.len() == 1);
+                    let ResultAndState { result, state } = exec_results[0].clone();
 
-            // TODO: We really should test with blocks with more than 1 tx
-            assert!(exec_results.len() == 1);
-            let ResultAndState { result, state } = exec_results[0].clone();
+                    let logs_root = log_rlp_hash(result.logs());
+                    assert_eq!(logs_root, test.logs);
 
-            let logs_root = log_rlp_hash(result.logs());
-            assert_eq!(logs_root, test.logs);
-
-            for (address, account) in state {
-                chain_state.insert(
-                    address,
-                    PlainAccount {
-                        info: account.info,
-                        storage: account
-                            .storage
-                            .iter()
-                            .map(|(k, v)| (*k, v.present_value))
-                            .collect(),
-                    },
-                );
+                    for (address, account) in state {
+                        if account.is_empty() {
+                            continue;
+                        }
+                        chain_state.insert(
+                            address,
+                            PlainAccount {
+                                info: account.info,
+                                storage: account
+                                    .storage
+                                    .iter()
+                                    .map(|(k, v)| (*k, v.present_value))
+                                    .collect(),
+                            },
+                        );
+                    }
+                    let state_root =
+                        state_merkle_trie_root(chain_state.iter().map(|(k, v)| (*k, v)));
+                    assert_eq!(state_root, test.hash);
+                }
+                _ => {
+                    panic!("BlockSTM result doesn't match the test's expectation.")
+                }
             }
-            let state_root = state_merkle_trie_root(chain_state.iter().map(|(k, v)| (*k, v)));
-            assert_eq!(state_root, test.hash);
         }
     }
 }
@@ -166,6 +192,7 @@ fn ethereum_tests() {
         "stCallCodes/call_OOG_additionalGasCosts1.json",
         "stEIP1559/senderBalance.json",
         "stEIP3607/initCollidingWithNonEmptyAccount.json",
+        "stExample/accessListExample.json",
         "stExample/add11_yml.json",
         "stExample/add11.json",
         "stExample/indexesOmitExample.json",
@@ -772,7 +799,7 @@ fn ethereum_tests() {
         let path = path_prefix.clone() + test;
         let raw_content = fs::read_to_string(Path::new(&path))
             .unwrap_or_else(|_| panic!("Cannot read suite: {:?}", test));
-        let parsed_suite: smodels::TestSuite = serde_json::from_str(&raw_content)
+        let parsed_suite: TestSuite = serde_json::from_str(&raw_content)
             .unwrap_or_else(|_| panic!("Cannot parse suite: {:?}", test));
         for (_, unit) in parsed_suite.0 {
             run_test_unit(unit)
