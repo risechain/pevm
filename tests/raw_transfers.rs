@@ -1,9 +1,9 @@
 // Test raw transfers -- only send some ETH from one account to another without extra data.
-// Currently, we only have a no-state-conflict test of user account sending to themselves.
+// Currently, we only have a no-state-conflict test of user accounts sending to themselves.
 // TODO: Add more tests of accounts cross-transferring to create state depdendencies.
 
 use revm::primitives::{
-    alloy_primitives::U160, env::TxEnv, Address, BlockEnv, SpecId, TransactTo, U256,
+    alloy_primitives::U160, env::TxEnv, Account, Address, BlockEnv, SpecId, TransactTo, U256,
 };
 
 mod common;
@@ -14,7 +14,11 @@ fn raw_transfers() {
     let block_env = BlockEnv::default();
     let block_size = 100_000; // number of transactions
 
+    // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
+    let accounts: Vec<(Address, Account)> = (0..=block_size).map(common::mock_account).collect();
+
     common::test_txs(
+        &accounts,
         spec_id,
         block_env,
         // Mock `block_size` transactions sending some tokens to itself.

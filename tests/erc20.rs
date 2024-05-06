@@ -1,17 +1,14 @@
-//! 1. Initialize with an ERC20 contract and N slave accounts (1 token/account).
-//! 2. Create N transactions where each slave account sends 1 token to itself.
+// Test ERC20 transfers.
+// Currently, we only have a no-state-conflict test of user accounts sending to themselves.
+// TODO: Add more tests of accounts cross-transferring to create state depdendencies.
 
-use block_stm_revm::{BlockSTM, Storage};
-use revm::{
-    db::DbAccount,
-    primitives::{
-        address, bytes, fixed_bytes, keccak256, uint, Account, AccountInfo, Address, BlockEnv,
-        Bytecode, Bytes, ResultAndState, SpecId, StorageSlot, TransactTo, TxEnv, B256,
-        KECCAK_EMPTY, U256,
-    },
-    DatabaseCommit, Evm, InMemoryDB,
+use revm::primitives::{
+    address, bytes, fixed_bytes, keccak256, uint, Account, AccountInfo, Address, BlockEnv,
+    Bytecode, Bytes, SpecId, StorageSlot, TransactTo, TxEnv, B256, U256,
 };
 use std::collections::HashMap;
+
+mod common;
 
 fn get_erc20_account(slaves: &[Address]) -> (Address, Account) {
     let address = address!("fbfbfddd6e35da57b7b0f9a2c10e34be70b3a4e9");
@@ -86,23 +83,6 @@ fn get_erc20_account(slaves: &[Address]) -> (Address, Account) {
     (address, account)
 }
 
-fn get_slave_accounts(slaves: &[Address]) -> Vec<(Address, Account)> {
-    slaves
-        .iter()
-        .map(|slave| {
-            (
-                *slave,
-                Account::from(AccountInfo::new(
-                    uint!(0x100000000000000000000000000000000_U256),
-                    0u64,
-                    KECCAK_EMPTY,
-                    Bytecode::default(),
-                )),
-            )
-        })
-        .collect()
-}
-
 fn get_txs(erc20_address: Address, slaves: &[Address]) -> Vec<TxEnv> {
     slaves
         .iter()
@@ -132,92 +112,27 @@ fn get_txs(erc20_address: Address, slaves: &[Address]) -> Vec<TxEnv> {
         .collect()
 }
 
-fn to_db_account(account: Account) -> DbAccount {
-    DbAccount {
-        info: account.info,
-        account_state: revm::db::AccountState::None,
-        storage: account
-            .storage
-            .into_iter()
-            .map(|(k, v)| (k, v.present_value))
-            .collect(),
-    }
-}
-
-fn run_sequential(spec_id: SpecId, slaves: &[Address]) -> Vec<ResultAndState> {
-    let mut db = InMemoryDB::default();
-
-    let (erc20_address, erc20_account) = get_erc20_account(slaves);
-    db.accounts
-        .insert(erc20_address, to_db_account(erc20_account));
-
-    let slave_accounts = get_slave_accounts(slaves);
-    for (address, account) in slave_accounts {
-        db.accounts.insert(address, to_db_account(account));
-    }
-
-    let block_env = BlockEnv::default();
-    db.accounts.insert(block_env.coinbase, DbAccount::default());
-
-    let txs = get_txs(erc20_address, slaves);
-
-    txs.iter()
-        .map(|tx| {
-            let result_and_state = Evm::builder()
-                .with_ref_db(&mut db)
-                .with_spec_id(spec_id)
-                .with_block_env(block_env.clone())
-                .with_tx_env(tx.clone())
-                .build()
-                .transact()
-                // TODO: Proper error handling
-                .unwrap();
-            db.commit(result_and_state.state.clone());
-            result_and_state
-        })
-        .collect()
-}
-
-fn run_parallel(spec_id: SpecId, slaves: &[Address]) -> Vec<ResultAndState> {
-    let mut storage = Storage::default();
-
-    let (erc20_address, erc20_account) = get_erc20_account(slaves);
-    storage.insert_account(erc20_address, erc20_account);
-
-    let slave_accounts = get_slave_accounts(slaves);
-    for (address, account) in slave_accounts {
-        storage.insert_account(address, account);
-    }
-
-    let block_env = BlockEnv::default();
-    storage.insert_account(block_env.coinbase, Account::default());
-
-    let concurrency_level =
-        std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN);
-
-    let txs = get_txs(erc20_address, slaves);
-
-    BlockSTM::run(storage, spec_id, block_env, txs, concurrency_level)
-}
-
-fn random_address() -> Address {
-    let bytes: [u8; 20] = rand::random();
-    Address::from_slice(&bytes)
-}
-
 #[test]
-fn erc20_independent() {
-    use std::time::Instant;
-    const N: usize = 1000;
-    let slaves: Vec<Address> = (0..N).map(|_| random_address()).collect();
+fn erc20() {
+    let spec_id = SpecId::LATEST;
+    let block_env = BlockEnv::default();
+    let block_size = 1000; // number of transactions
 
-    let now = Instant::now();
-    let result_parallel = run_parallel(SpecId::LATEST, &slaves);
-    println!("result_parallel: {:.6?}", now.elapsed());
+    // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
+    let mut accounts: Vec<(Address, Account)> =
+        (0..=block_size).map(common::mock_account).collect();
+    let user_addresses: Vec<Address> = (1..=block_size).map(|idx| accounts[idx].0).collect();
 
-    let now = Instant::now();
-    let result_sequential = run_sequential(SpecId::LATEST, &slaves);
-    println!("result_sequential: {:.6?}", now.elapsed());
+    // Mock the ERC20 contract
+    let (erc20_address, erc20_account) = get_erc20_account(&user_addresses);
+    accounts.push((erc20_address, erc20_account));
 
-    assert_eq!(result_parallel, result_sequential)
+    common::test_txs(
+        &accounts,
+        spec_id,
+        block_env,
+        // Mock `block_size` transactions sending some tokens to itself.
+        // Skipping `Address::ZERO` as the beneficiary account.
+        get_txs(erc20_address, &user_addresses),
+    );
 }
