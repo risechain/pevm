@@ -1,13 +1,25 @@
-use std::{num::NonZeroUsize, thread};
+use std::{convert::Infallible, num::NonZeroUsize, thread};
 
 use block_stm_revm::{BlockSTM, Storage};
 use revm::{
     primitives::{
-        alloy_primitives::U160, Account, AccountInfo, Address, BlockEnv, ResultAndState, SpecId,
-        TxEnv, U256,
+        alloy_primitives::U160, Account, AccountInfo, Address, BlockEnv, EVMError, ResultAndState,
+        SpecId, TxEnv, U256,
     },
     DatabaseCommit, Evm, InMemoryDB,
 };
+
+// TODO: More elegant solution?
+fn eq_evm_errors<DBError1, DBError2>(e1: &EVMError<DBError1>, e2: &EVMError<DBError2>) -> bool {
+    match (e1, e2) {
+        (EVMError::Transaction(e1), EVMError::Transaction(e2)) => e1 == e2,
+        (EVMError::Header(e1), EVMError::Header(e2)) => e1 == e2,
+        (EVMError::Custom(e1), EVMError::Custom(e2)) => e1 == e2,
+        // We treat all database errors as inequality.
+        // Warning: This can be dangerous when `EVMError` introduces a new variation.
+        _ => false,
+    }
+}
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -43,27 +55,33 @@ fn setup_storage(accounts: &[(Address, Account)]) -> (InMemoryDB, Storage) {
 }
 
 // The source-of-truth sequential execution result that BlockSTM must match.
+// Currently early returning the first encountered EVM error if there is any.
 fn execute_sequential(
     mut db: InMemoryDB,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: &[TxEnv],
-) -> Vec<ResultAndState> {
-    txs.iter()
-        .map(|tx| {
-            let result_and_state = Evm::builder()
-                .with_ref_db(&mut db)
-                .with_spec_id(spec_id)
-                .with_block_env(block_env.clone())
-                .with_tx_env(tx.clone())
-                .build()
-                .transact()
-                // TODO: Proper error handling
-                .unwrap();
-            db.commit(result_and_state.state.clone());
-            result_and_state
-        })
-        .collect()
+) -> Result<Vec<ResultAndState>, EVMError<Infallible>> {
+    let mut results = Vec::new();
+    for tx in txs {
+        let mut evm = Evm::builder()
+            .with_ref_db(&mut db)
+            .with_spec_id(spec_id)
+            .with_block_env(block_env.clone())
+            .with_tx_env(tx.clone())
+            .build();
+        let result = evm.transact();
+        drop(evm); // to reclaim the DB
+
+        match result {
+            Ok(result_and_state) => {
+                db.commit(result_and_state.state.clone());
+                results.push(result_and_state);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(results)
 }
 
 // Execute a list of transactions sequentially & with BlockSTM and assert that
@@ -85,8 +103,15 @@ pub(crate) fn test_txs(
         thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
     );
 
-    assert_eq!(
-        result_sequential, result_block_stm,
-        "Block-STM's execution result doesn't match Sequential's"
-    );
+    match (result_sequential, result_block_stm) {
+        (Ok(sequential_results), Ok(parallel_results)) => {
+            assert_eq!(sequential_results, parallel_results)
+        }
+        // TODO: Support extracting and comparing multiple errors in the input block.
+        // This only works for now as most tests have just one (potentially error) transaction.
+        (Err(sequential_error), Err(parallel_error)) => {
+            assert!(eq_evm_errors(&sequential_error, &parallel_error))
+        }
+        _ => panic!("Block-STM's execution result doesn't match Sequential's"),
+    };
 }

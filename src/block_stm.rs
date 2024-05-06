@@ -1,6 +1,6 @@
 use std::{
     num::NonZeroUsize,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     thread,
 };
 
@@ -9,7 +9,7 @@ use revm::primitives::{Account, BlockEnv, ResultAndState, SpecId, TxEnv};
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
     scheduler::Scheduler,
-    vm::{Vm, VmExecutionResult},
+    vm::{ExecutionError, Vm, VmExecutionResult},
     ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TxVersion, ValidationTask,
 };
 
@@ -20,27 +20,39 @@ pub struct BlockSTM;
 
 impl BlockSTM {
     /// Run a list of REVM transactions through Block-STM.
-    /// TODO: Better concurrency control
     pub fn run(
         storage: Storage,
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         concurrency_level: NonZeroUsize,
-    ) -> Vec<ResultAndState> {
+    ) -> Result<Vec<ResultAndState>, ExecutionError> {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
         let mv_memory = Arc::new(MvMemory::new(block_size));
         let mut beneficiary_account_info = storage.basic(block_env.coinbase).unwrap_or_default();
         let vm = Vm::new(storage, spec_id, block_env.clone(), txs, mv_memory.clone());
+
         // TODO: Should we move this to `Vm`?
+        let execution_error = RwLock::new(None);
         let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
+
         // TODO: Better thread handling
         thread::scope(|scope| {
             for _ in 0..concurrency_level.into() {
                 scope.spawn(|| {
                     let mut task = None;
                     while !scheduler.done() {
+                        // TODO: Have different functions or an enum for the caller to choose
+                        // the handling behaviour when a transaction's EVM execution fails.
+                        // Parallel block builders would like to exclude such transaction,
+                        // verifiers may want to exit early to save CPU cycles, while testers
+                        // may want to collect all execution results. We are exiting early as
+                        // the default behaviour for now.
+                        if execution_error.read().unwrap().is_some() {
+                            break;
+                        }
+
                         // Find and perform the next execution or validation task.
                         //
                         // After an incarnation executes it needs to pass validation. The
@@ -64,6 +76,7 @@ impl BlockSTM {
                                 &mv_memory,
                                 &vm,
                                 &scheduler,
+                                &execution_error,
                                 &execution_results,
                                 &tx_version,
                             )
@@ -79,10 +92,14 @@ impl BlockSTM {
             }
         });
 
+        if let Some(err) = execution_error.read().unwrap().as_ref() {
+            return Err(err.clone());
+        }
+
         // We lazily evaluate the final beneficiary account's balance at the end of each transaction
         // to avoid "implicit" dependency among consecutive transactions that read & write there.
         // TODO: Refactor, improve speed & error handling.
-        execution_results
+        Ok(execution_results
             .iter()
             .map(|m| m.lock().unwrap().clone().unwrap())
             .enumerate()
@@ -109,7 +126,7 @@ impl BlockSTM {
                     .insert(block_env.coinbase, beneficiary_account);
                 result_and_state
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -124,6 +141,7 @@ fn try_execute(
     mv_memory: &Arc<MvMemory>,
     vm: &Vm,
     scheduler: &Scheduler,
+    execution_error: &RwLock<Option<ExecutionError>>,
     execution_results: &Vec<Mutex<Option<ResultAndState>>>,
     tx_version: &TxVersion,
 ) -> Option<ValidationTask> {
@@ -132,8 +150,19 @@ fn try_execute(
             if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx) {
                 // Retry the execution immediately if the blocking transaction was
                 // re-executed by the time we can add it as a dependency.
-                return try_execute(mv_memory, vm, scheduler, execution_results, tx_version);
+                return try_execute(
+                    mv_memory,
+                    vm,
+                    scheduler,
+                    execution_error,
+                    execution_results,
+                    tx_version,
+                );
             }
+            None
+        }
+        VmExecutionResult::ExecutionError(err) => {
+            *execution_error.write().unwrap() = Some(err);
             None
         }
         VmExecutionResult::Ok {

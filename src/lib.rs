@@ -66,7 +66,7 @@ enum ReadOrigin {
 
 /// Errors when reading a memory location while executing BlockSTM.
 /// TODO: Better name & elaboration
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ReadError {
     /// Memory location not found.
     NotFound,
@@ -106,3 +106,4 @@ mod scheduler;
 mod storage;
 pub use storage::Storage;
 mod vm;
+pub use vm::ExecutionError;
