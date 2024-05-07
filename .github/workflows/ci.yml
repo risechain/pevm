@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Our tests are heavy, avoid running them in parallel to not risk nuking RAM.
+      # Each parallel test still executes parallelly up to the number of CPUs anyway.
       - run: |
           git submodule update --init
-          cargo test --release
+          cargo test --release -- --test-threads=1

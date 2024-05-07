@@ -1,5 +1,4 @@
-use core::time;
-use std::{cell::RefCell, sync::Arc, thread};
+use std::{cell::RefCell, sync::Arc};
 
 use revm::{
     primitives::{
@@ -58,9 +57,6 @@ impl VmDb {
         }
     }
 
-    // TODO: Distinguish beneficiary balance reads to call their dedicated
-    // read function. Should we branch here or just init MvMemory with
-    // the benediciary address?
     fn read(
         &mut self,
         location: &MemoryLocation,
@@ -68,48 +64,20 @@ impl VmDb {
         update_read_set: bool,
     ) -> Result<MemoryValue, ReadError> {
         // Dedicated handling for the beneficiary account
-        // TODO: Refactor & find a better place for this specific logic
         if let MemoryLocation::Basic(address) = *location {
             if address == self.block_env.coinbase {
-                if tx_idx == 0 {
-                    if update_read_set {
-                        self.read_set.push((location.clone(), ReadOrigin::Storage));
-                    }
-                    return self.storage.basic(address).map(MemoryValue::Basic);
-                }
-                match self.mv_memory.read_absolute(location, tx_idx - 1) {
-                    ReadMemoryResult::Ok { version, value } => {
-                        if update_read_set {
-                            self.read_set
-                                .push((location.clone(), ReadOrigin::MvMemory(version)));
-                        }
-                        match value {
-                            MemoryValue::Basic(account) => return Ok(MemoryValue::Basic(account)),
-                            MemoryValue::LazyBeneficiaryBalance(addition) => {
-                                // TODO: Better error handling
-                                match self.read(location, tx_idx - 1, false) {
-                                    Ok(MemoryValue::Basic(mut beneficiary_account)) => {
-                                        // TODO: Write this new absolute value to MvMemory
-                                        // to avoid future recalculations.
-                                        beneficiary_account.balance += addition;
-                                        return Ok(MemoryValue::Basic(beneficiary_account));
-                                    }
-                                    _ => unreachable!(),
-                                }
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-                    _ => {
-                        // Wait for the previous transaction to complete processing
-                        // the beneficiary account.
-                        // TODO: Ideally, we can detect and abort if the wait is
-                        // expected to be long, like via recursion depth.
-                        // Sad: Bump delay time when facing stack overflow..
-                        thread::sleep(time::Duration::from_nanos(8));
-                        return self.read(location, tx_idx, update_read_set);
-                    }
-                }
+                // TODO: Fine-tune stack size further.
+                // Currently using a rough "standard" estimate with the heavy
+                // evaluation test guarding a potential stack overflow. Raise
+                // these numbers if the test fails. Ideally the numbers would
+                // be proportional to the transaction index, i.e, the max
+                // recursive depth.
+                // If it's too hard to optimize for this case, just pre-check
+                // the block and go sequential up to the transaction that
+                // updates beneficiary, or just go full sequential for this.
+                return stacker::maybe_grow(4 * 1024, 16 * 1024, || {
+                    self.read_beneficiary(tx_idx, update_read_set)
+                });
             }
         }
 
@@ -139,6 +107,57 @@ impl VmDb {
                 }
                 Ok(value)
             }
+        }
+    }
+
+    // This may recurse deeply back to the top of the block
+    // to fully evaluate the (lazily updated) beneficiary account.
+    // TODO: Refactor this more.
+    fn read_beneficiary(
+        &mut self,
+        tx_idx: TxIdx,
+        update_read_set: bool,
+    ) -> Result<MemoryValue, ReadError> {
+        let location = MemoryLocation::Basic(self.block_env.coinbase);
+        if tx_idx == 0 {
+            if update_read_set {
+                self.read_set.push((location, ReadOrigin::Storage));
+            }
+            return self
+                .storage
+                .basic(self.block_env.coinbase)
+                .map(MemoryValue::Basic);
+        }
+
+        // We simply register this transaction as dependency of the previous in
+        // the racing cases that the previous transactions aren't yet ready.
+        let reschedule = Err(ReadError::BlockingIndex(tx_idx - 1));
+
+        match self.mv_memory.read_absolute(&location, tx_idx - 1) {
+            ReadMemoryResult::Ok { version, value } => {
+                if update_read_set {
+                    self.read_set
+                        .push((location.clone(), ReadOrigin::MvMemory(version)));
+                }
+                match value {
+                    MemoryValue::Basic(account) => Ok(MemoryValue::Basic(account)),
+                    MemoryValue::LazyBeneficiaryBalance(addition) => {
+                        // TODO: Better error handling
+                        match self.read(&location, tx_idx - 1, false) {
+                            Ok(MemoryValue::Basic(mut beneficiary_account)) => {
+                                // TODO: Write this new absolute value to MvMemory
+                                // to avoid future recalculations.
+                                beneficiary_account.balance += addition;
+                                Ok(MemoryValue::Basic(beneficiary_account))
+                            }
+
+                            _ => reschedule, // Very unlikely
+                        }
+                    }
+                    _ => reschedule, // Very unlikely
+                }
+            }
+            _ => reschedule, // Very unlikely
         }
     }
 }
