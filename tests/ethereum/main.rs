@@ -241,6 +241,9 @@ fn ethereum_tests() {
     // Skip tests like REVM does when it makes sense.
     // Let's document clearly why for each test that we skip.
     let path_prefix = String::from("tests/ethereum/tests/GeneralStateTests/");
+
+    // Skipped tests:
+    // - stTimeConsuming/CALLBlake2f_MaxRounds.json: succeeded but it takes too much time
     let state_tests = [
         "Cancun/stEIP1153-transientStorage/02_tloadAfterTstore.json",
         "Cancun/stEIP1153-transientStorage/05_tloadReentrancy.json",
@@ -2224,7 +2227,7 @@ fn ethereum_tests() {
         "VMTests/vmTests/swap.json",
     ];
     for test in state_tests {
-        let path = path_prefix.clone() + &test;
+        let path = path_prefix.clone() + test;
         let raw_content = fs::read_to_string(Path::new(&path))
             .unwrap_or_else(|_| panic!("Cannot read suite: {:?}", test));
         let parsed_suite: TestSuite = serde_json::from_str(&raw_content)
