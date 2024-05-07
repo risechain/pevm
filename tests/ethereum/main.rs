@@ -129,7 +129,10 @@ fn run_test_unit(unit: TestUnit) {
 
                         match inner {
                             InvalidTransaction::GasPriceLessThanBasefee => {
-                                assert!(exception.contains("INSUFFICIENT_MAX_FEE_PER_GAS"))
+                                assert!(
+                                    exception.contains("INSUFFICIENT_MAX_FEE_PER_GAS")
+                                        || exception.contains("TR_FeeCapLessThanBlocks")
+                                )
                             }
                             InvalidTransaction::CallGasCostMoreThanGasLimit => {
                                 assert!(
@@ -148,10 +151,13 @@ fn run_test_unit(unit: TestUnit) {
                                 assert!(exception.contains("TR_NoFundsX"))
                             }
                             InvalidTransaction::CreateInitCodeSizeLimit => {
-                                assert!(exception.contains("INITCODE_SIZE_EXCEEDED"))
+                                assert!(
+                                    exception.contains("INITCODE_SIZE_EXCEEDED")
+                                        || exception.contains("TR_InitCodeLimitExceeded")
+                                )
                             }
                             InvalidTransaction::MaxFeePerBlobGasNotSupported => {
-                                assert!(exception.contains("TYPE_3_TX_PRE_FORK"),)
+                                assert!(exception.contains("TYPE_3_TX_PRE_FORK"))
                             }
                             InvalidTransaction::BlobVersionedHashesNotSupported => {
                                 assert!(exception.contains("TYPE_3_TX_PRE_FORK"))
@@ -160,13 +166,31 @@ fn run_test_unit(unit: TestUnit) {
                                 assert!(exception.contains("INSUFFICIENT_MAX_FEE_PER_BLOB_GAS"))
                             }
                             InvalidTransaction::EmptyBlobs => {
-                                assert!(exception.contains("TYPE_3_TX_ZERO_BLOBS"))
+                                assert!(
+                                    exception.contains("TYPE_3_TX_ZERO_BLOBS")
+                                        || exception.contains("TR_EMPTYBLOB")
+                                )
                             }
                             InvalidTransaction::TooManyBlobs { .. } => {
-                                assert!(exception.contains("TYPE_3_TX_BLOB_COUNT_EXCEEDED"))
+                                assert!(
+                                    exception.contains("TYPE_3_TX_BLOB_COUNT_EXCEEDED")
+                                        || exception.contains("TR_BLOBLIST_OVERSIZE")
+                                )
                             }
                             InvalidTransaction::BlobVersionNotSupported => {
-                                assert!(exception.contains("TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH"))
+                                assert!(
+                                    exception.contains("TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH")
+                                        || exception.contains("TR_BLOBVERSION_INVALID")
+                                )
+                            }
+                            InvalidTransaction::BlobCreateTransaction => {
+                                assert!(exception.contains("TR_BLOBCREATE"))
+                            }
+                            InvalidTransaction::PriorityFeeGreaterThanMaxFee => {
+                                assert!(exception.contains("TR_TipGtFeeCap"))
+                            }
+                            InvalidTransaction::RejectCallerWithCode => {
+                                assert!(exception.contains("SenderNotEOA"))
                             }
                             other => panic!("expected {:?}, got {:?}", exception, other),
                         }
@@ -229,6 +253,10 @@ fn ethereum_tests() {
         "Cancun/stEIP4844-blobtransactions/blobhashListBounds4.json",
         "Cancun/stEIP4844-blobtransactions/blobhashListBounds5.json",
         "Cancun/stEIP4844-blobtransactions/blobhashListBounds6.json",
+        "Cancun/stEIP4844-blobtransactions/blobhashListBounds7.json",
+        "Cancun/stEIP4844-blobtransactions/createBlobhashTx.json",
+        "Cancun/stEIP4844-blobtransactions/emptyBlobhashList.json",
+        "Cancun/stEIP4844-blobtransactions/wrongBlobhashVersion.json",
         "Cancun/stEIP5656-MCOPY/MCOPY_copy_cost.json",
         "Cancun/stEIP5656-MCOPY/MCOPY_memory_hash.json",
         "Cancun/stEIP5656-MCOPY/MCOPY.json",
@@ -287,6 +315,7 @@ fn ethereum_tests() {
         "Shanghai/stEIP3855-push0/push0Gas2.json",
         "Shanghai/stEIP3860-limitmeterinitcode/create2InitCodeSizeLimit.json",
         "Shanghai/stEIP3860-limitmeterinitcode/createInitCodeSizeLimit.json",
+        "Shanghai/stEIP3860-limitmeterinitcode/creationTxInitCodeSizeLimit.json",
         "stArgsZeroOneBalance/addmodNonConst.json",
         "stArgsZeroOneBalance/addNonConst.json",
         "stArgsZeroOneBalance/andNonConst.json",
@@ -653,7 +682,16 @@ fn ethereum_tests() {
         "stEIP150Specific/Transaction64Rule_d64m1.json",
         "stEIP150Specific/Transaction64Rule_d64p1.json",
         "stEIP150Specific/Transaction64Rule_integerBoundaries.json",
+        "stEIP1559/intrinsic.json",
+        "stEIP1559/lowFeeCap.json",
+        "stEIP1559/lowGasPriceOldTypes.json",
+        "stEIP1559/outOfFunds.json",
+        "stEIP1559/outOfFundsOldTypes.json",
         "stEIP1559/senderBalance.json",
+        "stEIP1559/tipTooHigh.json",
+        "stEIP1559/transactionIntinsicBug_Paris.json",
+        "stEIP1559/transactionIntinsicBug.json",
+        "stEIP1559/valCausesOOF.json",
         "stEIP158Specific/callToEmptyThenCallErrorParis.json",
         "stEIP158Specific/EXP_Empty.json",
         "stEIP158Specific/EXTCODESIZE_toEpmty.json",
@@ -664,10 +702,17 @@ fn ethereum_tests() {
         "stEIP2930/manualCreate.json",
         "stEIP2930/transactionCosts.json",
         "stEIP3607/initCollidingWithNonEmptyAccount.json",
+        "stEIP3607/transactionCollidingWithNonEmptyAccount_calls.json",
+        "stEIP3607/transactionCollidingWithNonEmptyAccount_callsItself.json",
+        "stEIP3607/transactionCollidingWithNonEmptyAccount_init_Paris.json",
+        "stEIP3607/transactionCollidingWithNonEmptyAccount_init.json",
+        "stEIP3607/transactionCollidingWithNonEmptyAccount_send_Paris.json",
+        "stEIP3607/transactionCollidingWithNonEmptyAccount_send.json",
         "stExample/accessListExample.json",
         "stExample/add11_yml.json",
         "stExample/add11.json",
         "stExample/indexesOmitExample.json",
+        "stExample/invalidTr.json",
         "stExample/labelsExample.json",
         "stExample/mergeTest.json",
         "stExample/rangesExample.json",
@@ -2179,7 +2224,7 @@ fn ethereum_tests() {
         "VMTests/vmTests/swap.json",
     ];
     for test in state_tests {
-        let path = path_prefix.clone() + test;
+        let path = path_prefix.clone() + &test;
         let raw_content = fs::read_to_string(Path::new(&path))
             .unwrap_or_else(|_| panic!("Cannot read suite: {:?}", test));
         let parsed_suite: TestSuite = serde_json::from_str(&raw_content)
