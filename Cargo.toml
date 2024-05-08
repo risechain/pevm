@@ -11,6 +11,7 @@ revm = { git = "https://github.com/risechain/revm", rev = "ea65d5a6316958a80803e
 revme = { git = "https://github.com/risechain/revm", rev = "ea65d5a6316958a80803e9a90db22aa3e74c5194" }
 serde_json = { version = "1.0.116" }
 stacker = "0.1.15"
+walkdir = "2.5.0"
 
 [lints]
 rust.missing_debug_implementations = "warn"

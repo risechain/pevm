@@ -388,6 +388,7 @@ dependencies = [
  "revme",
  "serde_json",
  "stacker",
+ "walkdir",
 ]
 
 [[package]]
