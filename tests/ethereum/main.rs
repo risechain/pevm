@@ -122,80 +122,81 @@ fn run_test_unit(unit: TestUnit) {
             ) {
                 // Tests that expect execution to fail -> match error
                 (Some(exception), Err(error)) => {
-                    if let EVMError::Transaction(inner) = error {
-                        if exception.contains("TR_TypeNotSupported") {
-                            continue;
-                        }
-
-                        match inner {
-                            InvalidTransaction::GasPriceLessThanBasefee => {
-                                assert!(
-                                    exception.contains("INSUFFICIENT_MAX_FEE_PER_GAS")
-                                        || exception.contains("TR_FeeCapLessThanBlocks")
-                                )
-                            }
-                            InvalidTransaction::CallGasCostMoreThanGasLimit => {
-                                assert!(
-                                    exception.contains("INTRINSIC_GAS_TOO_LOW")
-                                        || exception.contains("TR_NoFundsOrGas")
-                                        || exception.contains("IntrinsicGas")
-                                )
-                            }
-                            InvalidTransaction::LackOfFundForMaxFee { .. } => {
-                                assert!(
-                                    exception.contains("INSUFFICIENT_ACCOUNT_FUNDS")
-                                        || exception.contains("TR_NoFunds")
-                                )
-                            }
-                            InvalidTransaction::OverflowPaymentInTransaction => {
-                                assert!(exception.contains("TR_NoFundsX"))
-                            }
-                            InvalidTransaction::CreateInitCodeSizeLimit => {
-                                assert!(
-                                    exception.contains("INITCODE_SIZE_EXCEEDED")
-                                        || exception.contains("TR_InitCodeLimitExceeded")
-                                )
-                            }
-                            InvalidTransaction::MaxFeePerBlobGasNotSupported => {
-                                assert!(exception.contains("TYPE_3_TX_PRE_FORK"))
-                            }
-                            InvalidTransaction::BlobVersionedHashesNotSupported => {
-                                assert!(exception.contains("TYPE_3_TX_PRE_FORK"))
-                            }
-                            InvalidTransaction::BlobGasPriceGreaterThanMax => {
-                                assert!(exception.contains("INSUFFICIENT_MAX_FEE_PER_BLOB_GAS"))
-                            }
-                            InvalidTransaction::EmptyBlobs => {
-                                assert!(
-                                    exception.contains("TYPE_3_TX_ZERO_BLOBS")
-                                        || exception.contains("TR_EMPTYBLOB")
-                                )
-                            }
-                            InvalidTransaction::TooManyBlobs { .. } => {
-                                assert!(
-                                    exception.contains("TYPE_3_TX_BLOB_COUNT_EXCEEDED")
-                                        || exception.contains("TR_BLOBLIST_OVERSIZE")
-                                )
-                            }
-                            InvalidTransaction::BlobVersionNotSupported => {
-                                assert!(
-                                    exception.contains("TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH")
-                                        || exception.contains("TR_BLOBVERSION_INVALID")
-                                )
-                            }
-                            InvalidTransaction::BlobCreateTransaction => {
-                                assert!(exception.contains("TR_BLOBCREATE"))
-                            }
-                            InvalidTransaction::PriorityFeeGreaterThanMaxFee => {
-                                assert!(exception.contains("TR_TipGtFeeCap"))
-                            }
-                            InvalidTransaction::RejectCallerWithCode => {
-                                assert!(exception.contains("SenderNotEOA"))
-                            }
-                            other => panic!("expected {:?}, got {:?}", exception, other),
-                        }
-                    } else {
-                        panic!("unexpected EVMError: {:?}", error);
+                    // TODO: Ideally the REVM errors would match the descriptive expectations more.
+                    if exception != "TR_TypeNotSupported" && !matches!(
+                        (exception.as_str(), &error),
+                        (
+                            "TR_BLOBLIST_OVERSIZE",
+                            EVMError::Transaction(InvalidTransaction::TooManyBlobs{..})
+                        ) | (
+                            "TR_BLOBCREATE",
+                            EVMError::Transaction(InvalidTransaction::BlobCreateTransaction)
+                        ) | (
+                            "TR_EMPTYBLOB",
+                            EVMError::Transaction(InvalidTransaction::EmptyBlobs)
+                        ) | (
+                            "TR_BLOBVERSION_INVALID",
+                            EVMError::Transaction(InvalidTransaction::BlobVersionNotSupported)
+                        ) | (
+                            "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS",
+                            EVMError::Transaction(InvalidTransaction::MaxFeePerBlobGasNotSupported)
+                        )| (
+                            "TransactionException.TYPE_3_TX_PRE_FORK",
+                            EVMError::Transaction(InvalidTransaction::BlobVersionedHashesNotSupported)
+                        ) | (
+                            "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS",
+                            EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee{..})
+                        )| (
+                            "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH",
+                            EVMError::Transaction(InvalidTransaction::BlobVersionNotSupported)
+                        )| (
+                            "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS",
+                            EVMError::Transaction(InvalidTransaction::GasPriceLessThanBasefee)
+                        )| (
+                            "TransactionException.TYPE_3_TX_ZERO_BLOBS",
+                            EVMError::Transaction(InvalidTransaction::EmptyBlobs)
+                        )| (
+                            "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED",
+                            EVMError::Transaction(InvalidTransaction::TooManyBlobs{..})
+                        )| (
+                            "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS",
+                            EVMError::Transaction(InvalidTransaction::BlobGasPriceGreaterThanMax)
+                        )| (
+                            "TransactionException.INITCODE_SIZE_EXCEEDED",
+                            EVMError::Transaction(InvalidTransaction::CreateInitCodeSizeLimit)
+                        )| (
+                            "TransactionException.INTRINSIC_GAS_TOO_LOW",
+                            EVMError::Transaction(InvalidTransaction::CallGasCostMoreThanGasLimit)
+                        )| (
+                            "TR_InitCodeLimitExceeded",
+                            EVMError::Transaction(InvalidTransaction::CreateInitCodeSizeLimit)
+                        )| (
+                            "TR_IntrinsicGas",
+                            EVMError::Transaction(InvalidTransaction::CallGasCostMoreThanGasLimit)
+                        )| (
+                            "TR_FeeCapLessThanBlocks",
+                            EVMError::Transaction(InvalidTransaction::GasPriceLessThanBasefee)
+                        )| (
+                            "TR_NoFunds",
+                            EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee{..})
+                        )| (
+                            "TR_TipGtFeeCap",
+                            EVMError::Transaction(InvalidTransaction::PriorityFeeGreaterThanMaxFee)
+                        )| (
+                            "SenderNotEOA",
+                            EVMError::Transaction(InvalidTransaction::RejectCallerWithCode)
+                        )| (
+                            "TR_NoFundsX",
+                            EVMError::Transaction(InvalidTransaction::OverflowPaymentInTransaction)
+                        )| (
+                            "TR_NoFundsOrGas",
+                            EVMError::Transaction(InvalidTransaction::CallGasCostMoreThanGasLimit)
+                        )| (
+                            "IntrinsicGas",
+                            EVMError::Transaction(InvalidTransaction::CallGasCostMoreThanGasLimit)
+                        )
+                    ) {
+                        panic!("\nUnmatched error!\nExpected: {:?}\nGot: {:?}", exception, error);
                     }
                 }
                 // Tests that exepect execution to succeed -> match post state root
