@@ -1,6 +1,7 @@
 // Basing this off REVM's bins/revme/src/cmd/statetest/runner.rs
 
 use block_stm_revm::{BlockSTM, Storage};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::{
     calc_excess_blob_gas, Account, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode,
@@ -13,7 +14,7 @@ use revme::cmd::statetest::{
     merkle_trie::{log_rlp_hash, state_merkle_trie_root},
     utils::recover_address,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{collections::HashMap, fs, num::NonZeroUsize};
 use walkdir::{DirEntry, WalkDir};
 
@@ -271,7 +272,7 @@ fn should_skip_test(path: &Path) -> bool {
         "stTimeConsuming/sstore_combinations_initial21_2.json",
         "stTimeConsuming/sstore_combinations_initial21_Paris.json",
         "stTimeConsuming/sstore_combinations_initial21.json",
-        
+
         // failed
         "Cancun/stEIP1153-transientStorage/01_tloadBeginningTxn.json",
         "Cancun/stEIP1153-transientStorage/03_tloadAfterStoreIs0.json",
@@ -1079,26 +1080,22 @@ fn should_skip_test(path: &Path) -> bool {
 
 #[test]
 fn ethereum_tests() {
-    // TODO: Run the whole suite.
-    // Skip tests like REVM does when it makes sense.
-    // Let's document clearly why for each test that we skip.
-
-    let paths: Vec<PathBuf> = WalkDir::new("tests/ethereum/tests/GeneralStateTests")
+    WalkDir::new("tests/ethereum/tests/GeneralStateTests")
         .into_iter()
         .filter_map(Result::ok)
         .map(DirEntry::into_path)
         .filter(|path| path.extension() == Some("json".as_ref()))
         .filter(|path| !should_skip_test(path))
-        .collect();
-
-    for path in paths {
-        println!("Running: {path:?}");
-        let raw_content =
-            fs::read_to_string(&path).unwrap_or_else(|_| panic!("Cannot read suite: {:?}", path));
-        let TestSuite(suite) = serde_json::from_str(&raw_content)
-            .unwrap_or_else(|_| panic!("Cannot parse suite: {:?}", path));
-        for (_, unit) in suite {
-            run_test_unit(unit)
-        }
-    }
+        .collect::<Vec<_>>()
+        .par_iter() // TODO: Further improve test speed
+        .for_each(|path| {
+            println!("Running: {path:?}");
+            let raw_content = fs::read_to_string(path)
+                .unwrap_or_else(|_| panic!("Cannot read suite: {:?}", path));
+            let TestSuite(suite) = serde_json::from_str(&raw_content)
+                .unwrap_or_else(|_| panic!("Cannot parse suite: {:?}", path));
+            for (_, unit) in suite {
+                run_test_unit(unit)
+            }
+        });
 }

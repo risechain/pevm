@@ -46,5 +46,5 @@ Finally, while Aptos and Polygon embed their Block-STM implementation directly i
 $ git submodule update --init
 # Our tests are heavy, avoid running them in parallel to not risk nuking RAM.
 # Each parallel test still executes parallelly up to the number of CPUs anyway.
-$ cargo test --release beneficiary -- --test-threads=1
+$ cargo test --release -- --test-threads=1
 ```
