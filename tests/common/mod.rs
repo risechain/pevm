@@ -23,6 +23,7 @@ fn eq_evm_errors<DBError1, DBError2>(e1: &EVMError<DBError1>, e2: &EVMError<DBEr
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
+#[allow(dead_code)]
 pub(crate) fn mock_account(idx: usize) -> (Address, Account) {
     let address = Address::from(U160::from(idx));
     (
@@ -86,6 +87,7 @@ fn execute_sequential(
 
 // Execute a list of transactions sequentially & with BlockSTM and assert that
 // the execution results match.
+#[allow(dead_code)]
 pub(crate) fn test_txs(
     accounts: &[(Address, Account)],
     spec_id: SpecId,
