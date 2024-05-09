@@ -298,6 +298,7 @@ impl Vm {
                     .iter()
                     .flat_map(|(address, account)| {
                         let mut writes = Vec::new();
+                        // TODO: Confirm if we're handling self-destructed accounts correctly.
                         if account.is_info_changed() {
                             // TODO: More granularity here to ensure we only notify new
                             // memory writes, for instance, only an account's balance instead
