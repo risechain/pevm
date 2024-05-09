@@ -236,10 +236,10 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     assert_eq!(logs_root, test.logs, "Mismatched logs root for {path:?}");
 
                     for (address, account) in state {
-                        if account.is_empty() || !account.is_touched() {
+                        if !account.is_touched() {
                             continue;
                         }
-                        if account.is_selfdestructed() {
+                        if account.is_empty() || account.is_selfdestructed() {
                             chain_state.remove(&address);
                         } else {
                             let chain_state_account = chain_state.entry(address).or_default();
@@ -277,7 +277,6 @@ fn should_skip_test(path: &Path) -> bool {
         "stCreate2/create2collisionStorageParis.json",
         "stCreateTest/CreateTransactionHighNonce.json",
         "stEIP1559/typeTwoBerlin.json",
-        "stEIP158Specific/callToEmptyThenCallError.json",
         "stExample/basefeeExample.json",
         "stExample/eip1559.json",
         "stExtCodeHash/dynamicAccountOverwriteEmpty.json",
@@ -287,42 +286,11 @@ fn should_skip_test(path: &Path) -> bool {
         "stRevertTest/RevertInCreateInInit.json",
         "stRevertTest/RevertInCreateInInit_Paris.json",
         "stRevertTest/RevertPrecompiledTouch.json",
-        "stRevertTest/RevertPrecompiledTouchExactOOG.json",
         "stRevertTest/RevertPrecompiledTouch_storage.json",
-        "stRevertTest/RevertPrefoundEmptyCall.json",
-        "stRevertTest/TouchToEmptyAccountRevert2.json",
-        "stRevertTest/TouchToEmptyAccountRevert3.json",
         "stSStoreTest/InitCollision.json",
         "stSStoreTest/InitCollisionParis.json",
-        "stSpecialTest/failed_tx_xcf416c53.json",
-        "stSystemOperationsTest/doubleSelfdestructTouch.json",
-        "stTimeConsuming/sstore_combinations_initial00.json",
-        "stTimeConsuming/sstore_combinations_initial00_2.json",
-        "stTimeConsuming/sstore_combinations_initial01.json",
-        "stTimeConsuming/sstore_combinations_initial01_2.json",
-        "stTimeConsuming/sstore_combinations_initial10.json",
-        "stTimeConsuming/sstore_combinations_initial10_2.json",
-        "stTimeConsuming/sstore_combinations_initial11.json",
-        "stTimeConsuming/sstore_combinations_initial11_2.json",
-        "stTimeConsuming/sstore_combinations_initial20.json",
-        "stTimeConsuming/sstore_combinations_initial20_2.json",
-        "stTimeConsuming/sstore_combinations_initial21.json",
-        "stTimeConsuming/sstore_combinations_initial21_2.json",
         "stTransactionTest/ValueOverflow.json",
         "stTransactionTest/ValueOverflowParis.json",
-        "stZeroCallsTest/ZeroValue_CALL_ToEmpty.json",
-        "stZeroCallsTest/ZeroValue_CALL_ToOneStorageKey.json",
-        "stZeroCallsTest/ZeroValue_SUICIDE_ToEmpty.json",
-        "stZeroCallsTest/ZeroValue_SUICIDE_ToOneStorageKey.json",
-        "stZeroCallsTest/ZeroValue_TransactionCALL_ToEmpty.json",
-        "stZeroCallsTest/ZeroValue_TransactionCALL_ToOneStorageKey.json",
-        "stZeroCallsTest/ZeroValue_TransactionCALLwithData_ToEmpty.json",
-        "stZeroCallsTest/ZeroValue_TransactionCALLwithData_ToOneStorageKey.json",
-        "stZeroKnowledge/ecmul_1-3_0_28000_80.json",
-        "stZeroKnowledge/ecpairing_inputs.json",
-        "stZeroKnowledge2/ecadd_0-0_0-0_21000_80.json",
-        "stZeroKnowledge2/ecadd_1-3_0-0_25000_80.json",
-        "stZeroKnowledge2/ecmul_0-3_5616_28000_96.json",
     ]
     .into_iter()
     .any(|test_name| path.ends_with(test_name))
