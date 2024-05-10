@@ -297,17 +297,20 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
 
 fn should_skip_test(path: &Path) -> bool {
     [
-        // These tests are passed but time consuming, uncomment to skip them:
+        // Unreasonable tests, even Geth skips these!
+        // https://github.com/etclabscore/go-ethereum/blob/52059f1ce339b5d5ae4269c6fde8ce54051705a5/tests/state_test.go#L679-L690
+        "stRevertTest/RevertPrecompiledTouch.json",
+        "stRevertTest/RevertPrecompiledTouch_storage.json",
+        // Expected parser failures, REVM also skips them.
+        // https://github.com/bluealloy/revm/blob/1914696de833600f28d895be6c2621714402419c/bins/revme/src/cmd/statetest/runner.rs#L81-L83
+        "stTransactionTest/ValueOverflow.json",
+        "stTransactionTest/ValueOverflowParis.json",
+        //
+        // We can temporarily add time-consuming tests for quicker development; samples:
         // "stTimeConsuming/CALLBlake2f_MaxRounds.json",
         // "stTimeConsuming/static_Call50000_sha256.json",
         // "vmPerformance/loopMul.json",
         // "stQuadraticComplexityTest/Call50000_sha256.json",
-
-        // Failing
-        "stRevertTest/RevertPrecompiledTouch.json",
-        "stRevertTest/RevertPrecompiledTouch_storage.json",
-        "stTransactionTest/ValueOverflow.json",
-        "stTransactionTest/ValueOverflowParis.json",
     ]
     .into_iter()
     .any(|test_name| path.ends_with(test_name))
@@ -325,9 +328,9 @@ fn ethereum_tests() {
         .par_iter() // TODO: Further improve test speed
         .for_each(|path| {
             let raw_content = fs::read_to_string(path)
-                .unwrap_or_else(|_| panic!("Cannot read suite: {:?}", path));
+                .unwrap_or_else(|e| panic!("Cannot read suite {path:?}: {e:?}"));
             let TestSuite(suite) = serde_json::from_str(&raw_content)
-                .unwrap_or_else(|_| panic!("Cannot parse suite: {:?}", path));
+                .unwrap_or_else(|e| panic!("Cannot parse suite {path:?}: {e:?}"));
             for (_, unit) in suite {
                 run_test_unit(path, unit)
             }
