@@ -93,12 +93,10 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv,
 
 fn run_test_unit(path: &Path, unit: TestUnit) {
     for (spec_name, tests) in unit.post {
-        // TODO: Should REVM know and handle these better, or it is
-        // truly fine to just skip them?
-        if matches!(
-            spec_name,
-            SpecName::ByzantiumToConstantinopleAt5 | SpecName::Constantinople | SpecName::Unknown
-        ) {
+        // Constantinople was immediately extended by Petersburg.
+        // There was technically never a Constantinople transaction on mainnet
+        // so REVM undestandably doesn't support it (without Petersburg).
+        if spec_name == SpecName::Constantinople {
             continue;
         }
         let spec_id = spec_name.to_spec_id();
