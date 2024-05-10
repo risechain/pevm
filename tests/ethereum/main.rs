@@ -4,6 +4,7 @@
 use block_stm_revm::{BlockSTM, Storage};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
+use revm::primitives::ruint::ParseError;
 use revm::primitives::{
     calc_excess_blob_gas, Account, AccountInfo, AccountStatus, Address, BlobExcessGasAndPrice,
     BlockEnv, Bytecode, Bytes, EVMError, ExecutionResult, HaltReason, InvalidTransaction, Output,
@@ -17,6 +18,7 @@ use revme::cmd::statetest::{
     utils::recover_address,
 };
 use std::path::Path;
+use std::str::FromStr;
 use std::{collections::HashMap, fs, num::NonZeroUsize};
 use walkdir::{DirEntry, WalkDir};
 
@@ -46,8 +48,8 @@ fn build_block_env(env: &Env) -> BlockEnv {
     }
 }
 
-fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> TxEnv {
-    TxEnv {
+fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv, ParseError> {
+    Ok(TxEnv {
         caller: if let Some(address) = tx.sender {
             address
         } else if let Some(address) = recover_address(tx.secret_key.as_slice()) {
@@ -61,7 +63,7 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> TxEnv {
             Some(address) => TransactTo::Call(address),
             None => TransactTo::Create,
         },
-        value: tx.value[indexes.value],
+        value: U256::from_str(&tx.value[indexes.value])?,
         data: tx.data[indexes.data].clone(),
         nonce: Some(tx.nonce.saturating_to()),
         chain_id: Some(1), // Ethereum mainnet
@@ -86,7 +88,7 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> TxEnv {
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
         eof_initcodes: Vec::new(),
         eof_initcodes_hashed: HashMap::new(),
-    }
+    })
 }
 
 fn run_test_unit(path: &Path, unit: TestUnit) {
@@ -102,6 +104,11 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
         let spec_id = spec_name.to_spec_id();
 
         for test in tests {
+            let tx_env = build_tx_env(&unit.transaction, &test.indexes);
+            if test.expect_exception.as_deref() == Some("TR_RLP_WRONGVALUE") && tx_env.is_err() {
+                continue;
+            }
+
             // Ideally we only need an account representation for both cases
             // instead of using `PlainAccount` & `Account`. The former is used
             // simply to utilize REVM's test root calculation functions.
@@ -139,7 +146,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     block_stm_storage,
                     spec_id,
                     build_block_env(&unit.env),
-                    vec![build_tx_env(&unit.transaction, &test.indexes)],
+                    vec![tx_env.unwrap()],
                     NonZeroUsize::MIN,
                 ),
             ) {
@@ -300,10 +307,6 @@ fn should_skip_test(path: &Path) -> bool {
         // https://github.com/etclabscore/go-ethereum/blob/52059f1ce339b5d5ae4269c6fde8ce54051705a5/tests/state_test.go#L679-L690
         "stRevertTest/RevertPrecompiledTouch.json",
         "stRevertTest/RevertPrecompiledTouch_storage.json",
-        // Expected parser failures, REVM also skips them.
-        // https://github.com/bluealloy/revm/blob/1914696de833600f28d895be6c2621714402419c/bins/revme/src/cmd/statetest/runner.rs#L81-L83
-        "stTransactionTest/ValueOverflow.json",
-        "stTransactionTest/ValueOverflowParis.json",
         //
         // We can temporarily add time-consuming tests for quicker development; samples:
         // "stTimeConsuming/CALLBlake2f_MaxRounds.json",

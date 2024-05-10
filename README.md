@@ -38,6 +38,7 @@ Finally, while Aptos and Polygon embed their Block-STM implementation directly i
 - Add pre-provided metadata from a statically analysed mempool or upstream nodes.
 - Track read checkpoints to re-execute from there instead of re-executing the whole transaction upon conflicts.
 - Hyper-optimise the implementation at low system levels.
+- Support multiple EVM executors (REVM, JIT & AOT compilers, etc.).
 - Pass more relevant [ethereum/tests](https://github.com/ethereum/tests).
 
 ### Testing
