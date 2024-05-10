@@ -433,9 +433,9 @@ dependencies = [
 
 [[package]]
 name = "c-kzg"
-version = "1.0.0"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3130f3d8717cc02e668a896af24984d5d5d4e8bf12e278e982e0f1bd88a0f9af"
+checksum = "cdf100c4cea8f207e883ff91ca886d621d8a166cb04971dfaa9bb8fd99ed95df"
 dependencies = [
  "blst",
  "cc",
@@ -2107,7 +2107,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "8.0.0"
-source = "git+https://github.com/risechain/revm?rev=ea65d5a6316958a80803e9a90db22aa3e74c5194#ea65d5a6316958a80803e9a90db22aa3e74c5194"
+source = "git+https://github.com/risechain/revm?rev=626fe267f13347cf60407cf11fc947661abe774b#626fe267f13347cf60407cf11fc947661abe774b"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -2124,7 +2124,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "4.0.0"
-source = "git+https://github.com/risechain/revm?rev=ea65d5a6316958a80803e9a90db22aa3e74c5194#ea65d5a6316958a80803e9a90db22aa3e74c5194"
+source = "git+https://github.com/risechain/revm?rev=626fe267f13347cf60407cf11fc947661abe774b#626fe267f13347cf60407cf11fc947661abe774b"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -2133,7 +2133,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "6.0.0"
-source = "git+https://github.com/risechain/revm?rev=ea65d5a6316958a80803e9a90db22aa3e74c5194#ea65d5a6316958a80803e9a90db22aa3e74c5194"
+source = "git+https://github.com/risechain/revm?rev=626fe267f13347cf60407cf11fc947661abe774b#626fe267f13347cf60407cf11fc947661abe774b"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
@@ -2149,7 +2149,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "3.1.1"
-source = "git+https://github.com/risechain/revm?rev=ea65d5a6316958a80803e9a90db22aa3e74c5194#ea65d5a6316958a80803e9a90db22aa3e74c5194"
+source = "git+https://github.com/risechain/revm?rev=626fe267f13347cf60407cf11fc947661abe774b#626fe267f13347cf60407cf11fc947661abe774b"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
@@ -2169,7 +2169,7 @@ dependencies = [
 [[package]]
 name = "revme"
 version = "0.4.0"
-source = "git+https://github.com/risechain/revm?rev=ea65d5a6316958a80803e9a90db22aa3e74c5194#ea65d5a6316958a80803e9a90db22aa3e74c5194"
+source = "git+https://github.com/risechain/revm?rev=626fe267f13347cf60407cf11fc947661abe774b#626fe267f13347cf60407cf11fc947661abe774b"
 dependencies = [
  "alloy-rlp",
  "hash-db",

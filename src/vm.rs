@@ -192,6 +192,10 @@ impl Database for VmDb {
         self.storage.code_by_hash(code_hash)
     }
 
+    fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
+        self.storage.has_storage(address)
+    }
+
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         match self.read(
             &MemoryLocation::Storage((address, index)),

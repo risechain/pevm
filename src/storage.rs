@@ -44,6 +44,14 @@ impl Storage {
         }
     }
 
+    pub(crate) fn has_storage(&self, address: Address) -> Result<bool, ReadError> {
+        Ok(self
+            .accounts
+            .get(&address)
+            .map(|a| !a.storage.is_empty())
+            .unwrap_or(false))
+    }
+
     pub(crate) fn storage(&self, address: Address, index: U256) -> Result<U256, ReadError> {
         Ok(self
             .accounts
