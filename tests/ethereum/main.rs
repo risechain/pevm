@@ -5,8 +5,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::{
     calc_excess_blob_gas, Account, AccountInfo, AccountStatus, Address, BlobExcessGasAndPrice,
-    BlockEnv, Bytecode, EVMError, InvalidTransaction, ResultAndState, StorageSlot, TransactTo,
-    TxEnv, U256,
+    BlockEnv, Bytecode, EVMError, InvalidTransaction, ResultAndState, SpecId, StorageSlot,
+    TransactTo, TxEnv, U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -235,20 +235,26 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     let logs_root = log_rlp_hash(result.logs());
                     assert_eq!(logs_root, test.logs, "Mismatched logs root for {path:?}");
 
+                    // This is a good reference for a minimal state/DB commitment logic for
+                    // BlockSTM/REVM to meet the Ethereum specs throughout the eras.
                     for (address, account) in state {
                         if !account.is_touched() {
                             continue;
                         }
-                        if account.is_empty() || account.is_selfdestructed() {
+                        if account.is_selfdestructed()
+                            || (account.is_empty()
+                                && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON))
+                        {
                             chain_state.remove(&address);
-                        } else {
-                            let chain_state_account = chain_state.entry(address).or_default();
-                            chain_state_account.info = account.info;
-                            chain_state_account
-                                .storage
-                                .extend(account.storage.iter().map(|(k, v)| (*k, v.present_value)));
+                            continue;
                         }
+                        let chain_state_account = chain_state.entry(address).or_default();
+                        chain_state_account.info = account.info;
+                        chain_state_account
+                            .storage
+                            .extend(account.storage.iter().map(|(k, v)| (*k, v.present_value)));
                     }
+
                     let state_root =
                         state_merkle_trie_root(chain_state.iter().map(|(k, v)| (*k, v)));
                     assert_eq!(state_root, test.hash, "Mismatched state root for {path:?}");
@@ -270,7 +276,6 @@ fn should_skip_test(path: &Path) -> bool {
         // "stQuadraticComplexityTest/Call50000_sha256.json",
 
         // Failing
-        "stCallCodes/touchAndGo.json",
         "stCreate2/RevertInCreateInInitCreate2.json",
         "stCreate2/RevertInCreateInInitCreate2Paris.json",
         "stCreate2/create2collisionStorage.json",
@@ -281,8 +286,6 @@ fn should_skip_test(path: &Path) -> bool {
         "stExample/eip1559.json",
         "stExtCodeHash/dynamicAccountOverwriteEmpty.json",
         "stExtCodeHash/dynamicAccountOverwriteEmpty_Paris.json",
-        "stPreCompiledContracts2/CallEcrecover_Overflow.json",
-        "stRefundTest/refundResetFrontier.json",
         "stRevertTest/RevertInCreateInInit.json",
         "stRevertTest/RevertInCreateInInit_Paris.json",
         "stRevertTest/RevertPrecompiledTouch.json",
