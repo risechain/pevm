@@ -5,8 +5,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::{
     calc_excess_blob_gas, Account, AccountInfo, AccountStatus, Address, BlobExcessGasAndPrice,
-    BlockEnv, Bytecode, EVMError, InvalidTransaction, ResultAndState, SpecId, StorageSlot,
-    TransactTo, TxEnv, U256,
+    BlockEnv, Bytecode, EVMError, ExecutionResult, HaltReason, InvalidTransaction, ResultAndState,
+    SpecId, StorageSlot, SuccessReason, TransactTo, TxEnv, U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -135,7 +135,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             }
 
             match (
-                test.expect_exception,
+                test.expect_exception.as_deref(),
                 BlockSTM::run(
                     block_stm_storage,
                     spec_id,
@@ -144,11 +144,27 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     NonZeroUsize::MIN,
                 ),
             ) {
+                // Special cases where REVM returns `Ok` instead of `Err` on unsupported features.
+                // Requiring stopping or halting reasons for now.
+                (Some("TR_TypeNotSupported"), Ok(exec_results)) => {
+                    // TODO: We really should test with blocks with more than 1 tx
+                    assert!(exec_results.len() == 1);
+                    assert!(matches!(
+                        exec_results[0].result,
+                        ExecutionResult::Halt {
+                            reason: HaltReason::NotActivated,
+                            ..
+                        } | ExecutionResult::Success {
+                            reason: SuccessReason::Stop,
+                            ..
+                        }
+                    ));
+                }
                 // Tests that expect execution to fail -> match error
                 (Some(exception), Err(error)) => {
                     // TODO: Ideally the REVM errors would match the descriptive expectations more.
                     if exception != "TR_TypeNotSupported" && !matches!(
-                        (exception.as_str(), &error),
+                        (exception, &error),
                         (
                             "TR_BLOBLIST_OVERSIZE",
                             EVMError::Transaction(InvalidTransaction::TooManyBlobs{..})
@@ -276,12 +292,9 @@ fn should_skip_test(path: &Path) -> bool {
         // "stQuadraticComplexityTest/Call50000_sha256.json",
 
         // Failing
-        "stExample/eip1559.json",
-        "stExample/basefeeExample.json",
-        "stRevertTest/RevertPrecompiledTouch_storage.json",
-        "stRevertTest/RevertPrecompiledTouch.json",
         "stCreateTest/CreateTransactionHighNonce.json",
-        "stEIP1559/typeTwoBerlin.json",
+        "stRevertTest/RevertPrecompiledTouch.json",
+        "stRevertTest/RevertPrecompiledTouch_storage.json",
         "stTransactionTest/ValueOverflow.json",
         "stTransactionTest/ValueOverflowParis.json",
     ]
