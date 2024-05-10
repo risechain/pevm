@@ -5,8 +5,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::{
     calc_excess_blob_gas, Account, AccountInfo, AccountStatus, Address, BlobExcessGasAndPrice,
-    BlockEnv, Bytecode, EVMError, ExecutionResult, HaltReason, InvalidTransaction, ResultAndState,
-    SpecId, StorageSlot, SuccessReason, TransactTo, TxEnv, U256,
+    BlockEnv, Bytecode, Bytes, EVMError, ExecutionResult, HaltReason, InvalidTransaction, Output,
+    ResultAndState, SpecId, StorageSlot, SuccessReason, TransactTo, TxEnv, U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -144,6 +144,18 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     NonZeroUsize::MIN,
                 ),
             ) {
+                // EIP-2681
+                (Some("TR_NonceHasMaxValue"), Ok(exec_results)) => {
+                    // TODO: We really should test with blocks with more than 1 tx
+                    assert!(exec_results.len() == 1);
+                    assert!(match exec_results[0].result.clone() {
+                        ExecutionResult::Success {
+                            output: Output::Create(b, None),
+                            ..
+                        } => b == Bytes::new(),
+                        _ => false,
+                    });
+                }
                 // Special cases where REVM returns `Ok` instead of `Err` on unsupported features.
                 // Requiring stopping or halting reasons for now.
                 (Some("TR_TypeNotSupported"), Ok(exec_results)) => {
@@ -160,7 +172,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                         }
                     ));
                 }
-                // Tests that expect execution to fail -> match error
+                // Remaining tests that expect execution to fail -> match error
                 (Some(exception), Err(error)) => {
                     // TODO: Ideally the REVM errors would match the descriptive expectations more.
                     if exception != "TR_TypeNotSupported" && !matches!(
@@ -292,7 +304,6 @@ fn should_skip_test(path: &Path) -> bool {
         // "stQuadraticComplexityTest/Call50000_sha256.json",
 
         // Failing
-        "stCreateTest/CreateTransactionHighNonce.json",
         "stRevertTest/RevertPrecompiledTouch.json",
         "stRevertTest/RevertPrecompiledTouch_storage.json",
         "stTransactionTest/ValueOverflow.json",
