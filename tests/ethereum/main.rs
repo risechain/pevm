@@ -301,23 +301,6 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
     }
 }
 
-fn should_skip_test(path: &Path) -> bool {
-    [
-        // Unreasonable tests, even Geth skips these!
-        // https://github.com/etclabscore/go-ethereum/blob/52059f1ce339b5d5ae4269c6fde8ce54051705a5/tests/state_test.go#L679-L690
-        "stRevertTest/RevertPrecompiledTouch.json",
-        "stRevertTest/RevertPrecompiledTouch_storage.json",
-        //
-        // We can temporarily add time-consuming tests for quicker development; samples:
-        // "stTimeConsuming/CALLBlake2f_MaxRounds.json",
-        // "stTimeConsuming/static_Call50000_sha256.json",
-        // "vmPerformance/loopMul.json",
-        // "stQuadraticComplexityTest/Call50000_sha256.json",
-    ]
-    .into_iter()
-    .any(|test_name| path.ends_with(test_name))
-}
-
 #[test]
 fn ethereum_state_tests() {
     WalkDir::new("tests/ethereum/tests/GeneralStateTests")
@@ -325,7 +308,11 @@ fn ethereum_state_tests() {
         .filter_map(Result::ok)
         .map(DirEntry::into_path)
         .filter(|path| path.extension() == Some("json".as_ref()))
-        .filter(|path| !should_skip_test(path))
+        // For development, we can further filter to run a small set of tests,
+        // or filter out time-consuming tests like:
+        //   - stTimeConsuming/**
+        //   - vmPerformance/loopMul.json
+        //   - stQuadraticComplexityTest/Call50000_sha256.json
         .collect::<Vec<_>>()
         .par_iter() // TODO: Further improve test speed
         .for_each(|path| {

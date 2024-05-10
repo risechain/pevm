@@ -2107,7 +2107,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "8.0.0"
-source = "git+https://github.com/risechain/revm?rev=306195d3321ac7a63f099b1e2be031057990d4ca#306195d3321ac7a63f099b1e2be031057990d4ca"
+source = "git+https://github.com/risechain/revm?rev=57f3d3f85a2e80ff5633c8994b5a2f59bf467273#57f3d3f85a2e80ff5633c8994b5a2f59bf467273"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -2124,7 +2124,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "4.0.0"
-source = "git+https://github.com/risechain/revm?rev=306195d3321ac7a63f099b1e2be031057990d4ca#306195d3321ac7a63f099b1e2be031057990d4ca"
+source = "git+https://github.com/risechain/revm?rev=57f3d3f85a2e80ff5633c8994b5a2f59bf467273#57f3d3f85a2e80ff5633c8994b5a2f59bf467273"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -2133,7 +2133,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "6.0.0"
-source = "git+https://github.com/risechain/revm?rev=306195d3321ac7a63f099b1e2be031057990d4ca#306195d3321ac7a63f099b1e2be031057990d4ca"
+source = "git+https://github.com/risechain/revm?rev=57f3d3f85a2e80ff5633c8994b5a2f59bf467273#57f3d3f85a2e80ff5633c8994b5a2f59bf467273"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
@@ -2149,7 +2149,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "3.1.1"
-source = "git+https://github.com/risechain/revm?rev=306195d3321ac7a63f099b1e2be031057990d4ca#306195d3321ac7a63f099b1e2be031057990d4ca"
+source = "git+https://github.com/risechain/revm?rev=57f3d3f85a2e80ff5633c8994b5a2f59bf467273#57f3d3f85a2e80ff5633c8994b5a2f59bf467273"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
@@ -2169,7 +2169,7 @@ dependencies = [
 [[package]]
 name = "revme"
 version = "0.4.0"
-source = "git+https://github.com/risechain/revm?rev=306195d3321ac7a63f099b1e2be031057990d4ca#306195d3321ac7a63f099b1e2be031057990d4ca"
+source = "git+https://github.com/risechain/revm?rev=57f3d3f85a2e80ff5633c8994b5a2f59bf467273#57f3d3f85a2e80ff5633c8994b5a2f59bf467273"
 dependencies = [
  "alloy-rlp",
  "hash-db",
