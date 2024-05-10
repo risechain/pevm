@@ -26,7 +26,6 @@ Finally, while Aptos and Polygon embed their Block-STM implementation directly i
 
 ### V1 TODO
 
-- Complete a robust version that passes all the relevant [ethereum/tests](https://github.com/ethereum/tests).
 - Design more tests for larger blocks with complex state transitions and dependencies (ERC-20 and Uniswap transactions, etc.); contribute upstream if appropriate.
 - Provide deep benchmarks, including a [Reth](https://github.com/paradigmxyz/reth) integration for syncing & building blocks.
 - Robust error handling.
@@ -39,6 +38,7 @@ Finally, while Aptos and Polygon embed their Block-STM implementation directly i
 - Add pre-provided metadata from a statically analysed mempool or upstream nodes.
 - Track read checkpoints to re-execute from there instead of re-executing the whole transaction upon conflicts.
 - Hyper-optimise the implementation at low system levels.
+- Pass more relevant [ethereum/tests](https://github.com/ethereum/tests).
 
 ### Testing
 

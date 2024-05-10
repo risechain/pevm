@@ -1,4 +1,5 @@
-// Basing this off REVM's bins/revme/src/cmd/statetest/runner.rs
+// Basing on REVM's bins/revme/src/cmd/statetest/runner.rs
+// https://github.com/bluealloy/revm/blob/main/bins/revme/src/cmd/statetest/runner.rs
 
 use block_stm_revm::{BlockSTM, Storage};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -107,8 +108,6 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             let mut chain_state: HashMap<Address, PlainAccount> = HashMap::new();
             let mut block_stm_storage = Storage::default();
 
-            // Shouldn't we parse accounts as `Account` instead of `AccountInfo`
-            // to have initial storage states?
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
                 let info =
@@ -317,7 +316,7 @@ fn should_skip_test(path: &Path) -> bool {
 }
 
 #[test]
-fn ethereum_tests() {
+fn ethereum_state_tests() {
     WalkDir::new("tests/ethereum/tests/GeneralStateTests")
         .into_iter()
         .filter_map(Result::ok)
