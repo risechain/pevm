@@ -8,8 +8,8 @@ dashmap = "5.5.3"
 rand = "0.8.5"
 rayon = "1.10.0"
 # TODO: Let's do our best to port needed changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "ea65d5a6316958a80803e9a90db22aa3e74c5194" }
-revme = { git = "https://github.com/risechain/revm", rev = "ea65d5a6316958a80803e9a90db22aa3e74c5194" }
+revm = { git = "https://github.com/risechain/revm", rev = "626fe267f13347cf60407cf11fc947661abe774b" }
+revme = { git = "https://github.com/risechain/revm", rev = "626fe267f13347cf60407cf11fc947661abe774b" }
 serde_json = { version = "1.0.116" }
 stacker = "0.1.15"
 walkdir = "2.5.0"

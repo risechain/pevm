@@ -90,7 +90,7 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> TxEnv {
 
 fn run_test_unit(path: &Path, unit: TestUnit) {
     for (spec_name, tests) in unit.post {
-        // Should REVM know and handle these better, or it is
+        // TODO: Should REVM know and handle these better, or it is
         // truly fine to just skip them?
         if matches!(
             spec_name,
@@ -276,22 +276,12 @@ fn should_skip_test(path: &Path) -> bool {
         // "stQuadraticComplexityTest/Call50000_sha256.json",
 
         // Failing
-        "stCreate2/RevertInCreateInInitCreate2.json",
-        "stCreate2/RevertInCreateInInitCreate2Paris.json",
-        "stCreate2/create2collisionStorage.json",
-        "stCreate2/create2collisionStorageParis.json",
+        "stExample/eip1559.json",
+        "stExample/basefeeExample.json",
+        "stRevertTest/RevertPrecompiledTouch_storage.json",
+        "stRevertTest/RevertPrecompiledTouch.json",
         "stCreateTest/CreateTransactionHighNonce.json",
         "stEIP1559/typeTwoBerlin.json",
-        "stExample/basefeeExample.json",
-        "stExample/eip1559.json",
-        "stExtCodeHash/dynamicAccountOverwriteEmpty.json",
-        "stExtCodeHash/dynamicAccountOverwriteEmpty_Paris.json",
-        "stRevertTest/RevertInCreateInInit.json",
-        "stRevertTest/RevertInCreateInInit_Paris.json",
-        "stRevertTest/RevertPrecompiledTouch.json",
-        "stRevertTest/RevertPrecompiledTouch_storage.json",
-        "stSStoreTest/InitCollision.json",
-        "stSStoreTest/InitCollisionParis.json",
         "stTransactionTest/ValueOverflow.json",
         "stTransactionTest/ValueOverflowParis.json",
     ]
