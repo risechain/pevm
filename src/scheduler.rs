@@ -1,5 +1,6 @@
 use std::{
     cmp::min,
+    collections::HashMap,
     sync::{
         // TODO: Fine-tune all atomic `Ordering`s.
         // We're starting with `Relaxed` for maximum performance
@@ -9,6 +10,8 @@ use std::{
         Mutex,
     },
 };
+
+use revm::primitives::{Address, TxEnv};
 
 use crate::{ExecutionTask, Task, TxIdx, TxIncarnation, TxVersion, ValidationTask};
 
@@ -27,6 +30,9 @@ pub(crate) enum TxIncarnationStatus {
     Executed(TxIncarnation),
     Aborting(TxIncarnation),
 }
+
+type TransactionsStatus = Vec<Mutex<TxIncarnationStatus>>;
+type TransactionsDependents = Vec<Mutex<Vec<TxIdx>>>;
 
 // The BlockSTM collaborative scheduler coordinates execution & validation
 // tasks among threads.
@@ -64,27 +70,50 @@ pub(crate) struct Scheduler {
     decrease_cnt: AtomicUsize,
     /// The most up-to-date incarnation number (initially 0) and
     /// the status of this incarnation.
-    transactions_status: Vec<Mutex<TxIncarnationStatus>>,
+    transactions_status: TransactionsStatus,
     /// The list of dependent transactions to resumne when the
     /// key transaction is re-executed.
-    transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
+    transactions_dependents: TransactionsDependents,
     /// Number of ongoing execution and validation tasks.
     num_active_tasks: AtomicUsize,
     /// Marker for completion
     done_marker: AtomicBool,
 }
 
+// TODO: Decide to run sequentially if there are too many dependencies in the block.
+fn preprocess_dependencies(txs: &[TxEnv]) -> (TransactionsStatus, TransactionsDependents) {
+    let block_size = txs.len();
+    let transactions_status: TransactionsStatus = (0..block_size)
+        .map(|_| Mutex::new(TxIncarnationStatus::ReadyToExecute(0)))
+        .collect();
+    let transactions_dependents: TransactionsDependents =
+        (0..block_size).map(|_| Mutex::new(Vec::new())).collect();
+
+    // Marking transactions from the same sender as dependents.
+    // TODO: Make this faster.
+    let mut tx_idxes_by_sender: HashMap<Address, Vec<TxIdx>> = HashMap::new();
+    for (tx_idx, tx) in txs.iter().enumerate() {
+        let sender_tx_idxes = tx_idxes_by_sender.entry(tx.caller).or_default();
+        if let Some(prev_idx) = sender_tx_idxes.last() {
+            *transactions_status[tx_idx].lock().unwrap() = TxIncarnationStatus::Aborting(0);
+            *transactions_dependents[*prev_idx].lock().unwrap() = vec![tx_idx];
+        }
+        sender_tx_idxes.push(tx_idx);
+    }
+
+    (transactions_status, transactions_dependents)
+}
+
 impl Scheduler {
-    pub(crate) fn new(block_size: usize) -> Self {
+    pub(crate) fn new(txs: &[TxEnv]) -> Self {
+        let (transactions_status, transactions_dependents) = preprocess_dependencies(txs);
         Self {
-            block_size,
+            block_size: txs.len(),
             execution_idx: AtomicUsize::new(0),
             validation_idx: AtomicUsize::new(0),
             decrease_cnt: AtomicUsize::new(0),
-            transactions_status: (0..block_size)
-                .map(|_| Mutex::new(TxIncarnationStatus::ReadyToExecute(0)))
-                .collect(),
-            transactions_dependents: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
+            transactions_status,
+            transactions_dependents,
             num_active_tasks: AtomicUsize::new(0),
             done_marker: AtomicBool::new(false),
         }
