@@ -1,5 +1,12 @@
-// Basing on REVM's bins/revme/src/cmd/statetest/runner.rs
-// https://github.com/bluealloy/revm/blob/main/bins/revme/src/cmd/statetest/runner.rs
+// Basing on https://github.com/bluealloy/revm/blob/main/bins/revme/src/cmd/statetest/runner.rs.
+// These tests may seem useless:
+// - They only have one transaction.
+// - REVM already tests them.
+// Nevertheless, they are important:
+// - REVM doesn't test very tightly (not matching on expected failures, skipping tests, etc.).
+// - We must use a REVM fork (for distinguishing explicit & implicit reads, etc.).
+// - We use custom handlers (for lazy-updating the beneficiary account, etc.) that require "re-testing".
+// - Help outline the minimal state commitment logic for BlockSTM.
 
 use block_stm_revm::{BlockSTM, Storage};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
