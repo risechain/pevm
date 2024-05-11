@@ -28,7 +28,7 @@ impl BlockSTM {
         concurrency_level: NonZeroUsize,
     ) -> Result<Vec<ResultAndState>, ExecutionError> {
         let block_size = txs.len();
-        let scheduler = Scheduler::new(block_size);
+        let scheduler = Scheduler::new(&txs);
         let mv_memory = Arc::new(MvMemory::new(block_size));
         let mut beneficiary_account_info = storage.basic(block_env.coinbase).unwrap_or_default();
         let vm = Vm::new(storage, spec_id, block_env.clone(), txs, mv_memory.clone());
