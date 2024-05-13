@@ -6,7 +6,7 @@ use revm::primitives::{
     alloy_primitives::U160, env::TxEnv, Account, Address, BlockEnv, SpecId, TransactTo, U256,
 };
 
-mod common;
+pub mod common;
 
 // Let's keep bumping this as execution performance improves,
 // to ensure that the heavyweight cases are well tested and to

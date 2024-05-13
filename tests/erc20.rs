@@ -7,7 +7,7 @@ use revm::primitives::{
     Bytecode, Bytes, SpecId, StorageSlot, TransactTo, TxEnv, B256, U256,
 };
 
-mod common;
+pub mod common;
 
 // Mock an ERC20 account and give each passed in user account a token
 fn mock_erc20_account(user_addresses: &[Address]) -> (Address, Account) {
