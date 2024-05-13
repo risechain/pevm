@@ -1,19 +1,13 @@
-//! Launch K clusters.
-//! Each cluster has M people.
-//! Each person makes N swaps.
+pub mod contract;
 
-pub mod common;
-
-use common::builders::contract::{
-    ERC20Token, SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9,
-};
+use crate::erc20::contract::ERC20Token;
+use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
 use revm::primitives::{
-    fixed_bytes, uint, Account, AccountInfo, Address, BlockEnv, Bytes, SpecId, TransactTo, TxEnv,
-    B256, U256,
+    fixed_bytes, uint, Account, AccountInfo, Address, Bytes, TransactTo, TxEnv, B256, U256,
 };
 use std::collections::HashMap;
 
-fn generate_cluster(
+pub fn generate_cluster(
     num_people: usize,
     num_swaps_per_person: usize,
 ) -> (Vec<(Address, Account)>, Vec<TxEnv>) {
@@ -171,20 +165,4 @@ fn generate_cluster(
     }
 
     (state, txs)
-}
-
-#[test]
-fn uniswap_clusters() {
-    const NUM_CLUSTERS: usize = 8;
-    const NUM_PEOPLE_PER_CLUSTER: usize = 4;
-    const NUM_SWAPS_PER_PERSON: usize = 16;
-
-    let mut final_state = Vec::from(&[(Address::ZERO, Account::default())]);
-    let mut final_txs = Vec::<TxEnv>::new();
-    for _ in 0..NUM_CLUSTERS {
-        let (state, txs) = generate_cluster(NUM_PEOPLE_PER_CLUSTER, NUM_SWAPS_PER_PERSON);
-        final_state.extend(state);
-        final_txs.extend(txs);
-    }
-    common::test_txs(&final_state, SpecId::LATEST, BlockEnv::default(), final_txs)
 }
