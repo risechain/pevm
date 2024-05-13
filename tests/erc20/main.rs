@@ -8,7 +8,7 @@ pub mod common;
 #[path = "./mod.rs"]
 pub mod erc20;
 
-use common::test_txs;
+use common::test_execute_revm;
 use erc20::generate_cluster;
 use revm::primitives::{Account, Address, BlockEnv, SpecId, TxEnv};
 
@@ -17,7 +17,7 @@ fn erc20_independent() {
     const N: usize = 1024;
     let (mut state, txs) = generate_cluster(N, 1, 1);
     state.push((Address::ZERO, Account::default()));
-    test_txs(&state, SpecId::LATEST, BlockEnv::default(), txs);
+    test_execute_revm(&state, SpecId::LATEST, BlockEnv::default(), txs);
 }
 
 #[test]
@@ -38,5 +38,5 @@ fn erc20_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_txs(&final_state, SpecId::LATEST, BlockEnv::default(), final_txs)
+    common::test_execute_revm(&final_state, SpecId::LATEST, BlockEnv::default(), final_txs)
 }

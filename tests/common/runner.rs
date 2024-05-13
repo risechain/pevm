@@ -1,4 +1,7 @@
-use block_stm_revm::{BlockSTM, Storage};
+use alloy_rpc_types::{Block, Header};
+use block_stm_revm::{
+    get_block_env, get_block_spec, get_tx_envs, BlockStmError, BlockStmResult, Storage,
+};
 use revm::{
     primitives::{
         alloy_primitives::U160, Account, AccountInfo, Address, BlockEnv, EVMError, ResultAndState,
@@ -8,17 +11,7 @@ use revm::{
 };
 use std::{convert::Infallible, num::NonZeroUsize, thread};
 
-// TODO: More elegant solution?
-fn eq_evm_errors<DBError1, DBError2>(e1: &EVMError<DBError1>, e2: &EVMError<DBError2>) -> bool {
-    match (e1, e2) {
-        (EVMError::Transaction(e1), EVMError::Transaction(e2)) => e1 == e2,
-        (EVMError::Header(e1), EVMError::Header(e2)) => e1 == e2,
-        (EVMError::Custom(e1), EVMError::Custom(e2)) => e1 == e2,
-        // We treat all database errors as inequality.
-        // Warning: This can be dangerous when `EVMError` introduces a new variation.
-        _ => false,
-    }
-}
+type SequentialExecutionResult = Result<Vec<ResultAndState>, EVMError<Infallible>>;
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -60,7 +53,7 @@ fn execute_sequential(
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: &[TxEnv],
-) -> Result<Vec<ResultAndState>, EVMError<Infallible>> {
+) -> SequentialExecutionResult {
     let mut results = Vec::new();
     for tx in txs {
         let mut evm = Evm::builder()
@@ -83,40 +76,76 @@ fn execute_sequential(
     Ok(results)
 }
 
-// Execute a list of transactions sequentially & with BlockSTM and assert that
-// the execution results match.
-pub fn test_txs(
-    accounts: &[(Address, Account)],
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    txs: Vec<TxEnv>,
+// TODO: More elegant solution?
+fn eq_evm_errors<DBError1, DBError2>(e1: &EVMError<DBError1>, e2: &EVMError<DBError2>) -> bool {
+    match (e1, e2) {
+        (EVMError::Transaction(e1), EVMError::Transaction(e2)) => e1 == e2,
+        (EVMError::Header(e1), EVMError::Header(e2)) => e1 == e2,
+        (EVMError::Custom(e1), EVMError::Custom(e2)) => e1 == e2,
+        // We treat all database errors as inequality.
+        // Warning: This can be dangerous when `EVMError` introduces a new variation.
+        _ => false,
+    }
+}
+
+fn assert_execution_result(
+    sequential_result: SequentialExecutionResult,
+    block_stm_result: BlockStmResult,
 ) {
-    // TODO: Decouple the (number of) prefilled accounts with the number of transactions.
-    let (sequential_db, block_stm_storage) = setup_storage(accounts);
-
-    let now = std::time::Instant::now();
-    let result_sequential = execute_sequential(sequential_db, spec_id, block_env.clone(), &txs);
-    println!("Sequential Execution Time: {:?}", now.elapsed());
-
-    let now = std::time::Instant::now();
-    let result_block_stm = BlockSTM::run(
-        block_stm_storage,
-        spec_id,
-        block_env,
-        txs,
-        thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
-    );
-    println!("Block-STM Execution Time: {:?}", now.elapsed());
-
-    match (result_sequential, result_block_stm) {
+    match (sequential_result, block_stm_result) {
         (Ok(sequential_results), Ok(parallel_results)) => {
             assert_eq!(sequential_results, parallel_results)
         }
         // TODO: Support extracting and comparing multiple errors in the input block.
         // This only works for now as most tests have just one (potentially error) transaction.
-        (Err(sequential_error), Err(parallel_error)) => {
+        (Err(sequential_error), Err(BlockStmError::ExecutionError(parallel_error))) => {
             assert!(eq_evm_errors(&sequential_error, &parallel_error))
         }
         _ => panic!("Block-STM's execution result doesn't match Sequential's"),
     };
+}
+
+// Execute an REVM block sequentially & with BlockSTM and assert that
+// the execution results match.
+pub fn test_execute_revm(
+    accounts: &[(Address, Account)],
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    txs: Vec<TxEnv>,
+) {
+    let (sequential_db, block_stm_storage) = setup_storage(accounts);
+    assert_execution_result(
+        execute_sequential(sequential_db, spec_id, block_env.clone(), &txs),
+        block_stm_revm::execute_revm(
+            block_stm_storage,
+            spec_id,
+            block_env,
+            txs,
+            thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
+        ),
+    );
+}
+
+// Execute an Alloy block sequentially & with BlockSTM and assert that
+// the execution results match.
+pub fn test_execute_alloy(
+    accounts: &[(Address, Account)],
+    block: Block,
+    parent_header: Option<Header>,
+) {
+    let (sequential_db, block_stm_storage) = setup_storage(accounts);
+    assert_execution_result(
+        execute_sequential(
+            sequential_db,
+            get_block_spec(&block.header).unwrap(),
+            get_block_env(&block.header, parent_header.as_ref()).unwrap(),
+            &get_tx_envs(&block.transactions).unwrap(),
+        ),
+        block_stm_revm::execute(
+            block_stm_storage,
+            block,
+            parent_header,
+            thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
+        ),
+    );
 }

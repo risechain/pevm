@@ -100,8 +100,10 @@ enum Task {
 }
 
 mod block_stm;
-pub use block_stm::BlockSTM;
+pub use block_stm::{execute, execute_revm, BlockStmError, BlockStmResult};
 mod mv_memory;
+mod primitives;
+pub use primitives::{get_block_env, get_block_spec, get_tx_envs};
 mod scheduler;
 mod storage;
 pub use storage::Storage;

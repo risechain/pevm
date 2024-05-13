@@ -8,7 +8,7 @@
 // - We use custom handlers (for lazy-updating the beneficiary account, etc.) that require "re-testing".
 // - Help outline the minimal state commitment logic for BlockSTM.
 
-use block_stm_revm::{BlockSTM, Storage};
+use block_stm_revm::{BlockStmError, Storage};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
@@ -147,7 +147,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
 
             match (
                 test.expect_exception.as_deref(),
-                BlockSTM::run(
+                block_stm_revm::execute_revm(
                     block_stm_storage,
                     spec_id,
                     build_block_env(&unit.env),
@@ -184,7 +184,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     ));
                 }
                 // Remaining tests that expect execution to fail -> match error
-                (Some(exception), Err(error)) => {
+                (Some(exception), Err(BlockStmError::ExecutionError(error))) => {
                     // TODO: Ideally the REVM errors would match the descriptive expectations more.
                     if exception != "TR_TypeNotSupported" && !matches!(
                         (exception, &error),

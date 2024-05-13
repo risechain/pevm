@@ -17,7 +17,7 @@ fn test_beneficiary(get_address: fn(usize) -> Address) {
     // Mock the beneficiary account (`Address:ZERO`) and the next `BLOCK_SIZE` user accounts.
     let accounts: Vec<(Address, Account)> = (0..=BLOCK_SIZE).map(common::mock_account).collect();
 
-    common::test_txs(
+    common::test_execute_revm(
         &accounts,
         SpecId::LATEST,
         BlockEnv::default(),
