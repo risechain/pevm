@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999d9efe259c47a34dde046952de795a8f6a" }
 dashmap = "5.5.3"
 rand = "0.8.5"
 rayon = "1.10.0"
