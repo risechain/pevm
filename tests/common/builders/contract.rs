@@ -140,6 +140,31 @@ impl ERC20Token {
             status: AccountStatus::default(),
         }
     }
+
+    // $ forge inspect ERC20Token methods
+    // {
+    //   "allowance(address,address)": "dd62ed3e",
+    //   "approve(address,uint256)": "095ea7b3",
+    //   "balanceOf(address)": "70a08231",
+    //   "decimals()": "313ce567",
+    //   "decreaseAllowance(address,uint256)": "a457c2d7",
+    //   "increaseAllowance(address,uint256)": "39509351",
+    //   "name()": "06fdde03",
+    //   "symbol()": "95d89b41",
+    //   "totalSupply()": "18160ddd",
+    //   "transfer(address,uint256)": "a9059cbb",
+    //   "transferFrom(address,address,uint256)": "23b872dd"
+    // }
+    pub fn transfer(recipient: Address, amount: U256) -> Bytes {
+        Bytes::from(
+            [
+                &fixed_bytes!("a9059cbb")[..],
+                &B256::from(from_address(recipient))[..],
+                &B256::from(amount)[..],
+            ]
+            .concat(),
+        )
+    }
 }
 
 // @uniswap/v3-core/contracts/UniswapV3Factory.sol
