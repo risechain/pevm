@@ -200,7 +200,7 @@ impl Database for VmDb {
         match self.read(
             &MemoryLocation::Storage((address, index)),
             self.tx_idx,
-            false,
+            true,
         ) {
             Err(err) => Err(err),
             Ok(MemoryValue::Storage(value)) => Ok(value),
