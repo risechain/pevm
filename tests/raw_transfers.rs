@@ -5,7 +5,7 @@ use revm::primitives::{
     alloy_primitives::U160, env::TxEnv, Account, Address, BlockEnv, SpecId, TransactTo, U256,
 };
 
-mod common;
+pub mod common;
 
 #[test]
 fn raw_transfers_independent() {

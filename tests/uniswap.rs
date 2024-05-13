@@ -2,16 +2,11 @@
 //! Each cluster has M people.
 //! Each person makes N swaps.
 
-#[path = "../common/mod.rs"]
-mod common;
+pub mod common;
 
-mod builders {
-    pub(crate) mod contract;
-    pub(crate) mod storage;
-}
-
-use crate::builders::contract::UniswapV3Pool;
-use builders::contract::{ERC20Token, SingleSwap, SwapRouter, UniswapV3Factory, WETH9};
+use common::builders::contract::{
+    ERC20Token, SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9,
+};
 use revm::primitives::{
     fixed_bytes, uint, Account, AccountInfo, Address, BlockEnv, Bytes, SpecId, TransactTo, TxEnv,
     B256, U256,

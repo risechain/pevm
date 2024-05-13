@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-
-use super::storage::{from_indices, from_short_string, from_tick};
-use crate::builders::storage::{from_address, StorageBuilder};
+use super::storage::{from_address, from_indices, from_short_string, from_tick, StorageBuilder};
 use revm::primitives::{
     fixed_bytes,
     hex::{FromHex, ToHexExt},
@@ -9,6 +6,7 @@ use revm::primitives::{
     ruint::UintTryFrom,
     uint, Account, AccountInfo, AccountStatus, Address, Bytecode, Bytes, FixedBytes, B256, U256,
 };
+use std::collections::HashMap;
 
 const POOL_FEE: u32 = 3000;
 const TICK_SPACING: i32 = 60;
@@ -26,10 +24,11 @@ fn keccak256_all(chunks: &[&[u8]]) -> B256 {
 }
 
 // @gnosis/canonical-weth/contracts/WETH9.sol
-pub(crate) struct WETH9 {}
+#[derive(Debug, Default)]
+pub struct WETH9 {}
 
 impl WETH9 {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {}
     }
     // | Name      | Type                                            | Slot | Offset | Bytes |
@@ -39,7 +38,7 @@ impl WETH9 {
     // | decimals  | uint8                                           | 2    | 0      | 1     |
     // | balanceOf | mapping(address => uint256)                     | 3    | 0      | 32    |
     // | allowance | mapping(address => mapping(address => uint256)) | 4    | 0      | 32    |
-    pub(crate) fn build(&self) -> Account {
+    pub fn build(&self) -> Account {
         let hex = WETH9.trim();
         let bytecode = Bytecode::new_raw(Bytes::from_hex(hex).unwrap());
 
@@ -59,7 +58,8 @@ impl WETH9 {
 }
 
 // @risechain/op-test-bench/foundry/src/ERC20Token.sol
-pub(crate) struct ERC20Token {
+#[derive(Debug, Default)]
+pub struct ERC20Token {
     name: String,
     symbol: String,
     decimals: U256,
@@ -69,7 +69,7 @@ pub(crate) struct ERC20Token {
 }
 
 impl ERC20Token {
-    pub(crate) fn new<U, V>(name: &str, symbol: &str, decimals: U, initial_supply: V) -> Self
+    pub fn new<U, V>(name: &str, symbol: &str, decimals: U, initial_supply: V) -> Self
     where
         U256: UintTryFrom<U>,
         U256: UintTryFrom<V>,
@@ -84,14 +84,14 @@ impl ERC20Token {
         }
     }
 
-    pub(crate) fn add_balances(&mut self, addresses: &[Address], amount: U256) -> &mut Self {
+    pub fn add_balances(&mut self, addresses: &[Address], amount: U256) -> &mut Self {
         for address in addresses {
             self.balances.insert(*address, amount);
         }
         self
     }
 
-    pub(crate) fn add_allowances(
+    pub fn add_allowances(
         &mut self,
         addresses: &[Address],
         spender: Address,
@@ -111,7 +111,7 @@ impl ERC20Token {
     // | _name        | string                                          | 3    | 0      | 32    |
     // | _symbol      | string                                          | 4    | 0      | 32    |
     // | _decimals    | uint8                                           | 5    | 0      | 1     |
-    pub(crate) fn build(&self) -> Account {
+    pub fn build(&self) -> Account {
         let hex = ERC20_TOKEN.trim();
         let bytecode = Bytecode::new_raw(Bytes::from_hex(hex).unwrap());
 
@@ -142,20 +142,22 @@ impl ERC20Token {
     }
 }
 
-pub(crate) struct UniswapV3Factory {
+// @uniswap/v3-core/contracts/UniswapV3Factory.sol
+#[derive(Debug, Default)]
+pub struct UniswapV3Factory {
     owner: Address,
     pools: HashMap<(Address, Address, U256), Address>,
 }
 
 impl UniswapV3Factory {
-    pub(crate) fn new(owner: Address) -> Self {
+    pub fn new(owner: Address) -> Self {
         Self {
             owner,
             pools: HashMap::new(),
         }
     }
 
-    pub(crate) fn add_pool(
+    pub fn add_pool(
         &mut self,
         token_0: Address,
         token_1: Address,
@@ -172,7 +174,7 @@ impl UniswapV3Factory {
     // | owner                | address                                                            | 3    | 0      | 20    |
     // | feeAmountTickSpacing | mapping(uint24 => int24)                                           | 4    | 0      | 32    |
     // | getPool              | mapping(address => mapping(address => mapping(uint24 => address))) | 5    | 0      | 32    |
-    pub(crate) fn build(&self, address: Address) -> Account {
+    pub fn build(&self, address: Address) -> Account {
         let hex = UNISWAP_V3_FACTORY.trim().replace(
             "0b748751e6f8b1a38c9386a19d9f8966b3593a9e",
             &address.encode_hex(),
@@ -217,7 +219,8 @@ impl UniswapV3Factory {
 }
 
 // @uniswap/v3-core/contracts/UniswapV3Pool.sol
-pub(crate) struct UniswapV3Pool {
+#[derive(Debug, Default)]
+pub struct UniswapV3Pool {
     token_0: Address,
     token_1: Address,
     factory: Address,
@@ -227,7 +230,7 @@ pub(crate) struct UniswapV3Pool {
 }
 
 impl UniswapV3Pool {
-    pub(crate) fn new(token_0: Address, token_1: Address, factory: Address) -> Self {
+    pub fn new(token_0: Address, token_1: Address, factory: Address) -> Self {
         Self {
             token_0,
             token_1,
@@ -238,7 +241,7 @@ impl UniswapV3Pool {
         }
     }
 
-    pub(crate) fn add_position(
+    pub fn add_position(
         &mut self,
         owner: Address,
         tick_lower: i32,
@@ -253,7 +256,7 @@ impl UniswapV3Pool {
         self
     }
 
-    pub(crate) fn add_tick(&mut self, tick: i32, value: [U256; 4]) -> &mut Self {
+    pub fn add_tick(&mut self, tick: i32, value: [U256; 4]) -> &mut Self {
         self.ticks.insert(from_tick(tick), value);
 
         let index: i32 = tick / TICK_SPACING;
@@ -275,7 +278,7 @@ impl UniswapV3Pool {
     // | tickBitmap           | mapping(int16 => uint256)                | 6    | 0      | 32      |
     // | positions            | mapping(bytes32 => struct Position.Info) | 7    | 0      | 32      |
     // | observations         | struct Oracle.Observation[65535]         | 8    | 0      | 2097120 |
-    pub(crate) fn build(&self, address: Address) -> Account {
+    pub fn build(&self, address: Address) -> Account {
         let hex = UNISWAP_V3_POOL
             .trim()
             .replace(
@@ -333,11 +336,7 @@ impl UniswapV3Pool {
     }
 
     // @uniswap/v3-periphery/contracts/libraries/PoolAddress.sol
-    pub(crate) fn get_address(
-        &self,
-        factory_address: Address,
-        pool_init_code_hash: B256,
-    ) -> Address {
+    pub fn get_address(&self, factory_address: Address, pool_init_code_hash: B256) -> Address {
         let hash = keccak256_all(&[
             fixed_bytes!("ff").as_slice(),
             factory_address.as_slice(),
@@ -354,14 +353,15 @@ impl UniswapV3Pool {
 }
 
 // @uniswap/v3-periphery/contracts/SwapRouter.sol
-pub(crate) struct SwapRouter {
+#[derive(Debug, Default)]
+pub struct SwapRouter {
     weth9: Address,
     factory: Address,
     pool_init_code_hash: B256,
 }
 
 impl SwapRouter {
-    pub(crate) fn new(weth9: Address, factory: Address, pool_init_code_hash: B256) -> Self {
+    pub fn new(weth9: Address, factory: Address, pool_init_code_hash: B256) -> Self {
         Self {
             weth9,
             factory,
@@ -372,7 +372,7 @@ impl SwapRouter {
     // | Name           | Type    | Slot | Offset | Bytes |
     // |----------------|---------|------|--------|-------|
     // | amountInCached | uint256 | 0    | 0      | 32    |
-    pub(crate) fn build(&self) -> Account {
+    pub fn build(&self) -> Account {
         let hex = SWAP_ROUTER
             .trim()
             .replace(
@@ -405,14 +405,15 @@ impl SwapRouter {
 }
 
 /// `@risechain/op-test-bench/foundry/src/SingleSwap.sol`
-pub(crate) struct SingleSwap {
+#[derive(Debug, Default)]
+pub struct SingleSwap {
     swap_router: Address,
     token_0: Address,
     token_1: Address,
 }
 
 impl SingleSwap {
-    pub(crate) fn new(swap_router: Address, token_0: Address, token_1: Address) -> Self {
+    pub fn new(swap_router: Address, token_0: Address, token_1: Address) -> Self {
         Self {
             swap_router,
             token_0,
@@ -425,7 +426,7 @@ impl SingleSwap {
     // | token0 | address | 0    | 0      | 20    |
     // | token1 | address | 1    | 0      | 20    |
     // | fee    | uint24  | 1    | 20     | 3     |
-    pub(crate) fn build(&self) -> Account {
+    pub fn build(&self) -> Account {
         let hex = SINGLE_SWAP.trim().replace(
             "e7cfcccb38ce07ba9d8d13431afe8cf6172de031",
             &self.swap_router.encode_hex(),
