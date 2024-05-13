@@ -1,9 +1,7 @@
-pub mod contract;
-
-use contract::ERC20Token;
+use alloy_primitives::U256;
 use revm::{
     db::PlainAccount,
-    primitives::{uint, AccountInfo, Address, TransactTo, TxEnv, U256},
+    primitives::{uint, AccountInfo, Address, TransactTo, TxEnv},
 };
 
 fn generate_addresses(length: usize) -> Vec<Address> {
@@ -21,13 +19,7 @@ pub fn generate_clusters(
 
     let people_addresses: Vec<Address> = clusters.clone().into_iter().flatten().collect();
 
-    let gld_address = Address::new(rand::random());
-
-    let gld_account = ERC20Token::new("Gold Token", "GLD", 18, 222_222_000_000_000_000_000_000u128)
-        .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
-        .build();
-
-    let mut state = Vec::from(&[(gld_address, gld_account)]);
+    let mut state = Vec::new();
     let mut txs = Vec::new();
 
     for person in people_addresses.iter() {
@@ -38,16 +30,14 @@ pub fn generate_clusters(
     for nonce in 0..num_transfers_per_person {
         for cluster in clusters.iter() {
             for person in cluster {
+                // send 1 wei to a random recipient within the cluster
                 let recipient = cluster[(rand::random::<usize>()) % (cluster.len())];
-                let calldata = ERC20Token::transfer(recipient, U256::from(rand::random::<u8>()));
-
                 txs.push(TxEnv {
                     caller: *person,
-                    gas_limit: 16_777_216u64,
-                    gas_price: U256::from(0xb2d05e07u64),
-                    transact_to: TransactTo::Call(gld_address),
-                    value: U256::ZERO,
-                    data: calldata,
+                    gas_limit: 21_000u64,
+                    gas_price: U256::from(0xd05e07b2u64),
+                    transact_to: TransactTo::Call(recipient),
+                    value: U256::from(1),
                     nonce: Some(nonce as u64),
                     ..TxEnv::default()
                 })

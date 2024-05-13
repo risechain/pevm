@@ -164,3 +164,20 @@ pub fn generate_cluster(
 
     (state, txs)
 }
+
+pub fn generate_clusters(
+    num_clusters: usize,
+    num_people_per_cluster: usize,
+    num_swaps_per_person: usize,
+) -> (Vec<(Address, PlainAccount)>, Vec<TxEnv>) {
+    let mut final_state = Vec::new();
+    let mut final_txs = Vec::new();
+
+    for _ in 0..num_clusters {
+        let (state, txs) = generate_cluster(num_people_per_cluster, num_swaps_per_person);
+        final_state.extend(state);
+        final_txs.extend(txs);
+    }
+
+    (final_state, final_txs)
+}
