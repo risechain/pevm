@@ -1,5 +1,3 @@
-use std::{convert::Infallible, num::NonZeroUsize, thread};
-
 use block_stm_revm::{BlockSTM, Storage};
 use revm::{
     primitives::{
@@ -8,6 +6,7 @@ use revm::{
     },
     DatabaseCommit, Evm, InMemoryDB,
 };
+use std::{convert::Infallible, num::NonZeroUsize, thread};
 
 // TODO: More elegant solution?
 fn eq_evm_errors<DBError1, DBError2>(e1: &EVMError<DBError1>, e2: &EVMError<DBError2>) -> bool {
@@ -94,7 +93,12 @@ pub fn test_txs(
 ) {
     // TODO: Decouple the (number of) prefilled accounts with the number of transactions.
     let (sequential_db, block_stm_storage) = setup_storage(accounts);
+
+    let now = std::time::Instant::now();
     let result_sequential = execute_sequential(sequential_db, spec_id, block_env.clone(), &txs);
+    println!("Sequential Execution Time: {:?}", now.elapsed());
+
+    let now = std::time::Instant::now();
     let result_block_stm = BlockSTM::run(
         block_stm_storage,
         spec_id,
@@ -102,6 +106,7 @@ pub fn test_txs(
         txs,
         thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
     );
+    println!("Block-STM Execution Time: {:?}", now.elapsed());
 
     match (result_sequential, result_block_stm) {
         (Ok(sequential_results), Ok(parallel_results)) => {
