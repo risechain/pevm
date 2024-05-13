@@ -145,10 +145,7 @@ impl MvMemory {
                     }
                 }
                 ReadMemoryResult::Ok { version, .. } => match prior_origin {
-                    // TODO: Verify this logic as it's not explicitly described
-                    // in the paper. We're setting `true` here to at least accept
-                    // lazily loading beneficiary account all the way to storage.
-                    ReadOrigin::Storage => return true,
+                    ReadOrigin::Storage => return false,
                     ReadOrigin::MvMemory(v) => {
                         if *v != version {
                             return false;
