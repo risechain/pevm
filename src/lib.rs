@@ -68,6 +68,9 @@ enum ReadOrigin {
 /// TODO: Better name & elaboration
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReadError {
+    /// Cannot read memory location from storage.
+    // TODO: Pass in more information about the error.
+    StorageError,
     /// Memory location not found.
     NotFound,
     /// This memory location has been written by a lower transaction.

@@ -33,21 +33,16 @@ pub(crate) enum VmExecutionResult {
 // A database interface that intercepts reads while executing a specific
 // transaction with revm. It provides values from the multi-version data
 // structure & storage, and tracks the read set of the current execution.
-struct VmDb {
+struct VmDb<S: Storage> {
     block_env: BlockEnv,
     tx_idx: TxIdx,
     mv_memory: Arc<MvMemory>,
-    storage: Arc<Storage>,
+    storage: Arc<S>,
     read_set: ReadSet,
 }
 
-impl VmDb {
-    fn new(
-        block_env: BlockEnv,
-        tx_idx: TxIdx,
-        mv_memory: Arc<MvMemory>,
-        storage: Arc<Storage>,
-    ) -> Self {
+impl<S: Storage> VmDb<S> {
+    fn new(block_env: BlockEnv, tx_idx: TxIdx, mv_memory: Arc<MvMemory>, storage: Arc<S>) -> Self {
         Self {
             block_env,
             tx_idx,
@@ -91,13 +86,16 @@ impl VmDb {
                     self.read_set.push((location.clone(), ReadOrigin::Storage));
                 }
                 match location {
-                    MemoryLocation::Basic(address) => {
-                        self.storage.basic(*address).map(MemoryValue::Basic)
-                    }
+                    MemoryLocation::Basic(address) => match self.storage.basic(*address) {
+                        Ok(Some(account)) => Ok(MemoryValue::Basic(account.into())),
+                        Ok(None) => Err(ReadError::NotFound),
+                        _ => Err(ReadError::StorageError),
+                    },
                     MemoryLocation::Storage((address, index)) => self
                         .storage
                         .storage(*address, *index)
-                        .map(MemoryValue::Storage),
+                        .map(MemoryValue::Storage)
+                        .map_err(|_| ReadError::StorageError),
                 }
             }
             ReadMemoryResult::Ok { version, value } => {
@@ -123,10 +121,11 @@ impl VmDb {
             if update_read_set {
                 self.read_set.push((location, ReadOrigin::Storage));
             }
-            return self
-                .storage
-                .basic(self.block_env.coinbase)
-                .map(MemoryValue::Basic);
+            return match self.storage.basic(self.block_env.coinbase) {
+                Ok(Some(account)) => Ok(MemoryValue::Basic(account.into())),
+                Ok(None) => Err(ReadError::NotFound),
+                _ => Err(ReadError::StorageError),
+            };
         }
 
         // We simply register this transaction as dependency of the previous in
@@ -162,7 +161,7 @@ impl VmDb {
     }
 }
 
-impl Database for VmDb {
+impl<S: Storage> Database for VmDb<S> {
     type Error = ReadError;
 
     // TODO: More granularity here to ensure we only record dependencies for,
@@ -189,11 +188,16 @@ impl Database for VmDb {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.storage.code_by_hash(code_hash)
+        self.storage
+            .code_by_hash(code_hash)
+            .map(Bytecode::new_raw)
+            .map_err(|_| ReadError::StorageError)
     }
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
-        self.storage.has_storage(address)
+        self.storage
+            .has_storage(address)
+            .map_err(|_| ReadError::StorageError)
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
@@ -209,24 +213,26 @@ impl Database for VmDb {
     }
 
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
-        self.storage.block_hash(number)
+        self.storage
+            .block_hash(number)
+            .map_err(|_| ReadError::StorageError)
     }
 }
 
 // The VM describes how to read values to execute transactions. Also, it
 // captures the read & write sets of each execution. Note that a single
 // `Vm` can be shared among threads.
-pub(crate) struct Vm {
-    storage: Arc<Storage>,
+pub(crate) struct Vm<S: Storage> {
+    storage: Arc<S>,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Arc<Vec<TxEnv>>,
     mv_memory: Arc<MvMemory>,
 }
 
-impl Vm {
+impl<S: Storage> Vm<S> {
     pub(crate) fn new(
-        storage: Storage,
+        storage: S,
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,

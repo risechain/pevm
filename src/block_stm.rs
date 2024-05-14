@@ -5,7 +5,7 @@ use std::{
 };
 
 use alloy_rpc_types::{Block, Header};
-use revm::primitives::{Account, BlockEnv, ResultAndState, SpecId, TxEnv};
+use revm::primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TxEnv};
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
@@ -32,8 +32,8 @@ pub enum BlockStmError {
 pub type BlockStmResult = Result<Vec<ResultAndState>, BlockStmError>;
 
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
-pub fn execute(
-    storage: Storage,
+pub fn execute<S: Storage + Send + Sync>(
+    storage: S,
     block: Block,
     parent_header: Option<Header>,
     concurrency_level: NonZeroUsize,
@@ -51,8 +51,8 @@ pub fn execute(
 }
 
 /// Execute an REVM block.
-pub fn execute_revm(
-    storage: Storage,
+pub fn execute_revm<S: Storage + Send + Sync>(
+    storage: S,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
@@ -61,7 +61,10 @@ pub fn execute_revm(
     let block_size = txs.len();
     let scheduler = Scheduler::new(&txs);
     let mv_memory = Arc::new(MvMemory::new(block_size));
-    let mut beneficiary_account_info = storage.basic(block_env.coinbase).unwrap_or_default();
+    let mut beneficiary_account_info = match storage.basic(block_env.coinbase) {
+        Ok(Some(account)) => account.into(),
+        _ => AccountInfo::default(),
+    };
     let vm = Vm::new(storage, spec_id, block_env.clone(), txs, mv_memory.clone());
 
     // TODO: Should we move this to `Vm`?
@@ -166,9 +169,9 @@ pub fn execute_revm(
 //   previous finished incarnation has not written, create validation
 //   tasks for all higher transactions.
 // - Otherwise, return a validation task for the transaction.
-fn try_execute(
+fn try_execute<S: Storage>(
     mv_memory: &Arc<MvMemory>,
-    vm: &Vm,
+    vm: &Vm<S>,
     scheduler: &Scheduler,
     execution_error: &RwLock<Option<ExecutionError>>,
     execution_results: &Vec<Mutex<Option<ResultAndState>>>,

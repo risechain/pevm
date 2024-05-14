@@ -1,69 +1,99 @@
-use std::collections::HashMap;
+use alloy_primitives::{Address, Bytes, B256, U256};
+use revm::{
+    primitives::{AccountInfo, Bytecode},
+    DatabaseRef,
+};
 
-use revm::primitives::{Account, AccountInfo, Address, Bytecode, B256, U256};
+// TODO: Reuse something sane from Alloy?
+// TODO: More proper testing.
+#[derive(Debug)]
+pub struct AccountBasic {
+    pub balance: U256,
+    pub nonce: u64,
+    pub code: Bytes,
+}
 
-use crate::ReadError;
+impl Default for AccountBasic {
+    fn default() -> Self {
+        Self {
+            balance: U256::ZERO,
+            nonce: 0,
+            code: Bytes::new(),
+        }
+    }
+}
+
+impl From<AccountBasic> for AccountInfo {
+    fn from(account: AccountBasic) -> Self {
+        let code = Bytecode::new_raw(account.code);
+        AccountInfo::new(account.balance, account.nonce, code.hash_slow(), code)
+    }
+}
+
+impl From<AccountInfo> for AccountBasic {
+    fn from(account: AccountInfo) -> Self {
+        AccountBasic {
+            balance: account.balance,
+            nonce: account.nonce,
+            code: account.code.unwrap_or_default().original_bytes(),
+        }
+    }
+}
 
 /// An interface to provide chain state to BlockSTM for transaction execution.
-/// TODO: Populate the remaining missing pieces like logs, etc.
+/// Staying close to the underlying REVM's Database trait while not leaking
+/// its primitives to library users (favoring Alloy at the moment).
 /// TODO: Better API for third-pary integration.
-#[derive(Debug, Default)]
-pub struct Storage {
-    accounts: HashMap<Address, Account>,
-    contracts: HashMap<B256, Bytecode>,
-    block_hashes: HashMap<U256, B256>,
+pub trait Storage {
+    /// Errors when querying data from storage.
+    type Error;
+
+    /// Get basic account information.
+    fn basic(&self, address: Address) -> Result<Option<AccountBasic>, Self::Error>;
+
+    /// Get account code by its hash.
+    fn code_by_hash(&self, code_hash: B256) -> Result<Bytes, Self::Error>;
+
+    /// Get if the account already has storage (to support EIP-7610).
+    fn has_storage(&self, address: Address) -> Result<bool, Self::Error>;
+
+    /// Get storage value of address at index.
+    fn storage(&self, address: Address, index: U256) -> Result<U256, Self::Error>;
+
+    /// Get block hash by block number.
+    fn block_hash(&self, number: U256) -> Result<B256, Self::Error>;
 }
 
-impl Storage {
-    /// Initialize a storage.
-    /// TODO: Init the storage with a custom genesis state.
-    pub fn new() -> Self {
-        Self {
-            accounts: HashMap::new(),
-            contracts: HashMap::new(),
-            block_hashes: HashMap::new(),
-        }
+// We can use any REVM database as storage provider.
+// There are some unfortunate back-and-forth conversions between
+// account & byte types, which hopefully it is minor enough.
+// TODO: More proper testing.
+impl<D: DatabaseRef> Storage for D {
+    type Error = D::Error;
+
+    fn basic(&self, address: Address) -> Result<Option<AccountBasic>, Self::Error> {
+        D::basic_ref(self, address).map(|a| a.map(|a| a.into()))
     }
 
-    /// Insert an account into the storage.
-    pub fn insert_account(&mut self, address: Address, account: Account) {
-        self.accounts.insert(address, account);
+    fn code_by_hash(&self, code_hash: B256) -> Result<Bytes, Self::Error> {
+        D::code_by_hash_ref(self, code_hash).map(|b| b.original_bytes())
     }
 
-    pub(crate) fn basic(&self, address: Address) -> Result<AccountInfo, ReadError> {
-        match self.accounts.get(&address) {
-            Some(account) => Ok(account.info.clone()),
-            None => Err(ReadError::NotFound),
-        }
+    fn has_storage(&self, address: Address) -> Result<bool, Self::Error> {
+        D::has_storage_ref(self, address)
     }
 
-    pub(crate) fn code_by_hash(&self, code_hash: B256) -> Result<Bytecode, ReadError> {
-        match self.contracts.get(&code_hash) {
-            Some(byte_code) => Ok(byte_code.clone()),
-            None => Err(ReadError::NotFound),
-        }
+    fn storage(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        D::storage_ref(self, address, index)
     }
 
-    pub(crate) fn has_storage(&self, address: Address) -> Result<bool, ReadError> {
-        Ok(self
-            .accounts
-            .get(&address)
-            .map(|a| !a.storage.is_empty())
-            .unwrap_or(false))
-    }
-
-    pub(crate) fn storage(&self, address: Address, index: U256) -> Result<U256, ReadError> {
-        Ok(self
-            .accounts
-            .get(&address)
-            .and_then(|a| a.storage.get(&index).map(|s| s.present_value))
-            .unwrap_or(U256::ZERO))
-    }
-
-    pub(crate) fn block_hash(&self, number: U256) -> Result<B256, ReadError> {
-        match self.block_hashes.get(&number) {
-            Some(block_hash) => Ok(*block_hash),
-            None => Err(ReadError::NotFound),
-        }
+    fn block_hash(&self, number: U256) -> Result<B256, Self::Error> {
+        D::block_hash_ref(self, number)
     }
 }
+
+// TODO: Support an Alloy database that fetches data via RPC.
+// TODO: Reintroduce our own lightweight in-memory storage instead
+// of using REVM's InMemoryDB for testing. The former is cleaner
+// but its demand is too low to justify the maintenance cost.
+// Perhaps we add it once we support multiple underlying executors.

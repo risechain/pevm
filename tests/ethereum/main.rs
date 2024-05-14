@@ -8,15 +8,16 @@
 // - We use custom handlers (for lazy-updating the beneficiary account, etc.) that require "re-testing".
 // - Help outline the minimal state commitment logic for BlockSTM.
 
-use block_stm_revm::{BlockStmError, Storage};
+use block_stm_revm::BlockStmError;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, Account, AccountInfo, AccountStatus, Address, BlobExcessGasAndPrice,
-    BlockEnv, Bytecode, Bytes, EVMError, ExecutionResult, HaltReason, InvalidTransaction, Output,
-    ResultAndState, SpecId, StorageSlot, SuccessReason, TransactTo, TxEnv, U256,
+    calc_excess_blob_gas, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode, Bytes,
+    EVMError, ExecutionResult, HaltReason, InvalidTransaction, Output, ResultAndState, SpecId,
+    SuccessReason, TransactTo, TxEnv, U256,
 };
+use revm::InMemoryDB;
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
 };
@@ -118,7 +119,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
             // instead of using `PlainAccount` & `Account`. The former is used
             // simply to utilize REVM's test root calculation functions.
             let mut chain_state: HashMap<Address, PlainAccount> = HashMap::new();
-            let mut block_stm_storage = Storage::default();
+            let mut block_stm_storage = InMemoryDB::default();
 
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
@@ -131,18 +132,12 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                         storage: raw_info.storage.clone(),
                     },
                 );
-                block_stm_storage.insert_account(
-                    *address,
-                    Account {
-                        info,
-                        storage: raw_info
-                            .storage
-                            .iter()
-                            .map(|(key, value)| (*key, StorageSlot::new(*value)))
-                            .collect(),
-                        status: AccountStatus::Loaded,
-                    },
-                );
+                block_stm_storage.insert_account_info(*address, info);
+                for (slot, value) in raw_info.storage.iter() {
+                    block_stm_storage
+                        .insert_account_storage(*address, *slot, *value)
+                        .unwrap();
+                }
             }
 
             match (

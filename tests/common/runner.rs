@@ -1,7 +1,5 @@
 use alloy_rpc_types::{Block, Header};
-use block_stm_revm::{
-    get_block_env, get_block_spec, get_tx_envs, BlockStmError, BlockStmResult, Storage,
-};
+use block_stm_revm::{get_block_env, get_block_spec, get_tx_envs, BlockStmError, BlockStmResult};
 use revm::{
     primitives::{
         alloy_primitives::U160, Account, AccountInfo, Address, BlockEnv, EVMError, ResultAndState,
@@ -25,25 +23,18 @@ pub fn mock_account(idx: usize) -> (Address, Account) {
     )
 }
 
-// Return an `InMemoryDB` for sequential usage and `Storage` for BlockSTM usage.
-// Both represent a "standard" mock state with prefilled accounts.
-fn setup_storage(accounts: &[(Address, Account)]) -> (InMemoryDB, Storage) {
-    let mut sequential_db: revm::db::CacheDB<revm::db::EmptyDBTyped<std::convert::Infallible>> =
-        InMemoryDB::default();
-    let mut block_stm_storage = Storage::default();
-
+// Using REVM's `InMemoryDB` as the testing storage for mock data.
+fn setup_storage(accounts: &[(Address, Account)]) -> InMemoryDB {
+    let mut db = InMemoryDB::default();
     for (address, account) in accounts {
-        sequential_db.insert_account_info(*address, account.info.clone());
+        db.insert_account_info(*address, account.info.clone());
         for (slot, value) in account.storage.iter() {
             // TODO: Better error handling
-            sequential_db
-                .insert_account_storage(*address, *slot, value.present_value)
+            db.insert_account_storage(*address, *slot, value.present_value)
                 .unwrap();
         }
-        block_stm_storage.insert_account(*address, account.clone());
     }
-
-    (sequential_db, block_stm_storage)
+    db
 }
 
 // The source-of-truth sequential execution result that BlockSTM must match.
@@ -113,11 +104,11 @@ pub fn test_execute_revm(
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
 ) {
-    let (sequential_db, block_stm_storage) = setup_storage(accounts);
+    let storage = setup_storage(accounts);
     assert_execution_result(
-        execute_sequential(sequential_db, spec_id, block_env.clone(), &txs),
+        execute_sequential(storage.clone(), spec_id, block_env.clone(), &txs),
         block_stm_revm::execute_revm(
-            block_stm_storage,
+            storage,
             spec_id,
             block_env,
             txs,
@@ -133,16 +124,16 @@ pub fn test_execute_alloy(
     block: Block,
     parent_header: Option<Header>,
 ) {
-    let (sequential_db, block_stm_storage) = setup_storage(accounts);
+    let storage = setup_storage(accounts);
     assert_execution_result(
         execute_sequential(
-            sequential_db,
+            storage.clone(),
             get_block_spec(&block.header).unwrap(),
             get_block_env(&block.header, parent_header.as_ref()).unwrap(),
             &get_tx_envs(&block.transactions).unwrap(),
         ),
         block_stm_revm::execute(
-            block_stm_storage,
+            storage,
             block,
             parent_header,
             thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
