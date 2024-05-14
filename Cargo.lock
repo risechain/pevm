@@ -47,7 +47,7 @@ checksum = "5c6cb57a04249c6480766f7f7cef5467412af1490f8d1e243141daddada3264f"
 [[package]]
 name = "alloy-consensus"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999d9efe259c47a34dde046952de795a8f6a#dd7a999d9efe259c47a34dde046952de795a8f6a"
+source = "git+https://github.com/alloy-rs/alloy?rev=dd25769df2089063e84a557c6844d20fba2eb315#dd25769df2089063e84a557c6844d20fba2eb315"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -60,7 +60,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999d9efe259c47a34dde046952de795a8f6a#dd7a999d9efe259c47a34dde046952de795a8f6a"
+source = "git+https://github.com/alloy-rs/alloy?rev=dd25769df2089063e84a557c6844d20fba2eb315#dd25769df2089063e84a557c6844d20fba2eb315"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -74,7 +74,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999d9efe259c47a34dde046952de795a8f6a#dd7a999d9efe259c47a34dde046952de795a8f6a"
+source = "git+https://github.com/alloy-rs/alloy?rev=dd25769df2089063e84a557c6844d20fba2eb315#dd25769df2089063e84a557c6844d20fba2eb315"
 dependencies = [
  "alloy-primitives",
  "alloy-serde",
@@ -129,7 +129,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999d9efe259c47a34dde046952de795a8f6a#dd7a999d9efe259c47a34dde046952de795a8f6a"
+source = "git+https://github.com/alloy-rs/alloy?rev=dd25769df2089063e84a557c6844d20fba2eb315#dd25769df2089063e84a557c6844d20fba2eb315"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -147,7 +147,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999d9efe259c47a34dde046952de795a8f6a#dd7a999d9efe259c47a34dde046952de795a8f6a"
+source = "git+https://github.com/alloy-rs/alloy?rev=dd25769df2089063e84a557c6844d20fba2eb315#dd25769df2089063e84a557c6844d20fba2eb315"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -492,6 +492,7 @@ dependencies = [
 name = "block-stm-revm"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types",
  "dashmap",
  "rand",
