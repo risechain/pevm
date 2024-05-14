@@ -109,6 +109,6 @@ mod primitives;
 pub use primitives::{get_block_env, get_block_spec, get_tx_envs};
 mod scheduler;
 mod storage;
-pub use storage::Storage;
+pub use storage::{AccountBasic, Storage};
 mod vm;
 pub use vm::ExecutionError;

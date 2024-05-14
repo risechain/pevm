@@ -4,12 +4,16 @@ use revm::{
     DatabaseRef,
 };
 
+/// Basic information of an account
 // TODO: Reuse something sane from Alloy?
 // TODO: More proper testing.
 #[derive(Debug)]
 pub struct AccountBasic {
+    /// The balance of the account.
     pub balance: U256,
+    /// The nonce of the account.
     pub nonce: u64,
+    /// The code of the account.
     pub code: Bytes,
 }
 
