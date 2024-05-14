@@ -98,20 +98,20 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv,
     })
 }
 
-fn run_test_unit(path: &Path, unit: TestUnit) {
-    for (spec_name, tests) in unit.post {
+fn run_test_unit(path: &Path, unit: &TestUnit) {
+    unit.post.par_iter().for_each(|(spec_name, tests)| {
         // Constantinople was immediately extended by Petersburg.
         // There was technically never a Constantinople transaction on mainnet
         // so REVM undestandably doesn't support it (without Petersburg).
-        if spec_name == SpecName::Constantinople {
-            continue;
+        if *spec_name == SpecName::Constantinople {
+            return;
         }
         let spec_id = spec_name.to_spec_id();
 
-        for test in tests {
+        tests.par_iter().for_each(|test| {
             let tx_env = build_tx_env(&unit.transaction, &test.indexes);
             if test.expect_exception.as_deref() == Some("TR_RLP_WRONGVALUE") && tx_env.is_err() {
-                continue;
+                return;
             }
 
             // Ideally we only need an account representation for both cases
@@ -302,8 +302,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     panic!("BlockSTM doesn't match the test's expectation for {path:?}")
                 }
             }
-        }
-    }
+        });
+    });
 }
 
 #[test]
@@ -325,8 +325,8 @@ fn ethereum_state_tests() {
                 .unwrap_or_else(|e| panic!("Cannot read suite {path:?}: {e:?}"));
             let TestSuite(suite) = serde_json::from_str(&raw_content)
                 .unwrap_or_else(|e| panic!("Cannot parse suite {path:?}: {e:?}"));
-            for (_, unit) in suite {
-                run_test_unit(path, unit)
-            }
+            suite
+                .par_iter()
+                .for_each(|(_, unit)| run_test_unit(path, unit));
         });
 }

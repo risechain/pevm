@@ -75,7 +75,7 @@ impl VmDb {
                 // If it's too hard to optimize for this case, just pre-check
                 // the block and go sequential up to the transaction that
                 // updates beneficiary, or just go full sequential for this.
-                return stacker::maybe_grow(4 * 1024, 16 * 1024, || {
+                return stacker::maybe_grow(32 * 1024, 64 * 1024, || {
                     self.read_beneficiary(tx_idx, update_read_set)
                 });
             }
