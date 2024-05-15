@@ -21,7 +21,7 @@ fn erc20_independent() {
     let (mut state, txs) = generate_cluster(N, 1, 1);
     state.push((Address::ZERO, PlainAccount::default()));
     test_execute_revm(
-        common::build_inmem_db(&state),
+        common::build_inmem_db(state),
         SpecId::LATEST,
         BlockEnv::default(),
         txs,
@@ -47,7 +47,7 @@ fn erc20_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
-        common::build_inmem_db(&final_state),
+        common::build_inmem_db(final_state),
         SpecId::LATEST,
         BlockEnv::default(),
         final_txs,
