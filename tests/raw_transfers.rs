@@ -2,8 +2,11 @@
 
 use alloy_rpc_types::{Block, BlockTransactions, Header, Transaction};
 use rand::random;
-use revm::primitives::{
-    alloy_primitives::U160, env::TxEnv, Account, Address, BlockEnv, SpecId, TransactTo, B256, U256,
+use revm::{
+    db::PlainAccount,
+    primitives::{
+        alloy_primitives::U160, env::TxEnv, Address, BlockEnv, SpecId, TransactTo, B256, U256,
+    },
 };
 
 pub mod common;
@@ -13,7 +16,8 @@ fn raw_transfers_independent() {
     let block_size = 100_000; // number of transactions
 
     // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
-    let accounts: Vec<(Address, Account)> = (0..=block_size).map(common::mock_account).collect();
+    let accounts: Vec<(Address, PlainAccount)> =
+        (0..=block_size).map(common::mock_account).collect();
 
     common::test_execute_revm(
         common::build_inmem_db(&accounts),
@@ -43,7 +47,8 @@ fn raw_transfers_same_sender_multiple_txs() {
     let block_size = 5_000; // number of transactions
 
     // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
-    let accounts: Vec<(Address, Account)> = (0..=block_size).map(common::mock_account).collect();
+    let accounts: Vec<(Address, PlainAccount)> =
+        (0..=block_size).map(common::mock_account).collect();
 
     let same_sender_address = Address::from(U160::from(1));
     let mut same_sender_nonce: u64 = 0;
@@ -83,7 +88,8 @@ fn raw_transfers_independent_alloy() {
     let block_size = 100_000; // number of transactions
 
     // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
-    let accounts: Vec<(Address, Account)> = (0..=block_size).map(common::mock_account).collect();
+    let accounts: Vec<(Address, PlainAccount)> =
+        (0..=block_size).map(common::mock_account).collect();
 
     common::test_execute_alloy(
         common::build_inmem_db(&accounts),

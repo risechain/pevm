@@ -2,8 +2,9 @@
 // "implicit" dependency among consecutive transactions.
 
 use rand::random;
-use revm::primitives::{
-    alloy_primitives::U160, env::TxEnv, Account, Address, BlockEnv, SpecId, TransactTo, U256,
+use revm::{
+    db::PlainAccount,
+    primitives::{alloy_primitives::U160, env::TxEnv, Address, BlockEnv, SpecId, TransactTo, U256},
 };
 
 pub mod common;
@@ -15,7 +16,8 @@ const BLOCK_SIZE: usize = 100_000;
 
 fn test_beneficiary(get_address: fn(usize) -> Address) {
     // Mock the beneficiary account (`Address:ZERO`) and the next `BLOCK_SIZE` user accounts.
-    let accounts: Vec<(Address, Account)> = (0..=BLOCK_SIZE).map(common::mock_account).collect();
+    let accounts: Vec<(Address, PlainAccount)> =
+        (0..=BLOCK_SIZE).map(common::mock_account).collect();
 
     common::test_execute_revm(
         common::build_inmem_db(&accounts),

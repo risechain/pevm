@@ -1,7 +1,10 @@
 pub mod contract;
 
 use contract::ERC20Token;
-use revm::primitives::{uint, Account, AccountInfo, Address, TransactTo, TxEnv, U256};
+use revm::{
+    db::PlainAccount,
+    primitives::{uint, AccountInfo, Address, TransactTo, TxEnv, U256},
+};
 
 fn generate_addresses(length: usize) -> Vec<Address> {
     (0..length).map(|_| Address::new(rand::random())).collect()
@@ -11,7 +14,7 @@ pub fn generate_cluster(
     num_families: usize,
     num_people_per_family: usize,
     num_transfers_per_person: usize,
-) -> (Vec<(Address, Account)>, Vec<TxEnv>) {
+) -> (Vec<(Address, PlainAccount)>, Vec<TxEnv>) {
     let families: Vec<Vec<Address>> = (0..num_families)
         .map(|_| generate_addresses(num_people_per_family))
         .collect();
@@ -29,7 +32,7 @@ pub fn generate_cluster(
 
     for person in people_addresses.iter() {
         let info = AccountInfo::from_balance(uint!(4_567_000_000_000_000_000_000_U256));
-        state.push((*person, Account::from(info)));
+        state.push((*person, PlainAccount::from(info)));
     }
 
     for nonce in 0..num_transfers_per_person {

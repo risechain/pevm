@@ -1,9 +1,10 @@
 use alloy_rpc_types::{Block, Header};
 use block_stm_revm::{get_block_env, get_block_spec, get_tx_envs, BlockStmError, BlockStmResult};
 use revm::{
+    db::PlainAccount,
     primitives::{
-        alloy_primitives::U160, Account, AccountInfo, Address, BlockEnv, EVMError, ResultAndState,
-        SpecId, TxEnv, U256,
+        alloy_primitives::U160, AccountInfo, Address, BlockEnv, EVMError, ResultAndState, SpecId,
+        TxEnv, U256,
     },
     DatabaseCommit, DatabaseRef, Evm, InMemoryDB,
 };
@@ -11,25 +12,24 @@ use std::{fmt::Debug, num::NonZeroUsize, thread};
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
-pub fn mock_account(idx: usize) -> (Address, Account) {
+pub fn mock_account(idx: usize) -> (Address, PlainAccount) {
     let address = Address::from(U160::from(idx));
     (
         address,
         // Filling half full accounts to have enough tokens for tests without worrying about
         // the corner case of balance not going beyond `U256::MAX`.
-        Account::from(AccountInfo::from_balance(U256::MAX.div_ceil(U256::from(2)))),
+        PlainAccount::from(AccountInfo::from_balance(U256::MAX.div_ceil(U256::from(2)))),
     )
 }
 
 // Build an inmemory database from a preset state of accounts.
-pub fn build_inmem_db(accounts: &[(Address, Account)]) -> InMemoryDB {
+pub fn build_inmem_db(accounts: &[(Address, PlainAccount)]) -> InMemoryDB {
     let mut db = InMemoryDB::default();
     for (address, account) in accounts {
         db.insert_account_info(*address, account.info.clone());
         for (slot, value) in account.storage.iter() {
             // TODO: Better error handling
-            db.insert_account_storage(*address, *slot, value.present_value)
-                .unwrap();
+            db.insert_account_storage(*address, *slot, *value).unwrap();
         }
     }
     db

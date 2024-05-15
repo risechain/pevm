@@ -113,9 +113,6 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                 return;
             }
 
-            // Ideally we only need an account representation for both cases
-            // instead of using `PlainAccount` & `Account`. The former is used
-            // simply to utilize REVM's test root calculation functions.
             let mut chain_state: HashMap<Address, PlainAccount> = HashMap::new();
             let mut block_stm_storage = InMemoryDB::default();
 

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, future::IntoFuture};
+use std::{collections::HashMap, fmt::Debug, future::IntoFuture, sync::Mutex};
 
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{Provider, RootProvider};
@@ -7,6 +7,7 @@ use alloy_transport::TransportError;
 use alloy_transport_http::Http;
 use reqwest::Client;
 use revm::{
+    db::PlainAccount,
     primitives::{AccountInfo, Bytecode},
     DatabaseRef,
 };
@@ -120,6 +121,13 @@ type RpcProvider = RootProvider<Http<Client>>;
 pub struct RpcStorage {
     provider: RpcProvider,
     block_id: BlockId,
+    // Convenient types for persisting then reconstructing block's state
+    // as in-memory storage for benchmarks, etc. Also work well when
+    // the storage is re-used, like for comparing sequential & parallel
+    // execution on the same block.
+    // Using a `Mutex` so we don't (yet) propagate mutability requirements
+    // back to our `Storage` trait.
+    cache: Mutex<HashMap<Address, PlainAccount>>,
     // TODO: Better async handling.
     runtime: Runtime,
 }
@@ -130,6 +138,7 @@ impl RpcStorage {
         RpcStorage {
             provider,
             block_id,
+            cache: Mutex::new(HashMap::new()),
             // TODO: Better error handling.
             runtime: Runtime::new().unwrap(),
         }
@@ -144,6 +153,9 @@ impl DatabaseRef for RpcStorage {
     type Error = TransportError;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        if let Some(account) = self.cache.lock().unwrap().get(&address) {
+            return Ok(Some(account.info.clone()));
+        }
         self.runtime.block_on(async {
             // TODO: Request these concurrently
             let (balance, nonce, code) = tokio::join!(
@@ -163,12 +175,12 @@ impl DatabaseRef for RpcStorage {
             // TODO: Should we properly cover the non-existing account case or it can
             // always be a `Some` here?
             let code = Bytecode::new_raw(code?);
-            Ok(Some(AccountInfo::new(
-                balance?,
-                nonce?,
-                code.hash_slow(),
-                code,
-            )))
+            let info = AccountInfo::new(balance?, nonce?, code.hash_slow(), code);
+            self.cache
+                .lock()
+                .unwrap()
+                .insert(address, info.clone().into());
+            Ok(Some(info))
         })
     }
 
@@ -182,12 +194,23 @@ impl DatabaseRef for RpcStorage {
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.runtime.block_on(
+        if let Some(account) = self.cache.lock().unwrap().get(&address) {
+            return Ok(account.storage.get(&index).cloned().unwrap_or(U256::ZERO));
+        }
+        let value = self.runtime.block_on(
             self.provider
                 .get_storage_at(address, index)
                 .block_id(self.block_id)
                 .into_future(),
-        )
+        )?;
+        self.cache.lock().unwrap().insert(
+            address,
+            PlainAccount {
+                info: self.basic(address)?.unwrap_or_default().into(),
+                storage: [(index, value)].into_iter().collect(),
+            },
+        );
+        Ok(value)
     }
 
     // TODO: Proper error handling & testing.

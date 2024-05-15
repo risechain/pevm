@@ -2,14 +2,15 @@ pub mod contract;
 
 use crate::erc20::contract::ERC20Token;
 use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
-use revm::primitives::{
-    fixed_bytes, uint, Account, AccountInfo, Address, Bytes, TransactTo, TxEnv, B256, U256,
+use revm::{
+    db::PlainAccount,
+    primitives::{fixed_bytes, uint, AccountInfo, Address, Bytes, TransactTo, TxEnv, B256, U256},
 };
 
 pub fn generate_cluster(
     num_people: usize,
     num_swaps_per_person: usize,
-) -> (Vec<(Address, Account)>, Vec<TxEnv>) {
+) -> (Vec<(Address, PlainAccount)>, Vec<TxEnv>) {
     let people_addresses: Vec<Address> = (0..num_people)
         .map(|_| Address::new(rand::random()))
         .collect();
@@ -107,7 +108,7 @@ pub fn generate_cluster(
 
     for person in people_addresses.iter() {
         let info = AccountInfo::from_balance(uint!(4_567_000_000_000_000_000_000_U256));
-        state.push((*person, Account::from(info)));
+        state.push((*person, PlainAccount::from(info)));
     }
 
     let mut txs = Vec::new();

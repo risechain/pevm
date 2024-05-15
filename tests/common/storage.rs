@@ -1,18 +1,19 @@
-use revm::primitives::{
-    alloy_primitives::U160, keccak256, ruint::UintTryFrom, Address, Storage, StorageSlot, B256,
-    I256, U256,
+use revm::{
+    db::states::plain_account::PlainStorage,
+    primitives::{
+        alloy_primitives::U160, keccak256, ruint::UintTryFrom, Address, B256, I256, U256,
+    },
 };
-use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub struct StorageBuilder {
-    dict: HashMap<U256, U256>,
+    dict: PlainStorage,
 }
 
 impl StorageBuilder {
     pub fn new() -> Self {
         StorageBuilder {
-            dict: HashMap::new(),
+            dict: PlainStorage::new(),
         }
     }
 
@@ -48,11 +49,8 @@ impl StorageBuilder {
         *entry = buffer.into();
     }
 
-    pub fn build(self) -> Storage {
+    pub fn build(self) -> PlainStorage {
         self.dict
-            .into_iter()
-            .map(|(k, v)| (k, StorageSlot::new(v)))
-            .collect()
     }
 }
 
