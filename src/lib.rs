@@ -69,8 +69,7 @@ enum ReadOrigin {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReadError {
     /// Cannot read memory location from storage.
-    // TODO: Pass in more information about the error.
-    StorageError,
+    StorageError(String),
     /// Memory location not found.
     NotFound,
     /// This memory location has been written by a lower transaction.
@@ -109,6 +108,6 @@ mod primitives;
 pub use primitives::{get_block_env, get_block_spec, get_tx_envs};
 mod scheduler;
 mod storage;
-pub use storage::{AccountBasic, Storage};
+pub use storage::{AccountBasic, RpcStorage, Storage};
 mod vm;
 pub use vm::ExecutionError;

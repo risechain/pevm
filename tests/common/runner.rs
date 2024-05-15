@@ -5,11 +5,9 @@ use revm::{
         alloy_primitives::U160, Account, AccountInfo, Address, BlockEnv, EVMError, ResultAndState,
         SpecId, TxEnv, U256,
     },
-    DatabaseCommit, Evm, InMemoryDB,
+    DatabaseCommit, DatabaseRef, Evm, InMemoryDB,
 };
-use std::{convert::Infallible, num::NonZeroUsize, thread};
-
-type SequentialExecutionResult = Result<Vec<ResultAndState>, EVMError<Infallible>>;
+use std::{fmt::Debug, num::NonZeroUsize, thread};
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -23,8 +21,8 @@ pub fn mock_account(idx: usize) -> (Address, Account) {
     )
 }
 
-// Using REVM's `InMemoryDB` as the testing storage for mock data.
-fn setup_storage(accounts: &[(Address, Account)]) -> InMemoryDB {
+// Build an inmemory database from a preset state of accounts.
+pub fn build_inmem_db(accounts: &[(Address, Account)]) -> InMemoryDB {
     let mut db = InMemoryDB::default();
     for (address, account) in accounts {
         db.insert_account_info(*address, account.info.clone());
@@ -39,12 +37,12 @@ fn setup_storage(accounts: &[(Address, Account)]) -> InMemoryDB {
 
 // The source-of-truth sequential execution result that BlockSTM must match.
 // Currently early returning the first encountered EVM error if there is any.
-fn execute_sequential(
-    mut db: InMemoryDB,
+fn execute_sequential<D: DatabaseRef + DatabaseCommit>(
+    mut db: D,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: &[TxEnv],
-) -> SequentialExecutionResult {
+) -> Result<Vec<ResultAndState>, EVMError<D::Error>> {
     let mut results = Vec::new();
     for tx in txs {
         let mut evm = Evm::builder()
@@ -79,8 +77,8 @@ fn eq_evm_errors<DBError1, DBError2>(e1: &EVMError<DBError1>, e2: &EVMError<DBEr
     }
 }
 
-fn assert_execution_result(
-    sequential_result: SequentialExecutionResult,
+fn assert_execution_result<D: DatabaseRef>(
+    sequential_result: Result<Vec<ResultAndState>, EVMError<D::Error>>,
     block_stm_result: BlockStmResult,
 ) {
     match (sequential_result, block_stm_result) {
@@ -98,17 +96,18 @@ fn assert_execution_result(
 
 // Execute an REVM block sequentially & with BlockSTM and assert that
 // the execution results match.
-pub fn test_execute_revm(
-    accounts: &[(Address, Account)],
+pub fn test_execute_revm<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
+    db: D,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
-) {
-    let storage = setup_storage(accounts);
-    assert_execution_result(
-        execute_sequential(storage.clone(), spec_id, block_env.clone(), &txs),
+) where
+    D::Error: Debug,
+{
+    assert_execution_result::<D>(
+        execute_sequential(db.clone(), spec_id, block_env.clone(), &txs),
         block_stm_revm::execute_revm(
-            storage,
+            db,
             spec_id,
             block_env,
             txs,
@@ -119,21 +118,22 @@ pub fn test_execute_revm(
 
 // Execute an Alloy block sequentially & with BlockSTM and assert that
 // the execution results match.
-pub fn test_execute_alloy(
-    accounts: &[(Address, Account)],
+pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
+    db: D,
     block: Block,
     parent_header: Option<Header>,
-) {
-    let storage = setup_storage(accounts);
-    assert_execution_result(
+) where
+    D::Error: Debug,
+{
+    assert_execution_result::<D>(
         execute_sequential(
-            storage.clone(),
+            db.clone(),
             get_block_spec(&block.header).unwrap(),
             get_block_env(&block.header, parent_header.as_ref()).unwrap(),
             &get_tx_envs(&block.transactions).unwrap(),
         ),
         block_stm_revm::execute(
-            storage,
+            db,
             block,
             parent_header,
             thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),

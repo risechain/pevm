@@ -102,8 +102,6 @@ pub fn get_tx_envs(transactions: &BlockTransactions) -> Option<Vec<TxEnv>> {
                     gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
                     blob_hashes: tx.blob_versioned_hashes.clone().unwrap_or_default(),
                     max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-                    eof_initcodes: Default::default(),
-                    eof_initcodes_hashed: Default::default(),
                 })
             }
             Some(tx_envs)

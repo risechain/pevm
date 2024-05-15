@@ -16,7 +16,7 @@ fn raw_transfers_independent() {
     let accounts: Vec<(Address, Account)> = (0..=block_size).map(common::mock_account).collect();
 
     common::test_execute_revm(
-        &accounts,
+        common::build_inmem_db(&accounts),
         SpecId::LATEST,
         BlockEnv::default(),
         // Mock `block_size` transactions sending some tokens to itself.
@@ -49,7 +49,7 @@ fn raw_transfers_same_sender_multiple_txs() {
     let mut same_sender_nonce: u64 = 0;
 
     common::test_execute_revm(
-        &accounts,
+        common::build_inmem_db(&accounts),
         SpecId::LATEST,
         BlockEnv::default(),
         (1..=block_size)
@@ -86,7 +86,7 @@ fn raw_transfers_independent_alloy() {
     let accounts: Vec<(Address, Account)> = (0..=block_size).map(common::mock_account).collect();
 
     common::test_execute_alloy(
-        &accounts,
+        common::build_inmem_db(&accounts),
         Block {
             header: Header {
                 number: Some(1),

@@ -27,5 +27,10 @@ fn uniswap_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(&final_state, SpecId::LATEST, BlockEnv::default(), final_txs)
+    common::test_execute_revm(
+        common::build_inmem_db(&final_state),
+        SpecId::LATEST,
+        BlockEnv::default(),
+        final_txs,
+    )
 }

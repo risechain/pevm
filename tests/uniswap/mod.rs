@@ -5,7 +5,6 @@ use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
 use revm::primitives::{
     fixed_bytes, uint, Account, AccountInfo, Address, Bytes, TransactTo, TxEnv, B256, U256,
 };
-use std::collections::HashMap;
 
 pub fn generate_cluster(
     num_people: usize,
@@ -158,8 +157,6 @@ pub fn generate_cluster(
                 gas_priority_fee: None,
                 blob_hashes: Vec::new(),
                 max_fee_per_blob_gas: None,
-                eof_initcodes: Vec::new(),
-                eof_initcodes_hashed: HashMap::new(),
             })
         }
     }

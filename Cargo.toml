@@ -5,15 +5,27 @@ edition = "2021"
 
 [dependencies]
 alloy-primitives = "0.7.2"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "dd25769df2089063e84a557c6844d20fba2eb315" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "07611cfc9f277dc5bbfd7d21e9d70ad37b441a51" }
 dashmap = "5.5.3"
+stacker = "0.1.15"
+
+# Let's do our best to port needed REVM changes upstream
+revm = { git = "https://github.com/risechain/revm", rev = "e44b3cd434b2de1bfc54fc9f548200ab63a6b356" }
+
+# RPC Storage dependencies
+# TODO: Put these behind an RPC flag to not pollute the core
+# library with RPC network & transport dependencies, etc.
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "07611cfc9f277dc5bbfd7d21e9d70ad37b441a51" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "07611cfc9f277dc5bbfd7d21e9d70ad37b441a51" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "07611cfc9f277dc5bbfd7d21e9d70ad37b441a51" }
+reqwest = "0.12.4"
+tokio = "1.37.0"
+
+[dev-dependencies]
 rand = "0.8.5"
 rayon = "1.10.0"
-# TODO: Let's do our best to port needed changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "d4a99ded7a2a8e131e28e7aa4f07c49999b88e29" }
-revme = { git = "https://github.com/risechain/revm", rev = "d4a99ded7a2a8e131e28e7aa4f07c49999b88e29" }
+revme = { git = "https://github.com/risechain/revm", rev = "e44b3cd434b2de1bfc54fc9f548200ab63a6b356" }
 serde_json = { version = "1.0.116" }
-stacker = "0.1.15"
 walkdir = "2.5.0"
 
 [lints]

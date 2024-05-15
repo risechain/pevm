@@ -94,8 +94,6 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv,
         gas_priority_fee: tx.max_priority_fee_per_gas,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-        eof_initcodes: Vec::new(),
-        eof_initcodes_hashed: HashMap::new(),
     })
 }
 
