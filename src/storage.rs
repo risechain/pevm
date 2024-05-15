@@ -1,8 +1,16 @@
+use std::{fmt::Debug, future::IntoFuture};
+
 use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_provider::{Provider, RootProvider};
+use alloy_rpc_types::{BlockId, BlockNumberOrTag};
+use alloy_transport::TransportError;
+use alloy_transport_http::Http;
+use reqwest::Client;
 use revm::{
     primitives::{AccountInfo, Bytecode},
     DatabaseRef,
 };
+use tokio::runtime::Runtime;
 
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
@@ -50,7 +58,7 @@ impl From<AccountInfo> for AccountBasic {
 /// TODO: Better API for third-pary integration.
 pub trait Storage {
     /// Errors when querying data from storage.
-    type Error;
+    type Error: Debug;
 
     /// Get basic account information.
     fn basic(&self, address: Address) -> Result<Option<AccountBasic>, Self::Error>;
@@ -72,7 +80,10 @@ pub trait Storage {
 // There are some unfortunate back-and-forth conversions between
 // account & byte types, which hopefully it is minor enough.
 // TODO: More proper testing.
-impl<D: DatabaseRef> Storage for D {
+impl<D: DatabaseRef> Storage for D
+where
+    D::Error: Debug,
+{
     type Error = D::Error;
 
     fn basic(&self, address: Address) -> Result<Option<AccountBasic>, Self::Error> {
@@ -96,7 +107,101 @@ impl<D: DatabaseRef> Storage for D {
     }
 }
 
-// TODO: Support an Alloy database that fetches data via RPC.
+// RPC Storage
+// TODO: Move to its own module.
+
+// TODO: Support generic network & transport types.
+// TODO: Put this behind an RPC flag to not pollute the core
+// library with RPC network & transport dependencies, etc.
+type RpcProvider = RootProvider<Http<Client>>;
+
+/// Fetch state data via RPC to execute.
+#[derive(Debug)]
+pub struct RpcStorage {
+    provider: RpcProvider,
+    block_id: BlockId,
+    // TODO: Better async handling.
+    runtime: Runtime,
+}
+
+impl RpcStorage {
+    /// Create a new RPC Storage
+    pub fn new(provider: RpcProvider, block_id: BlockId) -> Self {
+        RpcStorage {
+            provider,
+            block_id,
+            // TODO: Better error handling.
+            runtime: Runtime::new().unwrap(),
+        }
+    }
+}
+
+// TODO: Implement `Storage` instead.
+// Going with REVM's Database simply to make it easier
+// to try matching sequential & parallel execution.
+// In the future we should match block roots anyway.
+impl DatabaseRef for RpcStorage {
+    type Error = TransportError;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.runtime.block_on(async {
+            // TODO: Request these concurrently
+            let (balance, nonce, code) = tokio::join!(
+                self.provider
+                    .get_balance(address)
+                    .block_id(self.block_id)
+                    .into_future(),
+                self.provider
+                    .get_transaction_count(address)
+                    .block_id(self.block_id)
+                    .into_future(),
+                self.provider
+                    .get_code_at(address)
+                    .block_id(self.block_id)
+                    .into_future()
+            );
+            // TODO: Should we properly cover the non-existing account case or it can
+            // always be a `Some` here?
+            let code = Bytecode::new_raw(code?);
+            Ok(Some(AccountInfo::new(
+                balance?,
+                nonce?,
+                code.hash_slow(),
+                code,
+            )))
+        })
+    }
+
+    fn code_by_hash_ref(&self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
+        panic!("This should not be called as the code is already loaded via account");
+    }
+
+    fn has_storage_ref(&self, _address: Address) -> Result<bool, Self::Error> {
+        // FIXME! Returning `false` that should cover EIP-7610 for the time being.
+        Ok(false)
+    }
+
+    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        self.runtime.block_on(
+            self.provider
+                .get_storage_at(address, index)
+                .block_id(self.block_id)
+                .into_future(),
+        )
+    }
+
+    // TODO: Proper error handling & testing.
+    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+        self.runtime
+            .block_on(
+                self.provider
+                    .get_block_by_number(BlockNumberOrTag::Number(number.to::<u64>()), false)
+                    .into_future(),
+            )
+            .map(|block| block.unwrap().header.hash.unwrap())
+    }
+}
+
 // TODO: Reintroduce our own lightweight in-memory storage instead
 // of using REVM's InMemoryDB for testing. The former is cleaner
 // but its demand is too low to justify the maintenance cost.

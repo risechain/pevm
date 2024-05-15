@@ -17,7 +17,12 @@ fn erc20_independent() {
     const N: usize = 1024;
     let (mut state, txs) = generate_cluster(N, 1, 1);
     state.push((Address::ZERO, Account::default()));
-    test_execute_revm(&state, SpecId::LATEST, BlockEnv::default(), txs);
+    test_execute_revm(
+        common::build_inmem_db(&state),
+        SpecId::LATEST,
+        BlockEnv::default(),
+        txs,
+    );
 }
 
 #[test]
@@ -38,5 +43,10 @@ fn erc20_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(&final_state, SpecId::LATEST, BlockEnv::default(), final_txs)
+    common::test_execute_revm(
+        common::build_inmem_db(&final_state),
+        SpecId::LATEST,
+        BlockEnv::default(),
+        final_txs,
+    )
 }

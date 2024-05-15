@@ -89,13 +89,13 @@ impl<S: Storage> VmDb<S> {
                     MemoryLocation::Basic(address) => match self.storage.basic(*address) {
                         Ok(Some(account)) => Ok(MemoryValue::Basic(account.into())),
                         Ok(None) => Err(ReadError::NotFound),
-                        _ => Err(ReadError::StorageError),
+                        Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
                     },
                     MemoryLocation::Storage((address, index)) => self
                         .storage
                         .storage(*address, *index)
                         .map(MemoryValue::Storage)
-                        .map_err(|_| ReadError::StorageError),
+                        .map_err(|err| ReadError::StorageError(format!("{err:?}"))),
                 }
             }
             ReadMemoryResult::Ok { version, value } => {
@@ -124,7 +124,7 @@ impl<S: Storage> VmDb<S> {
             return match self.storage.basic(self.block_env.coinbase) {
                 Ok(Some(account)) => Ok(MemoryValue::Basic(account.into())),
                 Ok(None) => Err(ReadError::NotFound),
-                _ => Err(ReadError::StorageError),
+                Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
             };
         }
 
@@ -191,13 +191,13 @@ impl<S: Storage> Database for VmDb<S> {
         self.storage
             .code_by_hash(code_hash)
             .map(Bytecode::new_raw)
-            .map_err(|_| ReadError::StorageError)
+            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
         self.storage
             .has_storage(address)
-            .map_err(|_| ReadError::StorageError)
+            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
@@ -215,7 +215,7 @@ impl<S: Storage> Database for VmDb<S> {
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
         self.storage
             .block_hash(number)
-            .map_err(|_| ReadError::StorageError)
+            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 }
 
