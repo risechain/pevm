@@ -23,13 +23,13 @@ pub fn mock_account(idx: usize) -> (Address, PlainAccount) {
 }
 
 // Build an inmemory database from a preset state of accounts.
-pub fn build_inmem_db(accounts: &[(Address, PlainAccount)]) -> InMemoryDB {
+pub fn build_inmem_db(accounts: impl IntoIterator<Item = (Address, PlainAccount)>) -> InMemoryDB {
     let mut db = InMemoryDB::default();
     for (address, account) in accounts {
-        db.insert_account_info(*address, account.info.clone());
+        db.insert_account_info(address, account.info.clone());
         for (slot, value) in account.storage.iter() {
             // TODO: Better error handling
-            db.insert_account_storage(*address, *slot, *value).unwrap();
+            db.insert_account_storage(address, *slot, *value).unwrap();
         }
     }
     db

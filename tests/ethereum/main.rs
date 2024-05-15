@@ -17,7 +17,6 @@ use revm::primitives::{
     EVMError, ExecutionResult, HaltReason, InvalidTransaction, Output, ResultAndState, SpecId,
     SuccessReason, TransactTo, TxEnv, U256,
 };
-use revm::InMemoryDB;
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
 };
@@ -29,6 +28,9 @@ use std::path::Path;
 use std::str::FromStr;
 use std::{collections::HashMap, fs, num::NonZeroUsize};
 use walkdir::{DirEntry, WalkDir};
+
+#[path = "../common/mod.rs"]
+pub mod common;
 
 fn build_block_env(env: &Env) -> BlockEnv {
     BlockEnv {
@@ -114,8 +116,6 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
             }
 
             let mut chain_state: HashMap<Address, PlainAccount> = HashMap::new();
-            let mut block_stm_storage = InMemoryDB::default();
-
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
                 let info =
@@ -127,18 +127,12 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                         storage: raw_info.storage.clone(),
                     },
                 );
-                block_stm_storage.insert_account_info(*address, info);
-                for (slot, value) in raw_info.storage.iter() {
-                    block_stm_storage
-                        .insert_account_storage(*address, *slot, *value)
-                        .unwrap();
-                }
             }
 
             match (
                 test.expect_exception.as_deref(),
                 block_stm_revm::execute_revm(
-                    block_stm_storage,
+                    common::build_inmem_db(chain_state.clone()),
                     spec_id,
                     build_block_env(&unit.env),
                     vec![tx_env.unwrap()],
