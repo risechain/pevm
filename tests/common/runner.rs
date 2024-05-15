@@ -66,21 +66,27 @@ fn execute_sequential<D: DatabaseRef + DatabaseCommit>(
 }
 
 // TODO: More elegant solution?
-fn eq_evm_errors<DBError1, DBError2>(e1: &EVMError<DBError1>, e2: &EVMError<DBError2>) -> bool {
-    match (e1, e2) {
-        (EVMError::Transaction(e1), EVMError::Transaction(e2)) => e1 == e2,
-        (EVMError::Header(e1), EVMError::Header(e2)) => e1 == e2,
-        (EVMError::Custom(e1), EVMError::Custom(e2)) => e1 == e2,
+fn assert_evm_errors<DBError1: Debug, DBError2: Debug>(
+    seq_err: &EVMError<DBError1>,
+    block_stm_err: &EVMError<DBError2>,
+) {
+    match (seq_err, block_stm_err) {
+        (EVMError::Transaction(e1), EVMError::Transaction(e2)) => assert_eq!(e1, e2),
+        (EVMError::Header(e1), EVMError::Header(e2)) => assert_eq!(e1, e2),
+        (EVMError::Custom(e1), EVMError::Custom(e2)) => assert_eq!(e1, e2),
         // We treat all database errors as inequality.
         // Warning: This can be dangerous when `EVMError` introduces a new variation.
-        _ => false,
+        (e1, e2) =>
+            panic!("Block-STM's execution error doesn't match Sequential's\nSequential: {e1:?}\nBlock-STM: {e2:?}"),
     }
 }
 
 fn assert_execution_result<D: DatabaseRef>(
     sequential_result: Result<Vec<ResultAndState>, EVMError<D::Error>>,
     block_stm_result: BlockStmResult,
-) {
+) where
+    D::Error: Debug,
+{
     match (sequential_result, block_stm_result) {
         (Ok(sequential_results), Ok(parallel_results)) => {
             assert_eq!(sequential_results, parallel_results)
@@ -88,7 +94,7 @@ fn assert_execution_result<D: DatabaseRef>(
         // TODO: Support extracting and comparing multiple errors in the input block.
         // This only works for now as most tests have just one (potentially error) transaction.
         (Err(sequential_error), Err(BlockStmError::ExecutionError(parallel_error))) => {
-            assert!(eq_evm_errors(&sequential_error, &parallel_error))
+            assert_evm_errors(&sequential_error, &parallel_error);
         }
         _ => panic!("Block-STM's execution result doesn't match Sequential's"),
     };

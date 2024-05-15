@@ -10,7 +10,7 @@ dashmap = "5.5.3"
 stacker = "0.1.15"
 
 # Let's do our best to port needed REVM changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "e44b3cd434b2de1bfc54fc9f548200ab63a6b356" }
+revm = { git = "https://github.com/risechain/revm", rev = "3852b093e9ecb6a82416cb625cb5e611ec177fbf" }
 
 # RPC Storage dependencies
 # TODO: Put these behind an RPC flag to not pollute the core
@@ -24,7 +24,8 @@ tokio = "1.37.0"
 [dev-dependencies]
 rand = "0.8.5"
 rayon = "1.10.0"
-revme = { git = "https://github.com/risechain/revm", rev = "e44b3cd434b2de1bfc54fc9f548200ab63a6b356" }
+revme = { git = "https://github.com/risechain/revm", rev = "3852b093e9ecb6a82416cb625cb5e611ec177fbf" }
+serde = "1.0.202"
 serde_json = { version = "1.0.116" }
 walkdir = "2.5.0"
 

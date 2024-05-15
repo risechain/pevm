@@ -680,6 +680,7 @@ dependencies = [
  "reqwest 0.12.4",
  "revm",
  "revme",
+ "serde",
  "serde_json",
  "stacker",
  "tokio",
@@ -2650,7 +2651,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "9.0.0"
-source = "git+https://github.com/risechain/revm?rev=e44b3cd434b2de1bfc54fc9f548200ab63a6b356#e44b3cd434b2de1bfc54fc9f548200ab63a6b356"
+source = "git+https://github.com/risechain/revm?rev=3852b093e9ecb6a82416cb625cb5e611ec177fbf#3852b093e9ecb6a82416cb625cb5e611ec177fbf"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -2667,7 +2668,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "5.0.0"
-source = "git+https://github.com/risechain/revm?rev=e44b3cd434b2de1bfc54fc9f548200ab63a6b356#e44b3cd434b2de1bfc54fc9f548200ab63a6b356"
+source = "git+https://github.com/risechain/revm?rev=3852b093e9ecb6a82416cb625cb5e611ec177fbf#3852b093e9ecb6a82416cb625cb5e611ec177fbf"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -2676,7 +2677,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "7.0.0"
-source = "git+https://github.com/risechain/revm?rev=e44b3cd434b2de1bfc54fc9f548200ab63a6b356#e44b3cd434b2de1bfc54fc9f548200ab63a6b356"
+source = "git+https://github.com/risechain/revm?rev=3852b093e9ecb6a82416cb625cb5e611ec177fbf#3852b093e9ecb6a82416cb625cb5e611ec177fbf"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -2693,7 +2694,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "4.0.0"
-source = "git+https://github.com/risechain/revm?rev=e44b3cd434b2de1bfc54fc9f548200ab63a6b356#e44b3cd434b2de1bfc54fc9f548200ab63a6b356"
+source = "git+https://github.com/risechain/revm?rev=3852b093e9ecb6a82416cb625cb5e611ec177fbf#3852b093e9ecb6a82416cb625cb5e611ec177fbf"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
@@ -2713,7 +2714,7 @@ dependencies = [
 [[package]]
 name = "revme"
 version = "0.5.0"
-source = "git+https://github.com/risechain/revm?rev=e44b3cd434b2de1bfc54fc9f548200ab63a6b356#e44b3cd434b2de1bfc54fc9f548200ab63a6b356"
+source = "git+https://github.com/risechain/revm?rev=3852b093e9ecb6a82416cb625cb5e611ec177fbf#3852b093e9ecb6a82416cb625cb5e611ec177fbf"
 dependencies = [
  "alloy-rlp",
  "hash-db",
