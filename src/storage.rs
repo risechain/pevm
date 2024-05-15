@@ -143,6 +143,11 @@ impl RpcStorage {
             runtime: Runtime::new().unwrap(),
         }
     }
+
+    /// Get a snapshot of the loaded state
+    pub fn get_cache(&self) -> HashMap<Address, PlainAccount> {
+        self.cache.lock().unwrap().clone()
+    }
 }
 
 // TODO: Implement `Storage` instead.
