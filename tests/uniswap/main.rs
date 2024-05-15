@@ -12,7 +12,10 @@ pub mod erc20;
 pub mod uniswap;
 
 use crate::uniswap::generate_cluster;
-use revm::primitives::{Account, Address, BlockEnv, SpecId, TxEnv};
+use revm::{
+    db::PlainAccount,
+    primitives::{Address, BlockEnv, SpecId, TxEnv},
+};
 
 #[test]
 fn uniswap_clusters() {
@@ -20,7 +23,7 @@ fn uniswap_clusters() {
     const NUM_PEOPLE_PER_CLUSTER: usize = 4;
     const NUM_SWAPS_PER_PERSON: usize = 16;
 
-    let mut final_state = Vec::from(&[(Address::ZERO, Account::default())]);
+    let mut final_state = Vec::from(&[(Address::ZERO, PlainAccount::default())]);
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..NUM_CLUSTERS {
         let (state, txs) = generate_cluster(NUM_PEOPLE_PER_CLUSTER, NUM_SWAPS_PER_PERSON);
