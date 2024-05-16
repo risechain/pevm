@@ -49,3 +49,7 @@ $ git submodule update --init
 # Each parallel test still executes parallelly up to the number of CPUs anyway.
 $ cargo test --release -- --test-threads=1
 ```
+
+## Benchmarks
+
+See the dedicated doc [here](./benches/README.md).

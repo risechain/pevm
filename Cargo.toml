@@ -10,7 +10,7 @@ dashmap = "5.5.3"
 stacker = "0.1.15"
 
 # Let's do our best to port needed REVM changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "3852b093e9ecb6a82416cb625cb5e611ec177fbf" }
+revm = { git = "https://github.com/risechain/revm", rev = "58a126a0a3b586cb97943358deb1285e5dc9fefc" }
 
 # RPC Storage dependencies
 # TODO: Put these behind an RPC flag to not pollute the core
@@ -22,9 +22,10 @@ reqwest = "0.12.4"
 tokio = "1.37.0"
 
 [dev-dependencies]
+criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"
-revme = { git = "https://github.com/risechain/revm", rev = "3852b093e9ecb6a82416cb625cb5e611ec177fbf" }
+revme = { git = "https://github.com/risechain/revm", rev = "58a126a0a3b586cb97943358deb1285e5dc9fefc" }
 serde = "1.0.202"
 serde_json = { version = "1.0.116" }
 walkdir = "2.5.0"
@@ -33,3 +34,7 @@ walkdir = "2.5.0"
 rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
 rust.unreachable_pub = "warn"
+
+[[bench]]
+name = "mainnet"
+harness = false
