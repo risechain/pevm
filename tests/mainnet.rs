@@ -14,10 +14,10 @@ pub mod common;
 
 fn test_blocks(block_numbers: &[u64]) {
     // Minor but we can also turn this into a lazy static for reuse.
-    let rpc_url: Url = std::env::var("RPC_URL")
-        .unwrap_or("https://eth.llamarpc.com".to_string())
-        .parse()
-        .unwrap();
+    let rpc_url = match std::env::var("RPC_URL") {
+        Ok(value) if !value.is_empty() => value.parse().unwrap(),
+        _ => Url::parse("https://eth.llamarpc.com").unwrap(),
+    };
     let runtime = Runtime::new().unwrap();
     for block_number in block_numbers {
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
