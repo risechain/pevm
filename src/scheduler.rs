@@ -11,7 +11,8 @@ use std::{
     },
 };
 
-use revm::primitives::{Address, TxEnv};
+use alloy_primitives::U256;
+use revm::primitives::{Address, TransactTo, TxEnv};
 
 use crate::{ExecutionTask, Task, TxIdx, TxIncarnation, TxVersion, ValidationTask};
 
@@ -81,27 +82,56 @@ pub(crate) struct Scheduler {
 }
 
 // TODO: Decide to run sequentially if there are too many dependencies in the block.
+// TODO: Make this much faster.
 fn preprocess_dependencies(txs: &[TxEnv]) -> (TransactionsStatus, TransactionsDependents) {
     let block_size = txs.len();
-    let transactions_status: TransactionsStatus = (0..block_size)
-        .map(|_| Mutex::new(TxIncarnationStatus::ReadyToExecute(0)))
+    let mut transactions_status: Vec<TxIncarnationStatus> = (0..block_size)
+        .map(|_| TxIncarnationStatus::ReadyToExecute(0))
         .collect();
-    let transactions_dependents: TransactionsDependents =
-        (0..block_size).map(|_| Mutex::new(Vec::new())).collect();
+    let mut transactions_dependents: Vec<Vec<TxIdx>> =
+        (0..block_size).map(|_| Vec::new()).collect();
 
-    // Marking transactions from the same sender as dependents.
-    // TODO: Make this faster.
+    // Marking transactions from the same sender as dependents (all write to nonce).
     let mut tx_idxes_by_sender: HashMap<Address, Vec<TxIdx>> = HashMap::new();
+    // Marking transactions to the same address as dependents.
+    let mut tx_idxes_by_recipients: HashMap<Address, Vec<TxIdx>> = HashMap::new();
     for (tx_idx, tx) in txs.iter().enumerate() {
+        // Sender
         let sender_tx_idxes = tx_idxes_by_sender.entry(tx.caller).or_default();
         if let Some(prev_idx) = sender_tx_idxes.last() {
-            *transactions_status[tx_idx].lock().unwrap() = TxIncarnationStatus::Aborting(0);
-            *transactions_dependents[*prev_idx].lock().unwrap() = vec![tx_idx];
+            transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
+            transactions_dependents[*prev_idx].push(tx_idx);
+            // This is a simplication, to first prioritize senders to avoid nonce error
+            // during execution. In practice the recipients case weights much more, think
+            // popular CEX addresses ike Binance 14 in this block:
+            // https://etherscan.io/txs?block=13217637
+            // TODO: Build a fuller dependency graph from both same senders, recipients, and more.
+            sender_tx_idxes.push(tx_idx);
+            continue;
         }
         sender_tx_idxes.push(tx_idx);
+        // Recipient
+        // We check for a non-empty value that guarantees to update the balance of the recipient,
+        // to avoid smart contract interactions that only change some storage slots, etc.
+        if tx.value != U256::ZERO {
+            if let TransactTo::Call(to) = tx.transact_to {
+                let recipient_tx_idxes = tx_idxes_by_recipients.entry(to).or_default();
+                if let Some(prev_idx) = recipient_tx_idxes.last() {
+                    transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
+                    transactions_dependents[*prev_idx].push(tx_idx);
+                }
+                recipient_tx_idxes.push(tx_idx);
+            }
+        }
     }
 
-    (transactions_status, transactions_dependents)
+    (
+        transactions_status.into_iter().map(Mutex::new).collect(),
+        transactions_dependents
+            .into_iter()
+            .map(Mutex::new)
+            .collect(),
+    )
 }
 
 impl Scheduler {

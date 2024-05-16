@@ -16,14 +16,17 @@ use alloy_primitives::Address;
 use alloy_rpc_types::Block;
 use block_stm_revm::{execute_revm, get_block_env, get_block_spec, get_tx_envs};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use revm::db::PlainAccount;
+use revm::{db::PlainAccount, primitives::KECCAK_EMPTY};
 
 // Better project structure
 #[path = "../tests/common/mod.rs"]
 pub mod common;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    let concunrrecy_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
+    // TODO: Fine-tune concurrency level
+    let concunrrecy_level = thread::available_parallelism()
+        .unwrap_or(NonZeroUsize::MIN)
+        .min(NonZeroUsize::new(16).unwrap());
 
     for block_path in fs::read_dir("blocks").unwrap() {
         let block_path = block_path.unwrap().path();
@@ -39,10 +42,23 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         let tx_envs = get_tx_envs(&block.transactions).unwrap();
 
         // Parse state
-        let accounts: HashMap<Address, PlainAccount> = serde_json::from_reader(BufReader::new(
+        let mut accounts: HashMap<Address, PlainAccount> = serde_json::from_reader(BufReader::new(
             File::open(format!("blocks/{block_number}/state_for_execution.json")).unwrap(),
         ))
         .unwrap();
+        // Hacky but we don't serialize the whole account info to save space
+        // So we need to resconstruct intermediate values upon deserializing.
+        for (_, account) in accounts.iter_mut() {
+            account.info.previous_or_original_balance = account.info.balance;
+            account.info.previous_or_original_nonce = account.info.nonce;
+            if let Some(code) = account.info.code.clone() {
+                let code_hash = code.hash_slow();
+                account.info.code_hash = code_hash;
+                account.info.previous_or_original_code_hash = code_hash;
+            } else {
+                account.info.code_hash = KECCAK_EMPTY;
+            }
+        }
         let db = common::build_inmem_db(accounts);
 
         let mut group = c.benchmark_group(format!(
