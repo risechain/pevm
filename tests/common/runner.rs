@@ -37,7 +37,7 @@ pub fn build_inmem_db(accounts: impl IntoIterator<Item = (Address, PlainAccount)
 
 // The source-of-truth sequential execution result that BlockSTM must match.
 // Currently early returning the first encountered EVM error if there is any.
-fn execute_sequential<D: DatabaseRef + DatabaseCommit>(
+pub fn execute_sequential<D: DatabaseRef + DatabaseCommit>(
     mut db: D,
     spec_id: SpecId,
     block_env: BlockEnv,

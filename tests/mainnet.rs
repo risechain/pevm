@@ -51,13 +51,11 @@ fn ethereum_mainnet_blocks() {
         // FRONTIER
         46147, // First block with a transaction
               // 930196,  // Relatively large block
-              // 1149999, // Last block
               // HOMESTEAD
               // 1150000, // First block
               // 2179522, // Relatively large block
               // 2462997, // Last block with a transaction
               // TANGERINE
-              // 2463002, // First block with a transaction
               // 2641321, // Relatively large block
               // 2674998, // Last block with a transaction
               // SPURIOUS_DRAGON
