@@ -42,3 +42,7 @@ harness = false
 [[bench]]
 name = "gigagas"
 harness = false
+
+[[bench]]
+name = "erc20"
+harness = false
