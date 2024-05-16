@@ -45,3 +45,11 @@ This benchmark includes a few transactions for each Ethereum hardfork that chang
 | 19426586     | SHANGHAI        | 127              | 1,5757,891 | 2.5718 ms            | 1.2886 ms          | **50%** |
 | 19426587     | CANCUN          | 37               | 2,633,933  | 440.34 µs            | 493.62 µs          | 112%    |
 | 19638737     | CANCUN          | 381              | 15,932,416 | 3.1573 ms            | 57.751 ms          | 1829%   |
+
+## Gigagas
+
+This benchmark includes mocked blocks that exceed 1 Gigagas to see how PEVM can speed up building and syncing large blocks in the future. All blocks are currently in the CANCUN spec.
+
+|                           | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | P / S   |
+| ------------------------- | ---------------- | ------------- | -------------------- | ------------------ | ------- |
+| Independent Raw Transfers | 47,620           | 1,000,020,000 | 197.22 ms            | 178.64 ms          | **91%** |

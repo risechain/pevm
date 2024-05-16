@@ -38,3 +38,7 @@ rust.unreachable_pub = "warn"
 [[bench]]
 name = "mainnet"
 harness = false
+
+[[bench]]
+name = "gigagas"
+harness = false
