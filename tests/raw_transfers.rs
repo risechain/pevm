@@ -1,9 +1,9 @@
 // Test raw transfers -- only send some ETH from one account to another without extra data.
 
-use alloy_rpc_types::{Block, BlockTransactions, Header, Transaction};
+use alloy_rpc_types::{Block, BlockTransactions, Transaction};
 use rand::random;
 use revm::primitives::{
-    alloy_primitives::U160, env::TxEnv, Address, BlockEnv, SpecId, TransactTo, B256, U256,
+    alloy_primitives::U160, env::TxEnv, Address, BlockEnv, SpecId, TransactTo, U256,
 };
 
 pub mod common;
@@ -80,14 +80,7 @@ fn raw_transfers_independent_alloy() {
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         common::build_inmem_db((0..=block_size).map(common::mock_account)),
         Block {
-            header: Header {
-                number: Some(1),
-                timestamp: 1710338135,
-                mix_hash: Some(B256::ZERO),
-                excess_blob_gas: Some(0),
-                gas_limit: u128::MAX,
-                ..Header::default()
-            },
+            header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
             transactions: BlockTransactions::Full(
                 (1..block_size)
                     .map(|i| {
