@@ -111,12 +111,12 @@ pub fn test_execute_revm<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
     D::Error: Debug,
 {
     // TODO: Fine-tune concurrency level
-    let concunrrecy_level = thread::available_parallelism()
+    let concurrency_level = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
         .min(NonZeroUsize::new(16).unwrap());
     assert_execution_result::<D>(
         execute_sequential(db.clone(), spec_id, block_env.clone(), &txs),
-        block_stm_revm::execute_revm(db, spec_id, block_env, txs, concunrrecy_level),
+        block_stm_revm::execute_revm(db, spec_id, block_env, txs, concurrency_level),
     );
 }
 
@@ -130,7 +130,7 @@ pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>
     D::Error: Debug,
 {
     // TODO: Fine-tune concurrency level
-    let concunrrecy_level = thread::available_parallelism()
+    let concurrency_level = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
         .min(NonZeroUsize::new(16).unwrap());
     assert_execution_result::<D>(
@@ -140,6 +140,6 @@ pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>
             get_block_env(&block.header, parent_header.as_ref()).unwrap(),
             &get_tx_envs(&block.transactions).unwrap(),
         ),
-        block_stm_revm::execute(db, block, parent_header, concunrrecy_level),
+        block_stm_revm::execute(db, block, parent_header, concurrency_level),
     );
 }

@@ -24,7 +24,7 @@ pub mod common;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     // TODO: Fine-tune concurrency level
-    let concunrrecy_level = thread::available_parallelism()
+    let concurrency_level = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
         .min(NonZeroUsize::new(16).unwrap());
 
@@ -83,7 +83,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     black_box(spec_id),
                     black_box(block_env.clone()),
                     black_box(tx_envs.clone()),
-                    black_box(concunrrecy_level),
+                    black_box(concurrency_level),
                 )
             })
         });

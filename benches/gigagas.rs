@@ -38,7 +38,7 @@ pub fn benchmark_gigagas(c: &mut Criterion) {
             }
         })
         .collect::<Vec<_>>();
-    let concunrrecy_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
+    let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
 
     let mut group = c.benchmark_group("Independent Raw Transfers");
     group.bench_function("Sequential", |b| {
@@ -58,7 +58,7 @@ pub fn benchmark_gigagas(c: &mut Criterion) {
                 black_box(spec_id),
                 black_box(block_env.clone()),
                 black_box(tx_envs.clone()),
-                black_box(concunrrecy_level),
+                black_box(concurrency_level),
             )
         })
     });
