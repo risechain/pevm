@@ -42,3 +42,7 @@ harness = false
 [[bench]]
 name = "gigagas"
 harness = false
+
+[profile.bench]
+ito = true
+codegen-units = 1
