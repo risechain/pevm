@@ -39,6 +39,22 @@ type TxIdx = usize;
 // The i-th time a transaction is re-executed, counting from 0.
 type TxIncarnation = usize;
 
+// - ReadyToExecute(i) --try_incarnate--> Executing(i)
+// Non-blocked execution:
+//   - Executing(i) --finish_execution--> Executed(i)
+//   - Executed(i) --try_validation_abort--> Aborting(i)
+//   - Aborted(i) --finish_validation(w.aborted=true)--> ReadyToExecute(i+1)
+// Blocked execution:
+//   - Executing(i) --add_dependency--> Aborting(i)
+//   - Aborting(i) --resume--> ReadyToExecute(i+1)
+#[derive(PartialEq, Debug)]
+pub(crate) enum TxIncarnationStatus {
+    ReadyToExecute(TxIncarnation),
+    Executing(TxIncarnation),
+    Executed(TxIncarnation),
+    Aborting(TxIncarnation),
+}
+
 // BlockSTM maintains an in-memory multi-version data structure that
 // stores for each memory location the latest value written per
 // transaction, along with the associated transaction version. When a

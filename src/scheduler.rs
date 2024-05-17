@@ -1,6 +1,5 @@
 use std::{
     cmp::min,
-    collections::HashMap,
     sync::{
         // TODO: Fine-tune all atomic `Ordering`s.
         // We're starting with `Relaxed` for maximum performance
@@ -11,29 +10,7 @@ use std::{
     },
 };
 
-use alloy_primitives::U256;
-use revm::primitives::{Address, TransactTo, TxEnv};
-
-use crate::{ExecutionTask, Task, TxIdx, TxIncarnation, TxVersion, ValidationTask};
-
-// - ReadyToExecute(i) --try_incarnate--> Executing(i)
-// Non-blocked execution:
-//   - Executing(i) --finish_execution--> Executed(i)
-//   - Executed(i) --try_validation_abort--> Aborting(i)
-//   - Aborted(i) --finish_validation(w.aborted=true)--> ReadyToExecute(i+1)
-// Blocked execution:
-//   - Executing(i) --add_dependency--> Aborting(i)
-//   - Aborting(i) --resume--> ReadyToExecute(i+1)
-#[derive(PartialEq, Debug)]
-pub(crate) enum TxIncarnationStatus {
-    ReadyToExecute(TxIncarnation),
-    Executing(TxIncarnation),
-    Executed(TxIncarnation),
-    Aborting(TxIncarnation),
-}
-
-type TransactionsStatus = Vec<Mutex<TxIncarnationStatus>>;
-type TransactionsDependents = Vec<Mutex<Vec<TxIdx>>>;
+use crate::{ExecutionTask, Task, TxIdx, TxIncarnationStatus, TxVersion, ValidationTask};
 
 // The BlockSTM collaborative scheduler coordinates execution & validation
 // tasks among threads.
@@ -71,79 +48,32 @@ pub(crate) struct Scheduler {
     decrease_cnt: AtomicUsize,
     /// The most up-to-date incarnation number (initially 0) and
     /// the status of this incarnation.
-    transactions_status: TransactionsStatus,
+    transactions_status: Vec<Mutex<TxIncarnationStatus>>,
     /// The list of dependent transactions to resumne when the
     /// key transaction is re-executed.
-    transactions_dependents: TransactionsDependents,
+    transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
     /// Number of ongoing execution and validation tasks.
     num_active_tasks: AtomicUsize,
     /// Marker for completion
     done_marker: AtomicBool,
 }
 
-// TODO: Decide to run sequentially if there are too many dependencies in the block.
-// TODO: Make this much faster.
-fn preprocess_dependencies(txs: &[TxEnv]) -> (TransactionsStatus, TransactionsDependents) {
-    let block_size = txs.len();
-    let mut transactions_status: Vec<TxIncarnationStatus> = (0..block_size)
-        .map(|_| TxIncarnationStatus::ReadyToExecute(0))
-        .collect();
-    let mut transactions_dependents: Vec<Vec<TxIdx>> =
-        (0..block_size).map(|_| Vec::new()).collect();
-
-    // Marking transactions from the same sender as dependents (all write to nonce).
-    let mut tx_idxes_by_sender: HashMap<Address, Vec<TxIdx>> = HashMap::new();
-    // Marking transactions to the same address as dependents.
-    let mut tx_idxes_by_recipients: HashMap<Address, Vec<TxIdx>> = HashMap::new();
-    for (tx_idx, tx) in txs.iter().enumerate() {
-        // Sender
-        let sender_tx_idxes = tx_idxes_by_sender.entry(tx.caller).or_default();
-        if let Some(prev_idx) = sender_tx_idxes.last() {
-            transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
-            transactions_dependents[*prev_idx].push(tx_idx);
-            // This is a simplication, to first prioritize senders to avoid nonce error
-            // during execution. In practice the recipients case weights much more, think
-            // popular CEX addresses ike Binance 14 in this block:
-            // https://etherscan.io/txs?block=13217637
-            // TODO: Build a fuller dependency graph from both same senders, recipients, and more.
-            sender_tx_idxes.push(tx_idx);
-            continue;
-        }
-        sender_tx_idxes.push(tx_idx);
-        // Recipient
-        // We check for a non-empty value that guarantees to update the balance of the recipient,
-        // to avoid smart contract interactions that only change some storage slots, etc.
-        if tx.value != U256::ZERO {
-            if let TransactTo::Call(to) = tx.transact_to {
-                let recipient_tx_idxes = tx_idxes_by_recipients.entry(to).or_default();
-                if let Some(prev_idx) = recipient_tx_idxes.last() {
-                    transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
-                    transactions_dependents[*prev_idx].push(tx_idx);
-                }
-                recipient_tx_idxes.push(tx_idx);
-            }
-        }
-    }
-
-    (
-        transactions_status.into_iter().map(Mutex::new).collect(),
-        transactions_dependents
-            .into_iter()
-            .map(Mutex::new)
-            .collect(),
-    )
-}
-
 impl Scheduler {
-    pub(crate) fn new(txs: &[TxEnv]) -> Self {
-        let (transactions_status, transactions_dependents) = preprocess_dependencies(txs);
+    pub(crate) fn new(
+        block_size: usize,
+        transactions_status: Vec<TxIncarnationStatus>,
+        transactions_dependents: Vec<Vec<TxIdx>>,
+    ) -> Self {
         Self {
-            block_size: txs.len(),
+            block_size,
             execution_idx: AtomicUsize::new(0),
             validation_idx: AtomicUsize::new(0),
             decrease_cnt: AtomicUsize::new(0),
-            transactions_status,
-            transactions_dependents,
+            transactions_status: transactions_status.into_iter().map(Mutex::new).collect(),
+            transactions_dependents: transactions_dependents
+                .into_iter()
+                .map(Mutex::new)
+                .collect(),
             num_active_tasks: AtomicUsize::new(0),
             done_marker: AtomicBool::new(false),
         }
@@ -189,6 +119,10 @@ impl Scheduler {
                     tx_incarnation: i,
                 });
             }
+            // Returning nothing here seems to waste another worker loop
+            // while we can just drop `transaction_status` and recurse
+            // on the next execution id until we find work.
+            // TODO: Try & benchmark that
         }
         self.num_active_tasks.fetch_sub(1, Relaxed);
         None

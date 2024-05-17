@@ -110,10 +110,7 @@ pub fn test_execute_revm<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
 ) where
     D::Error: Debug,
 {
-    // TODO: Fine-tune concurrency level
-    let concurrency_level = thread::available_parallelism()
-        .unwrap_or(NonZeroUsize::MIN)
-        .min(NonZeroUsize::new(16).unwrap());
+    let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result::<D>(
         execute_sequential(db.clone(), spec_id, block_env.clone(), &txs),
         block_stm_revm::execute_revm(db, spec_id, block_env, txs, concurrency_level),
@@ -129,10 +126,7 @@ pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>
 ) where
     D::Error: Debug,
 {
-    // TODO: Fine-tune concurrency level
-    let concurrency_level = thread::available_parallelism()
-        .unwrap_or(NonZeroUsize::MIN)
-        .min(NonZeroUsize::new(16).unwrap());
+    let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result::<D>(
         execute_sequential(
             db.clone(),
