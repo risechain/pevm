@@ -48,3 +48,4 @@ harness = false
 # degrades performance on the heavier ms mainnet benches!
 # lto = true
 codegen-units = 1
+debug = true

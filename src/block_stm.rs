@@ -1,18 +1,21 @@
 use std::{
+    collections::HashMap,
     num::NonZeroUsize,
     sync::{Arc, Mutex, RwLock},
     thread,
 };
 
+use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, Header};
-use revm::primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TxEnv};
+use revm::primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv};
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
     primitives::{get_block_env, get_block_spec, get_tx_envs},
     scheduler::Scheduler,
     vm::{ExecutionError, Vm, VmExecutionResult},
-    ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TxVersion, ValidationTask,
+    ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TxIdx, TxIncarnationStatus,
+    TxVersion, ValidationTask,
 };
 
 /// Errors when executing a block with BlockSTM.
@@ -72,7 +75,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
     // Initialize main components
     let block_size = txs.len();
-    let scheduler = Scheduler::new(&txs);
+    let (transactions_status, transactions_dependents, max_concurrency_level) =
+        preprocess_dependencies(&txs);
+    let scheduler = Scheduler::new(block_size, transactions_status, transactions_dependents);
     let mv_memory = Arc::new(MvMemory::new(block_size));
     let vm = Vm::new(storage, spec_id, block_env.clone(), txs, mv_memory.clone());
 
@@ -109,12 +114,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
     // TODO: Better thread handling
     thread::scope(|scope| {
-        // TODO: Further fine-tune the concurrency level to avoid edge cases like executing
-        // two transactions with 16+ threads (hence overheads). For instance, we can estimate
-        // a max concurrency level of the no. transactions multiplying by 2, as a naive match
-        // with the double thread workloads (an execution and a validation task per tx).
-        // There are probably more precise ways to tune this.
-        for _ in 0..concurrency_level.into() {
+        for _ in 0..concurrency_level.min(max_concurrency_level).into() {
             scope.spawn(|| {
                 let mut task = None;
                 while !scheduler.done() {
@@ -190,6 +190,76 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             }
         })
         .collect())
+}
+
+// TODO: Make this as fast as possible.
+fn preprocess_dependencies(
+    txs: &[TxEnv],
+) -> (Vec<TxIncarnationStatus>, Vec<Vec<TxIdx>>, NonZeroUsize) {
+    let block_size = txs.len();
+    if block_size == 0 {
+        return (Vec::new(), Vec::new(), NonZeroUsize::MIN);
+    }
+
+    let mut transactions_status: Vec<TxIncarnationStatus> = (0..block_size)
+        .map(|_| TxIncarnationStatus::ReadyToExecute(0))
+        .collect();
+    let mut transactions_dependents: Vec<Vec<TxIdx>> =
+        (0..block_size).map(|_| Vec::new()).collect();
+
+    // Marking transactions from the same sender as dependents (all write to nonce).
+    let mut tx_idxes_by_sender: HashMap<Address, Vec<TxIdx>> = HashMap::new();
+    // Marking transactions to the same address as dependents.
+    let mut tx_idxes_by_recipients: HashMap<Address, Vec<TxIdx>> = HashMap::new();
+    for (tx_idx, tx) in txs.iter().enumerate() {
+        // Sender
+        let sender_tx_idxes = tx_idxes_by_sender.entry(tx.caller).or_default();
+        if let Some(prev_idx) = sender_tx_idxes.last() {
+            transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
+            transactions_dependents[*prev_idx].push(tx_idx);
+            // This is a simplication, to first prioritize senders to avoid nonce error
+            // during execution. In practice the recipients case weights much more, think
+            // popular CEX addresses ike Binance 14 in this block:
+            // https://etherscan.io/txs?block=13217637
+            // TODO: Build a fuller dependency graph from both same senders, recipients, and more.
+            sender_tx_idxes.push(tx_idx);
+            continue;
+        }
+        sender_tx_idxes.push(tx_idx);
+        // Recipient
+        // We check for a non-empty value that guarantees to update the balance of the recipient,
+        // to avoid smart contract interactions that only change some storage slots, etc.
+        if tx.value != U256::ZERO {
+            if let TransactTo::Call(to) = tx.transact_to {
+                let recipient_tx_idxes = tx_idxes_by_recipients.entry(to).or_default();
+                if let Some(prev_idx) = recipient_tx_idxes.last() {
+                    transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
+                    transactions_dependents[*prev_idx].push(tx_idx);
+                }
+                recipient_tx_idxes.push(tx_idx);
+            }
+        }
+    }
+
+    // Estimate the max concurrency level to not waste thread overheads
+    // on blocks with many dependencies among transactions.
+    // TODO: Let's put in the work to find some hot algorithms here!
+    // Currently using very sad heuristics that overfit the mainnet benchmark.
+    let mut max_concurrency_level = NonZeroUsize::new(16).unwrap();
+    let num_dependent_txs: usize = transactions_status
+        .iter()
+        .filter(|status| matches!(status, TxIncarnationStatus::Aborting(_)))
+        .count();
+    let dependent_ratio = num_dependent_txs as f64 / block_size as f64;
+    if dependent_ratio > 0.85 {
+        max_concurrency_level = NonZeroUsize::new(8).unwrap();
+    }
+
+    (
+        transactions_status,
+        transactions_dependents,
+        max_concurrency_level,
+    )
 }
 
 // Execute the next incarnation of a transaction.
