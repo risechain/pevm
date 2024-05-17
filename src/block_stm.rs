@@ -26,12 +26,16 @@ pub enum BlockStmError {
     MissingTransactionData,
     /// EVM execution error.
     ExecutionError(ExecutionError),
+    /// Impractical errors that should be unreachable.
+    /// The library has bugs if this is yielded.
+    UnreachableError,
 }
 
 /// Execution result of BlockSTM.
 pub type BlockStmResult = Result<Vec<ResultAndState>, BlockStmError>;
 
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
+/// TODO: Better error handling.
 pub fn execute<S: Storage + Send + Sync>(
     storage: S,
     block: Block,
@@ -51,6 +55,7 @@ pub fn execute<S: Storage + Send + Sync>(
 }
 
 /// Execute an REVM block.
+// TODO: Better error handling.
 pub fn execute_revm<S: Storage + Send + Sync>(
     storage: S,
     spec_id: SpecId,
@@ -58,21 +63,57 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     txs: Vec<TxEnv>,
     concurrency_level: NonZeroUsize,
 ) -> BlockStmResult {
-    let block_size = txs.len();
-    let scheduler = Scheduler::new(&txs);
-    let mv_memory = Arc::new(MvMemory::new(block_size));
+    // Beneficiary setup for post-processing
+    let beneficiary_location = MemoryLocation::Basic(block_env.coinbase);
     let mut beneficiary_account_info = match storage.basic(block_env.coinbase) {
         Ok(Some(account)) => account.into(),
         _ => AccountInfo::default(),
     };
+
+    // Initialize main components
+    let block_size = txs.len();
+    let scheduler = Scheduler::new(&txs);
+    let mv_memory = Arc::new(MvMemory::new(block_size));
     let vm = Vm::new(storage, spec_id, block_env.clone(), txs, mv_memory.clone());
 
-    // TODO: Should we move this to `Vm`?
+    // Edge case that is pretty common
+    // TODO: Shortcut even before initializing the main parallel components.
+    // It would require structuring a cleaner trait interface for any Storage
+    // to act as the standalone DB for sequential execution.
+    if block_size == 1 {
+        return match vm.execute(0) {
+            VmExecutionResult::ExecutionError(err) => Err(BlockStmError::ExecutionError(err)),
+            VmExecutionResult::Ok {
+                mut result_and_state,
+                write_set,
+                ..
+            } => {
+                for (location, value) in write_set {
+                    if location == beneficiary_location {
+                        result_and_state.state.insert(
+                            block_env.coinbase,
+                            post_process_beneficiary(&mut beneficiary_account_info, &value),
+                        );
+                        break;
+                    }
+                }
+                Ok(vec![result_and_state])
+            }
+            _ => Err(BlockStmError::UnreachableError),
+        };
+    }
+
+    // Start multithreading mainline
     let execution_error = RwLock::new(None);
     let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
 
     // TODO: Better thread handling
     thread::scope(|scope| {
+        // TODO: Further fine-tune the concurrency level to avoid edge cases like executing
+        // two transactions with 16+ threads (hence overheads). For instance, we can estimate
+        // a max concurrency level of the no. transactions multiplying by 2, as a naive match
+        // with the double thread workloads (an execution and a validation task per tx).
+        // There are probably more precise ways to tune this.
         for _ in 0..concurrency_level.into() {
             scope.spawn(|| {
                 let mut task = None;
@@ -137,27 +178,16 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         .map(|m| m.lock().unwrap().clone().unwrap())
         .enumerate()
         .map(|(tx_idx, mut result_and_state)| {
-            match mv_memory.read_absolute(&MemoryLocation::Basic(block_env.coinbase), tx_idx) {
-                ReadMemoryResult::Ok {
-                    value: MemoryValue::Basic(account),
-                    ..
-                } => {
-                    beneficiary_account_info = account;
-                }
-                ReadMemoryResult::Ok {
-                    value: MemoryValue::LazyBeneficiaryBalance(addition),
-                    ..
-                } => {
-                    beneficiary_account_info.balance += addition;
+            match mv_memory.read_absolute(&beneficiary_location, tx_idx) {
+                ReadMemoryResult::Ok { value, .. } => {
+                    result_and_state.state.insert(
+                        block_env.coinbase,
+                        post_process_beneficiary(&mut beneficiary_account_info, &value),
+                    );
+                    result_and_state
                 }
                 _ => unreachable!(),
             }
-            let mut beneficiary_account = Account::from(beneficiary_account_info.clone());
-            beneficiary_account.mark_touch();
-            result_and_state
-                .state
-                .insert(block_env.coinbase, beneficiary_account);
-            result_and_state
         })
         .collect())
 }
@@ -227,4 +257,25 @@ fn try_validate(
         mv_memory.convert_writes_to_estimates(tx_version.tx_idx);
     }
     scheduler.finish_validation(tx_version, aborted)
+}
+
+// Fully evaluate a beneficiary account at the end of block execution,
+// including lazy updating atomic balances.
+// TODO: Cleaner interface & error handling
+fn post_process_beneficiary(
+    beneficiary_account_info: &mut AccountInfo,
+    value: &MemoryValue,
+) -> Account {
+    match value {
+        MemoryValue::Basic(info) => {
+            *beneficiary_account_info = info.clone();
+        }
+        MemoryValue::LazyBeneficiaryBalance(addition) => {
+            beneficiary_account_info.balance += addition;
+        }
+        _ => unreachable!(),
+    }
+    let mut beneficiary_account = Account::from(beneficiary_account_info.clone());
+    beneficiary_account.mark_touch();
+    beneficiary_account
 }
