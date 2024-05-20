@@ -200,7 +200,9 @@ impl DatabaseRef for RpcStorage {
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         if let Some(account) = self.cache.lock().unwrap().get(&address) {
-            return Ok(account.storage.get(&index).cloned().unwrap_or(U256::ZERO));
+            if let Some(value) = account.storage.get(&index) {
+                return Ok(*value);
+            }
         }
         let value = self.runtime.block_on(
             self.provider
@@ -208,13 +210,17 @@ impl DatabaseRef for RpcStorage {
                 .block_id(self.block_id)
                 .into_future(),
         )?;
-        self.cache.lock().unwrap().insert(
-            address,
-            PlainAccount {
-                info: self.basic(address)?.unwrap_or_default().into(),
-                storage: [(index, value)].into_iter().collect(),
-            },
-        );
+        match self.cache.lock().unwrap().entry(address) {
+            std::collections::hash_map::Entry::Occupied(mut account) => {
+                account.get_mut().storage.insert(index, value);
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(PlainAccount {
+                    info: self.basic(address)?.unwrap_or_default().into(),
+                    storage: [(index, value)].into_iter().collect(),
+                });
+            }
+        };
         Ok(value)
     }
 

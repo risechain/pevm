@@ -20,6 +20,7 @@ fn empty_alloy_block() {
             ..Block::default()
         },
         None,
+        true,
     );
 }
 
@@ -51,6 +52,7 @@ fn one_tx_alloy_block() {
             ..Block::default()
         },
         None,
+        true,
     );
 }
 
