@@ -10,7 +10,12 @@ use std::{
     },
 };
 
-use crate::{ExecutionTask, Task, TxIdx, TxIncarnationStatus, TxVersion, ValidationTask};
+use ahash::{AHashMap, AHashSet};
+
+use crate::{
+    ExecutionTask, Task, TransactionsDependencies, TransactionsDependents, TransactionsStatus,
+    TxIdx, TxIncarnationStatus, TxVersion, ValidationTask,
+};
 
 // The BlockSTM collaborative scheduler coordinates execution & validation
 // tasks among threads.
@@ -51,7 +56,17 @@ pub(crate) struct Scheduler {
     transactions_status: Vec<Mutex<TxIncarnationStatus>>,
     /// The list of dependent transactions to resumne when the
     /// key transaction is re-executed.
-    transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
+    transactions_dependents: Vec<Mutex<AHashSet<TxIdx>>>,
+    /// A list of optional dependencies flagged during preprocessing.
+    /// For instance, for a transaction to depend on two lower others,
+    /// one send to the same recipient address, and one is from
+    /// the same sender. We cannot casually check if all dependencies
+    /// are clear with the dependents map as it can only lock the
+    /// dependency. Two dependencies may check at the same time
+    /// before they clear and think that the dependent is not yet
+    /// ready, making it forever unexecuted.
+    // TODO: Build a fuller dependency graph.
+    transactions_dependencies: AHashMap<TxIdx, Mutex<AHashSet<TxIdx>>>,
     /// Number of ongoing execution and validation tasks.
     num_active_tasks: AtomicUsize,
     /// Marker for completion
@@ -61,8 +76,9 @@ pub(crate) struct Scheduler {
 impl Scheduler {
     pub(crate) fn new(
         block_size: usize,
-        transactions_status: Vec<TxIncarnationStatus>,
-        transactions_dependents: Vec<Vec<TxIdx>>,
+        transactions_status: TransactionsStatus,
+        transactions_dependents: TransactionsDependents,
+        transactions_dependencies: TransactionsDependencies,
     ) -> Self {
         Self {
             block_size,
@@ -73,6 +89,10 @@ impl Scheduler {
             transactions_dependents: transactions_dependents
                 .into_iter()
                 .map(Mutex::new)
+                .collect(),
+            transactions_dependencies: transactions_dependencies
+                .into_iter()
+                .map(|(tx_idx, deps)| (tx_idx, Mutex::new(deps)))
                 .collect(),
             num_active_tasks: AtomicUsize::new(0),
             done_marker: AtomicBool::new(false),
@@ -192,7 +212,7 @@ impl Scheduler {
             let mut blocking_dependents = self.transactions_dependents[blocking_tx_idx]
                 .lock()
                 .unwrap();
-            blocking_dependents.push(tx_idx);
+            blocking_dependents.insert(tx_idx);
             drop(blocking_dependents);
 
             self.num_active_tasks.fetch_sub(1, Relaxed);
@@ -239,6 +259,16 @@ impl Scheduler {
             // Resume dependent transactions
             let mut min_dependent_idx = None;
             for tx_idx in dependents.iter() {
+                if let Some(deps) = self.transactions_dependencies.get(tx_idx) {
+                    // TODO: Better error handling
+                    let mut deps = deps.lock().unwrap();
+                    deps.retain(|dep_idx| dep_idx != &tx_version.tx_idx);
+                    // Skip this dependent as it has other pending dependencies.
+                    // Let the last one evoke it.
+                    if !deps.is_empty() {
+                        continue;
+                    }
+                }
                 self.set_ready_status(*tx_idx);
                 min_dependent_idx = match min_dependent_idx {
                     None => Some(*tx_idx),

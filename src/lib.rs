@@ -2,7 +2,8 @@
 
 // TODO: Better types & API please
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
+
 use revm::primitives::{AccountInfo, Address, U256};
 
 // TODO: More granularity here, for instance, to separate an account's
@@ -55,6 +56,17 @@ pub(crate) enum TxIncarnationStatus {
     Executed(TxIncarnation),
     Aborting(TxIncarnation),
 }
+
+// TODO: Clearer doc. See `Scheduler` in `scheduler.rs` for now.
+type TransactionsStatus = Vec<TxIncarnationStatus>;
+// We use `Vec` for dependents to simplify runtime update code.
+// We use `HashMap` for dependencies as we're only adding
+// them during preprocessing and removing them during processing.
+// The undelrying `HashSet` is to simplify index deduplication logic
+// while adding new dependencies.
+// TODO: Intuitively both should share a smiliar data structure?
+type TransactionsDependents = Vec<AHashSet<TxIdx>>;
+type TransactionsDependencies = AHashMap<TxIdx, AHashSet<TxIdx>>;
 
 // BlockSTM maintains an in-memory multi-version data structure that
 // stores for each memory location the latest value written per

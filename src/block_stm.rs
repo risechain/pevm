@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, Header};
 use revm::primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv};
@@ -14,8 +14,9 @@ use crate::{
     primitives::{get_block_env, get_block_spec, get_tx_envs},
     scheduler::Scheduler,
     vm::{ExecutionError, Vm, VmExecutionResult},
-    ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TxIdx, TxIncarnationStatus,
-    TxVersion, ValidationTask,
+    ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependencies,
+    TransactionsDependents, TransactionsStatus, TxIdx, TxIncarnationStatus, TxVersion,
+    ValidationTask,
 };
 
 /// Errors when executing a block with BlockSTM.
@@ -76,9 +77,18 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
     // Initialize main components
     let block_size = txs.len();
-    let (transactions_status, transactions_dependents, max_concurrency_level) =
-        preprocess_dependencies(&txs);
-    let scheduler = Scheduler::new(block_size, transactions_status, transactions_dependents);
+    let (
+        transactions_status,
+        transactions_dependents,
+        transactions_dependencies,
+        max_concurrency_level,
+    ) = preprocess_dependencies(&beneficiary_address, &txs);
+    let scheduler = Scheduler::new(
+        block_size,
+        transactions_status,
+        transactions_dependents,
+        transactions_dependencies,
+    );
     let mv_memory = Arc::new(MvMemory::new(block_size));
     let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
 
@@ -208,51 +218,91 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
 // TODO: Make this as fast as possible.
 fn preprocess_dependencies(
+    beneficiary_address: &Address,
     txs: &[TxEnv],
-) -> (Vec<TxIncarnationStatus>, Vec<Vec<TxIdx>>, NonZeroUsize) {
+) -> (
+    TransactionsStatus,
+    TransactionsDependents,
+    TransactionsDependencies,
+    NonZeroUsize,
+) {
     let block_size = txs.len();
     if block_size == 0 {
-        return (Vec::new(), Vec::new(), NonZeroUsize::MIN);
+        return (Vec::new(), Vec::new(), AHashMap::new(), NonZeroUsize::MIN);
     }
 
-    let mut transactions_status: Vec<TxIncarnationStatus> = (0..block_size)
+    let mut transactions_status: TransactionsStatus = (0..block_size)
         .map(|_| TxIncarnationStatus::ReadyToExecute(0))
         .collect();
-    let mut transactions_dependents: Vec<Vec<TxIdx>> =
-        (0..block_size).map(|_| Vec::new()).collect();
+    let mut transactions_dependents: TransactionsDependents =
+        (0..block_size).map(|_| AHashSet::new()).collect();
+    let mut transactions_dependencies: TransactionsDependencies = AHashMap::new();
 
     // Marking transactions from the same sender as dependents (all write to nonce).
     let mut tx_idxes_by_sender: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
     // Marking transactions to the same address as dependents.
     let mut tx_idxes_by_recipients: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
     for (tx_idx, tx) in txs.iter().enumerate() {
-        // Sender
-        let sender_tx_idxes = tx_idxes_by_sender.entry(tx.caller).or_default();
-        if let Some(prev_idx) = sender_tx_idxes.last() {
+        let mut register_dependency = |dependency_idx: usize| {
             transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
-            transactions_dependents[*prev_idx].push(tx_idx);
-            // This is a simplication, to first prioritize senders to avoid nonce error
-            // during execution. In practice the recipients case weights much more, think
-            // popular CEX addresses ike Binance 14 in this block:
-            // https://etherscan.io/txs?block=13217637
-            // TODO: Build a fuller dependency graph from both same senders, recipients, and more.
-            sender_tx_idxes.push(tx_idx);
-            continue;
+            transactions_dependents[dependency_idx].insert(tx_idx);
+            transactions_dependencies
+                .entry(tx_idx)
+                .or_default()
+                .insert(dependency_idx);
+        };
+
+        if &tx.caller == beneficiary_address && tx_idx > 0 {
+            register_dependency(tx_idx - 1);
         }
-        sender_tx_idxes.push(tx_idx);
-        // Recipient
+        // Sender as Sender
+        if let Some(prev_idx) = tx_idxes_by_sender
+            .get(&tx.caller)
+            .and_then(|tx_idxs| tx_idxs.last())
+        {
+            register_dependency(*prev_idx);
+        }
+        // Sender as Recipient
+        // This is critical to avoid this nasty race condition:
+        // 1. A spends money
+        // 2. B sends money to A
+        // 3. A spends money
+        // Without (3) depending on (2), (2) may race and write to A first, then (1) comes
+        // second flagging (2) for re-execution and execute (3) as dependency. (3) would
+        // panic with a nonce error reading from (2) before it rewrites the new nonce
+        // reading from (1).
+        if let Some(prev_idx) = tx_idxes_by_recipients
+            .get(&tx.caller)
+            .and_then(|tx_idxs| tx_idxs.last())
+        {
+            register_dependency(*prev_idx);
+        }
         // We check for a non-empty value that guarantees to update the balance of the recipient,
         // to avoid smart contract interactions that only change some storage slots, etc.
         if tx.value != U256::ZERO {
             if let TransactTo::Call(to) = tx.transact_to {
+                if &to == beneficiary_address && tx_idx > 0 {
+                    register_dependency(tx_idx - 1);
+                }
+                // Recipient as Sender
+                if let Some(prev_idx) = tx_idxes_by_sender
+                    .get(&to)
+                    .and_then(|tx_idxs| tx_idxs.last())
+                {
+                    register_dependency(*prev_idx);
+                }
+                // Recipient as Recipient
                 let recipient_tx_idxes = tx_idxes_by_recipients.entry(to).or_default();
                 if let Some(prev_idx) = recipient_tx_idxes.last() {
-                    transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
-                    transactions_dependents[*prev_idx].push(tx_idx);
+                    register_dependency(*prev_idx);
                 }
                 recipient_tx_idxes.push(tx_idx);
             }
         }
+        tx_idxes_by_sender
+            .entry(tx.caller)
+            .or_default()
+            .push(tx_idx);
     }
 
     let min_concurrency_level = NonZeroUsize::new(2).unwrap();
@@ -266,6 +316,7 @@ fn preprocess_dependencies(
     (
         transactions_status,
         transactions_dependents,
+        transactions_dependencies,
         max_concurrency_level,
     )
 }
