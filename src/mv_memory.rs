@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 // ~x2 performance gain over a naive `RwLock<HashMap>`!
 use dashmap::{mapref::entry::Entry, DashMap};
@@ -43,7 +43,7 @@ pub(crate) struct MvMemory {
     data: DashMap<
         MemoryLocation,
         // TODO: Use an id hasher for performance.
-        DashMap<TxIdx, MemoryEntry>,
+        HashMap<TxIdx, MemoryEntry>,
     >,
     last_written_locations: Vec<Mutex<Vec<MemoryLocation>>>,
     last_read_set: Vec<Mutex<ReadSet>>,
@@ -77,14 +77,13 @@ impl MvMemory {
             // two threads get `None` first, then the latter's `insert` overwrote
             // the former's.
             match self.data.entry(location.clone()) {
-                Entry::Occupied(location_map) => {
-                    location_map.get().insert(tx_version.tx_idx, entry);
+                Entry::Occupied(mut written_transactions) => {
+                    written_transactions
+                        .get_mut()
+                        .insert(tx_version.tx_idx, entry);
                 }
                 Entry::Vacant(vacant) => {
-                    // TODO: Fine-tune the number of shards
-                    let location_map = DashMap::with_shard_amount(2);
-                    location_map.insert(tx_version.tx_idx, entry);
-                    vacant.insert(location_map);
+                    vacant.insert([(tx_version.tx_idx, entry)].into_iter().collect());
                 }
             }
         }
@@ -101,8 +100,8 @@ impl MvMemory {
         for prev_location in prev_locations.iter() {
             // TODO: Faster "difference" function when there are many locations
             if !new_locations.contains(prev_location) {
-                if let Some(location_map) = self.data.get_mut(prev_location) {
-                    location_map.remove(&tx_version.tx_idx);
+                if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
+                    written_transactions.remove(&tx_version.tx_idx);
                 }
             }
         }
@@ -163,8 +162,8 @@ impl MvMemory {
     pub(crate) fn convert_writes_to_estimates(&self, tx_idx: TxIdx) {
         // TODO: Better error handling
         for location in self.last_written_locations[tx_idx].lock().unwrap().iter() {
-            if let Some(location_map) = self.data.get_mut(location) {
-                location_map.insert(tx_idx, MemoryEntry::Estimate);
+            if let Some(mut written_transactions) = self.data.get_mut(location) {
+                written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }
         }
     }
@@ -190,13 +189,12 @@ impl MvMemory {
         tx_idx: TxIdx,
     ) -> ReadMemoryResult {
         let mut result: Option<(usize, MemoryEntry)> = None;
-        if let Some(location_map) = self.data.get(location) {
-            for entry in location_map.iter() {
-                let idx = entry.key();
+        if let Some(written_transactions) = self.data.get(location) {
+            for (idx, entry) in written_transactions.iter() {
                 if *idx < tx_idx {
                     // TODO: Cleaner code please...
                     if result.is_none() || result.clone().unwrap().0 < *idx {
-                        result = Some((*idx, entry.value().clone()));
+                        result = Some((*idx, entry.clone()));
                     }
                 }
             }
@@ -223,20 +221,19 @@ impl MvMemory {
         location: &MemoryLocation,
         tx_idx: TxIdx,
     ) -> ReadMemoryResult {
-        let Some(location_map) = self.data.get(location) else {
+        let Some(written_transactions) = self.data.get(location) else {
             return ReadMemoryResult::NotFound;
         };
-        let Some(MemoryEntry::Data(tx_incarnation, value)) =
-            location_map.get(&tx_idx).as_deref().cloned()
+        let Some(MemoryEntry::Data(tx_incarnation, value)) = written_transactions.get(&tx_idx)
         else {
             return ReadMemoryResult::NotFound;
         };
         ReadMemoryResult::Ok {
             version: TxVersion {
                 tx_idx,
-                tx_incarnation,
+                tx_incarnation: *tx_incarnation,
             },
-            value,
+            value: value.clone(),
         }
     }
 }
