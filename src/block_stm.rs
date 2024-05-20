@@ -245,14 +245,23 @@ fn preprocess_dependencies(
     // on blocks with many dependencies among transactions.
     // TODO: Let's put in the work to find some hot algorithms here!
     // Currently using very sad heuristics that overfit the mainnet benchmark.
-    let mut max_concurrency_level = NonZeroUsize::new(16).unwrap();
-    let num_dependent_txs: usize = transactions_status
+    let mut max_concurrency_level =
+        // This division by 2 means a thread must complete ~4 tasks to justify
+        // its overheads.
+        // TODO: Experiment with a smooth thread pool to exit threads as there
+        // are few (expected) tasks left to minimize joining overheads.
+        NonZeroUsize::new(block_size / 2).unwrap_or(NonZeroUsize::new(2).unwrap());
+    let num_independent_txs: usize = transactions_status
         .iter()
-        .filter(|status| matches!(status, TxIncarnationStatus::Aborting(_)))
+        .filter(|status| matches!(status, TxIncarnationStatus::ReadyToExecute(_)))
         .count();
-    let dependent_ratio = num_dependent_txs as f64 / block_size as f64;
-    if dependent_ratio > 0.85 {
-        max_concurrency_level = NonZeroUsize::new(8).unwrap();
+    let independent_ratio = num_independent_txs as f64 / block_size as f64;
+    if num_independent_txs < 5 {
+        max_concurrency_level = max_concurrency_level.min(NonZeroUsize::new(2).unwrap());
+    }
+    // Too many dependencies! Reduce no. threads to reduce overheads.
+    else if independent_ratio < 0.15 {
+        max_concurrency_level = max_concurrency_level.min(NonZeroUsize::new(8).unwrap());
     }
 
     (
