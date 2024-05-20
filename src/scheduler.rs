@@ -118,11 +118,10 @@ impl Scheduler {
                     tx_idx,
                     tx_incarnation: i,
                 });
+            } else {
+                drop(transaction_status);
+                return self.try_incarnate(self.execution_idx.fetch_add(1, Relaxed));
             }
-            // Returning nothing here seems to waste another worker loop
-            // while we can just drop `transaction_status` and recurse
-            // on the next execution id until we find work.
-            // TODO: Try & benchmark that
         }
         self.num_active_tasks.fetch_sub(1, Relaxed);
         None
@@ -147,13 +146,16 @@ impl Scheduler {
         let validation_idx = self.validation_idx.fetch_add(1, Relaxed);
         if validation_idx < self.block_size {
             // TODO: Better error handling
-            if let TxIncarnationStatus::Executed(i) =
-                *self.transactions_status[validation_idx].lock().unwrap()
-            {
+            let transaction_status = self.transactions_status[validation_idx].lock().unwrap();
+            if let TxIncarnationStatus::Executed(i) = *transaction_status {
                 return Some(TxVersion {
                     tx_idx: validation_idx,
                     tx_incarnation: i,
                 });
+            } else {
+                drop(transaction_status);
+                self.num_active_tasks.fetch_sub(1, Relaxed);
+                return self.next_version_to_validate();
             }
         }
         self.num_active_tasks.fetch_sub(1, Relaxed);
