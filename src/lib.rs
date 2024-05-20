@@ -96,12 +96,12 @@ pub enum ReadError {
 }
 
 // The memory locations needed to execute an incarnation.
-// TODO: Properly type this
+// TODO: Properly type this: `HashMap` is actually better!
 type ReadSet = Vec<(MemoryLocation, ReadOrigin)>;
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.
-// TODO: Properly type this
+// TODO: Properly type this: `HashMap` is actually better!
 type WriteSet = Vec<(MemoryLocation, MemoryValue)>;
 
 // TODO: Properly type this

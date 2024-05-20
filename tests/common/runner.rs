@@ -84,6 +84,7 @@ fn assert_evm_errors<DBError1: Debug, DBError2: Debug>(
 fn assert_execution_result<D: DatabaseRef>(
     sequential_result: Result<Vec<ResultAndState>, EVMError<D::Error>>,
     block_stm_result: BlockStmResult,
+    must_succeed: bool,
 ) where
     D::Error: Debug,
 {
@@ -94,7 +95,11 @@ fn assert_execution_result<D: DatabaseRef>(
         // TODO: Support extracting and comparing multiple errors in the input block.
         // This only works for now as most tests have just one (potentially error) transaction.
         (Err(sequential_error), Err(BlockStmError::ExecutionError(parallel_error))) => {
-            assert_evm_errors(&sequential_error, &parallel_error);
+            if must_succeed {
+                panic!("This block must succeed!");
+            } else {
+                assert_evm_errors(&sequential_error, &parallel_error);
+            }
         }
         _ => panic!("Block-STM's execution result doesn't match Sequential's"),
     };
@@ -114,6 +119,7 @@ pub fn test_execute_revm<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
     assert_execution_result::<D>(
         execute_sequential(db.clone(), spec_id, block_env.clone(), &txs),
         block_stm_revm::execute_revm(db, spec_id, block_env, txs, concurrency_level),
+        false, // TODO: Parameterize this
     );
 }
 
@@ -123,6 +129,7 @@ pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>
     db: D,
     block: Block,
     parent_header: Option<Header>,
+    must_succeed: bool,
 ) where
     D::Error: Debug,
 {
@@ -135,5 +142,6 @@ pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>
             &get_tx_envs(&block.transactions).unwrap(),
         ),
         block_stm_revm::execute(db, block, parent_header, concurrency_level),
+        must_succeed,
     );
 }

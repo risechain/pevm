@@ -27,7 +27,7 @@ fn test_blocks(block_numbers: &[u64]) {
             .unwrap();
         let rpc_storage = RpcStorage::new(provider, BlockId::number(block_number - 1));
         let db = CacheDB::new(&rpc_storage);
-        common::test_execute_alloy(db, block.clone(), None);
+        common::test_execute_alloy(db, block.clone(), None, true);
 
         // Snapshot blocks (for benchmark)
         // TODO: Binary formats to save disk?

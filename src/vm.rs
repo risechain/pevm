@@ -1,4 +1,4 @@
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 use revm::{
     primitives::{
@@ -307,7 +307,10 @@ impl<S: Storage> Vm<S> {
                     .state
                     .iter()
                     .flat_map(|(address, account)| {
-                        let mut writes = Vec::new();
+                        // A hash map is critical as there can be multiple state transitions
+                        // of the same location in a transaction (think internal txs)!
+                        // We only care about the latest state.
+                        let mut writes = HashMap::new();
                         // TODO: Confirm if we're handling self-destructed accounts correctly.
                         if account.is_info_changed() {
                             // TODO: More granularity here to ensure we only notify new
@@ -320,18 +323,18 @@ impl<S: Storage> Vm<S> {
                                 account_info.balance += *gas_payment.borrow();
                                 explicitly_wrote_to_coinbase = true;
                             }
-                            writes.push((
+                            writes.insert(
                                 MemoryLocation::Basic(*address),
                                 MemoryValue::Basic(account_info),
-                            ));
+                            );
                         }
                         for (slot, value) in account.changed_storage_slots() {
-                            writes.push((
+                            writes.insert(
                                 MemoryLocation::Storage((*address, *slot)),
                                 MemoryValue::Storage(value.present_value),
-                            ));
+                            );
                         }
-                        writes
+                        writes.into_iter().collect::<Vec<_>>()
                     })
                     .collect();
 
