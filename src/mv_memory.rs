@@ -92,25 +92,28 @@ impl MvMemory {
         let mut last_written_locations = self.last_written_locations[tx_version.tx_idx]
             .lock()
             .unwrap();
-        let prev_locations = last_written_locations.clone();
 
-        let new_locations: Vec<MemoryLocation> = write_set.iter().map(|(l, _)| l.clone()).collect();
-        last_written_locations.clone_from(&new_locations);
-
-        for prev_location in prev_locations.iter() {
+        for prev_location in last_written_locations.iter() {
             // TODO: Faster "difference" function when there are many locations
-            if !new_locations.contains(prev_location) {
+            if !write_set
+                .iter()
+                .any(|(location, _)| location == prev_location)
+            {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
                     written_transactions.remove(&tx_version.tx_idx);
                 }
             }
         }
 
-        for new_location in new_locations.iter() {
-            if !prev_locations.contains(new_location) {
+        for (new_location, _) in write_set.iter() {
+            if !last_written_locations.contains(new_location) {
+                // We update right before returning to avoid an early clone.
+                *last_written_locations = write_set.iter().map(|(l, _)| l.clone()).collect();
                 return true;
             }
         }
+        // We update right before returning to avoid an early clone.
+        *last_written_locations = write_set.iter().map(|(l, _)| l.clone()).collect();
         false
     }
 

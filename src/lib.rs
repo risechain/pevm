@@ -96,12 +96,14 @@ pub enum ReadError {
 }
 
 // The memory locations needed to execute an incarnation.
-// TODO: Properly type this: `HashMap` is actually better!
+// While a hash map is cleaner and reduce duplication chances,
+// vectors are noticeably faster in the mainnet benchmark.
 type ReadSet = Vec<(MemoryLocation, ReadOrigin)>;
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.
-// TODO: Properly type this: `HashMap` is actually better!
+// While a hash map is cleaner and reduce duplication chances,
+// vectors are noticeably faster in the mainnet benchmark.
 type WriteSet = Vec<(MemoryLocation, MemoryValue)>;
 
 // TODO: Properly type this
