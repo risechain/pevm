@@ -191,11 +191,11 @@ impl MvMemory {
         let mut result: Option<(usize, MemoryEntry)> = None;
         if let Some(written_transactions) = self.data.get(location) {
             for (idx, entry) in written_transactions.iter() {
-                if *idx < tx_idx {
-                    // TODO: Cleaner code please...
-                    if result.is_none() || result.clone().unwrap().0 < *idx {
-                        result = Some((*idx, entry.clone()));
-                    }
+                if *idx < tx_idx
+                    && (result.is_none()
+                        || result.as_ref().is_some_and(|(best_idx, _)| best_idx < idx))
+                {
+                    result = Some((*idx, entry.clone()));
                 }
             }
         }
