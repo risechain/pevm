@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::BTreeMap, sync::Mutex};
 
 // ~x2 performance gain over a naive `RwLock<HashMap>`!
 use dashmap::{mapref::entry::Entry, DashMap};
@@ -40,11 +40,7 @@ pub(crate) enum ReadMemoryResult {
 // version of a corresponding transaction.
 // TODO: Better concurrency control if possible.
 pub(crate) struct MvMemory {
-    data: DashMap<
-        MemoryLocation,
-        // TODO: Use an id hasher for performance.
-        HashMap<TxIdx, MemoryEntry>,
-    >,
+    data: DashMap<MemoryLocation, BTreeMap<TxIdx, MemoryEntry>>,
     // Technically we only need the location and not the value.
     // Storing the whole set is a sad optimization to take
     // ownership of the output writeset instead of clonine its
@@ -198,12 +194,10 @@ impl MvMemory {
     ) -> ReadMemoryResult {
         let mut result: Option<(usize, MemoryEntry)> = None;
         if let Some(written_transactions) = self.data.get(location) {
-            for (idx, entry) in written_transactions.iter() {
-                if *idx < tx_idx
-                    && (result.is_none()
-                        || result.as_ref().is_some_and(|(best_idx, _)| best_idx < idx))
-                {
+            for (idx, entry) in written_transactions.iter().rev() {
+                if *idx < tx_idx {
                     result = Some((*idx, entry.clone()));
+                    break;
                 }
             }
         }
