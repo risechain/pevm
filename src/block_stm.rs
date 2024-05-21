@@ -67,8 +67,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     concurrency_level: NonZeroUsize,
 ) -> BlockStmResult {
     // Beneficiary setup for post-processing
-    let beneficiary_location = MemoryLocation::Basic(block_env.coinbase);
-    let mut beneficiary_account_info = match storage.basic(block_env.coinbase) {
+    let beneficiary_address = block_env.coinbase;
+    let beneficiary_location = MemoryLocation::Basic(beneficiary_address);
+    let mut beneficiary_account_info = match storage.basic(beneficiary_address) {
         Ok(Some(account)) => account.into(),
         _ => AccountInfo::default(),
     };
@@ -79,7 +80,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         preprocess_dependencies(&txs);
     let scheduler = Scheduler::new(block_size, transactions_status, transactions_dependents);
     let mv_memory = Arc::new(MvMemory::new(block_size));
-    let vm = Vm::new(storage, spec_id, block_env.clone(), txs, mv_memory.clone());
+    let vm = Vm::new(storage, spec_id, block_env, txs, mv_memory.clone());
 
     // Edge case that is pretty common
     // TODO: Shortcut even before initializing the main parallel components.
@@ -96,7 +97,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 for (location, value) in write_set {
                     if location == beneficiary_location {
                         result_and_state.state.insert(
-                            block_env.coinbase,
+                            beneficiary_address,
                             post_process_beneficiary(&mut beneficiary_account_info, &value),
                         );
                         break;
@@ -153,7 +154,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                             &scheduler,
                             &execution_error,
                             &execution_results,
-                            &tx_version,
+                            tx_version,
                         )
                         .map(Task::Validation),
                         Some(Task::Validation(tx_version)) => {
@@ -181,7 +182,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             match mv_memory.read_absolute(&beneficiary_location, tx_idx) {
                 ReadMemoryResult::Ok { value, .. } => {
                     result_and_state.state.insert(
-                        block_env.coinbase,
+                        beneficiary_address,
                         post_process_beneficiary(&mut beneficiary_account_info, &value),
                     );
                     result_and_state
@@ -284,7 +285,7 @@ fn try_execute<S: Storage>(
     scheduler: &Scheduler,
     execution_error: &RwLock<Option<ExecutionError>>,
     execution_results: &Vec<Mutex<Option<ResultAndState>>>,
-    tx_version: &TxVersion,
+    tx_version: TxVersion,
 ) -> Option<ValidationTask> {
     match vm.execute(tx_version.tx_idx) {
         VmExecutionResult::ReadError { blocking_tx_idx } => {
@@ -312,7 +313,7 @@ fn try_execute<S: Storage>(
             write_set,
         } => {
             *execution_results[tx_version.tx_idx].lock().unwrap() = Some(result_and_state);
-            let wrote_new_location = mv_memory.record(tx_version, read_set, write_set);
+            let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
             scheduler.finish_execution(tx_version, wrote_new_location)
         }
     }
