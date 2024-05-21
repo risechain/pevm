@@ -34,7 +34,7 @@ pub(crate) enum VmExecutionResult {
 // transaction with revm. It provides values from the multi-version data
 // structure & storage, and tracks the read set of the current execution.
 struct VmDb<S: Storage> {
-    block_env: BlockEnv,
+    beneficiary_address: Address,
     tx_idx: TxIdx,
     mv_memory: Arc<MvMemory>,
     storage: Arc<S>,
@@ -42,9 +42,14 @@ struct VmDb<S: Storage> {
 }
 
 impl<S: Storage> VmDb<S> {
-    fn new(block_env: BlockEnv, tx_idx: TxIdx, mv_memory: Arc<MvMemory>, storage: Arc<S>) -> Self {
+    fn new(
+        beneficiary_address: Address,
+        tx_idx: TxIdx,
+        mv_memory: Arc<MvMemory>,
+        storage: Arc<S>,
+    ) -> Self {
         Self {
-            block_env,
+            beneficiary_address,
             tx_idx,
             mv_memory,
             storage,
@@ -60,7 +65,7 @@ impl<S: Storage> VmDb<S> {
     ) -> Result<MemoryValue, ReadError> {
         // Dedicated handling for the beneficiary account
         if let MemoryLocation::Basic(address) = *location {
-            if address == self.block_env.coinbase {
+            if address == self.beneficiary_address {
                 // TODO: Fine-tune stack size further.
                 // Currently using a rough "standard" estimate with the heavy
                 // evaluation test guarding a potential stack overflow. Raise
@@ -116,12 +121,12 @@ impl<S: Storage> VmDb<S> {
         tx_idx: TxIdx,
         update_read_set: bool,
     ) -> Result<MemoryValue, ReadError> {
-        let location = MemoryLocation::Basic(self.block_env.coinbase);
+        let location = MemoryLocation::Basic(self.beneficiary_address);
         if tx_idx == 0 {
             if update_read_set {
                 self.read_set.push((location, ReadOrigin::Storage));
             }
-            return match self.storage.basic(self.block_env.coinbase) {
+            return match self.storage.basic(self.beneficiary_address) {
                 Ok(Some(account)) => Ok(MemoryValue::Basic(account.into())),
                 Ok(None) => Err(ReadError::NotFound),
                 Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
@@ -176,7 +181,7 @@ impl<S: Storage> Database for VmDb<S> {
     ) -> Result<Option<AccountInfo>, Self::Error> {
         // We preload a mock beneficiary account, to only lazy evaluate it on
         // explicit reads and once BlockSTM is completed.
-        if address == self.block_env.coinbase && is_preload {
+        if address == self.beneficiary_address && is_preload {
             return Ok(Some(AccountInfo::default()));
         }
         match self.read(&MemoryLocation::Basic(address), self.tx_idx, !is_preload) {
@@ -268,7 +273,7 @@ impl<S: Storage> Vm<S> {
     #[allow(clippy::arc_with_non_send_sync)] // TODO: Fix at REVM?
     pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
         let mut db = VmDb::new(
-            self.block_env.clone(),
+            self.block_env.coinbase,
             tx_idx,
             self.mv_memory.clone(),
             self.storage.clone(),
@@ -293,7 +298,7 @@ impl<S: Storage> Vm<S> {
             .with_db(&mut db)
             .with_spec_id(self.spec_id)
             .with_block_env(self.block_env.clone())
-            .with_tx_env(self.txs.get(tx_idx).unwrap().clone())
+            .with_tx_env(self.txs[tx_idx].clone())
             .with_handler(handler)
             .build();
 
@@ -346,7 +351,7 @@ impl<S: Storage> Vm<S> {
                 }
 
                 VmExecutionResult::Ok {
-                    result_and_state: result_and_state.clone(),
+                    result_and_state,
                     read_set: db.read_set,
                     write_set,
                 }

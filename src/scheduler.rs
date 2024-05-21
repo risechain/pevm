@@ -221,7 +221,7 @@ impl Scheduler {
     // re-validating smaller transactions.
     pub(crate) fn finish_execution(
         &self,
-        tx_version: &TxVersion,
+        tx_version: TxVersion,
         wrote_new_location: bool,
     ) -> Option<ValidationTask> {
         // TODO: Better error handling
@@ -259,7 +259,7 @@ impl Scheduler {
                 if wrote_new_location {
                     self.decrease_validation_idx(tx_version.tx_idx);
                 } else {
-                    return Some(tx_version.clone());
+                    return Some(tx_version);
                 }
             }
         } else {
