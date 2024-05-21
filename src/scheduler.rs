@@ -186,12 +186,14 @@ impl Scheduler {
         let mut transaction_status = self.transactions_status[tx_idx].lock().unwrap();
         if let TxIncarnationStatus::Executing(i) = *transaction_status {
             *transaction_status = TxIncarnationStatus::Aborting(i);
+            drop(transaction_status);
 
             // TODO: Better error handling here
             let mut blocking_dependents = self.transactions_dependents[blocking_tx_idx]
                 .lock()
                 .unwrap();
             blocking_dependents.push(tx_idx);
+            drop(blocking_dependents);
 
             self.num_active_tasks.fetch_sub(1, Relaxed);
             return true;
@@ -227,6 +229,7 @@ impl Scheduler {
         if let TxIncarnationStatus::Executing(i) = *transaction_status {
             // TODO: Assert that `i` equals `tx_version.tx_incarnation`?
             *transaction_status = TxIncarnationStatus::Executed(i);
+            drop(transaction_status);
 
             // TODO: Better error handling
             let mut dependents = self.transactions_dependents[tx_version.tx_idx]
@@ -235,14 +238,15 @@ impl Scheduler {
 
             // Resume dependent transactions
             let mut min_dependent_idx = None;
-            for tx_idx in dependents.clone() {
-                self.set_ready_status(tx_idx);
+            for tx_idx in dependents.iter() {
+                self.set_ready_status(*tx_idx);
                 min_dependent_idx = match min_dependent_idx {
-                    None => Some(tx_idx),
-                    Some(min_index) => Some(min(tx_idx, min_index)),
+                    None => Some(*tx_idx),
+                    Some(min_index) => Some(min(*tx_idx, min_index)),
                 }
             }
             dependents.clear();
+            drop(dependents);
 
             if let Some(min_idx) = min_dependent_idx {
                 self.decrease_execution_idx(min_idx);
