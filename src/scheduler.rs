@@ -254,13 +254,13 @@ impl Scheduler {
 
             if self.validation_idx.load(Relaxed) > tx_version.tx_idx {
                 // This incarnation wrote to a new location, so we must
-                // re-evaluate (it and) all higher transactions in case they read
+                // re-evaluate it (via the immediately returned task returned
+                // immediately) and all higher transactions in case they read
                 // the new location.
                 if wrote_new_location {
-                    self.decrease_validation_idx(tx_version.tx_idx);
-                } else {
-                    return Some(tx_version);
+                    self.decrease_validation_idx(tx_version.tx_idx + 1);
                 }
+                return Some(tx_version);
             }
         } else {
             // TODO: Better error handling
