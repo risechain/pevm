@@ -118,6 +118,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         for _ in 0..concurrency_level.min(max_concurrency_level).into() {
             scope.spawn(|| {
                 let mut task = None;
+                let mut consecutive_empty_tasks: u8 = 0;
                 while !scheduler.done() {
                     // TODO: Have different functions or an enum for the caller to choose
                     // the handling behaviour when a transaction's EVM execution fails.
@@ -162,6 +163,18 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                         }
                         None => scheduler.next_task(),
                     };
+
+                    if task.is_none() {
+                        consecutive_empty_tasks += 1;
+                    } else {
+                        consecutive_empty_tasks = 0;
+                    }
+                    // Many consecutive empty tasks usually mean the number of remaining tasks
+                    // is smaller than the number of threads, or they are highly sequential
+                    // anyway. This early exit helps remove thread overheads and join faster.
+                    if consecutive_empty_tasks == 3 {
+                        break;
+                    }
                 }
             });
         }
@@ -242,28 +255,13 @@ fn preprocess_dependencies(
         }
     }
 
-    // Estimate the max concurrency level to not waste thread overheads
-    // on blocks with many dependencies among transactions.
-    // TODO: Let's put in the work to find some hot algorithms here!
-    // Currently using very sad heuristics that overfit the mainnet benchmark.
-    let mut max_concurrency_level =
-        // This division by 2 means a thread must complete ~4 tasks to justify
-        // its overheads.
-        // TODO: Experiment with a smooth thread pool to exit threads as there
-        // are few (expected) tasks left to minimize joining overheads.
-        NonZeroUsize::new(block_size / 2).unwrap_or(NonZeroUsize::new(2).unwrap());
-    let num_independent_txs: usize = transactions_status
-        .iter()
-        .filter(|status| matches!(status, TxIncarnationStatus::ReadyToExecute(_)))
-        .count();
-    let independent_ratio = num_independent_txs as f64 / block_size as f64;
-    if num_independent_txs < 5 {
-        max_concurrency_level = max_concurrency_level.min(NonZeroUsize::new(2).unwrap());
-    }
-    // Too many dependencies! Reduce no. threads to reduce overheads.
-    else if independent_ratio < 0.15 {
-        max_concurrency_level = max_concurrency_level.min(NonZeroUsize::new(8).unwrap());
-    }
+    let min_concurrency_level = NonZeroUsize::new(2).unwrap();
+    // This division by 2 means a thread must complete ~4 tasks to justify
+    // its overheads.
+    // TODO: Fine tune for edge cases given the dependency data above.
+    let max_concurrency_level = NonZeroUsize::new(block_size / 2)
+        .unwrap_or(min_concurrency_level)
+        .max(min_concurrency_level);
 
     (
         transactions_status,
