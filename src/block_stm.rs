@@ -189,7 +189,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // TODO: Refactor, improve speed & error handling.
     Ok(execution_results
         .iter()
-        .map(|m| m.lock().unwrap().clone().unwrap())
+        .map(|m| m.lock().unwrap().take().unwrap())
         .enumerate()
         .map(|(tx_idx, mut result_and_state)| {
             match mv_memory.read_absolute(&beneficiary_location, tx_idx) {
