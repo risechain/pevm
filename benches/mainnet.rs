@@ -26,7 +26,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     // TODO: Fine-tune concurrency level
     let concurrency_level = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
-        .min(NonZeroUsize::new(16).unwrap());
+        // 8 seems to be the sweet max for Ethereum blocks. Any more
+        // will yield many overheads and hurt execution on (small) blocks
+        // with many dependencies.
+        .min(NonZeroUsize::new(8).unwrap());
 
     for block_path in fs::read_dir("blocks").unwrap() {
         let block_path = block_path.unwrap().path();
