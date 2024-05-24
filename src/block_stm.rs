@@ -80,7 +80,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         preprocess_dependencies(&txs);
     let scheduler = Scheduler::new(block_size, transactions_status, transactions_dependents);
     let mv_memory = Arc::new(MvMemory::new(block_size));
-    let vm = Vm::new(storage, spec_id, block_env, txs, mv_memory.clone());
+    let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
 
     // Edge case that is pretty common
     // TODO: Shortcut even before initializing the main parallel components.
@@ -98,7 +98,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                     if location == beneficiary_location {
                         result_and_state.state.insert(
                             beneficiary_address,
-                            post_process_beneficiary(&mut beneficiary_account_info, &value),
+                            post_process_beneficiary(&mut beneficiary_account_info, value),
                         );
                         break;
                     }
@@ -196,7 +196,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 ReadMemoryResult::Ok { value, .. } => {
                     result_and_state.state.insert(
                         beneficiary_address,
-                        post_process_beneficiary(&mut beneficiary_account_info, &value),
+                        post_process_beneficiary(&mut beneficiary_account_info, value),
                     );
                     result_and_state
                 }
@@ -342,17 +342,20 @@ fn try_validate(
 // TODO: Cleaner interface & error handling
 fn post_process_beneficiary(
     beneficiary_account_info: &mut AccountInfo,
-    value: &MemoryValue,
+    value: MemoryValue,
 ) -> Account {
     match value {
         MemoryValue::Basic(info) => {
-            *beneficiary_account_info = info.clone();
+            *beneficiary_account_info = info;
         }
         MemoryValue::LazyBeneficiaryBalance(addition) => {
             beneficiary_account_info.balance += addition;
         }
         _ => unreachable!(),
     }
+    // TODO: This potentially wipes beneficiary account's storage.
+    // Does that happen and if so is it acceptable? A quick test with
+    // REVM wipes it too!
     let mut beneficiary_account = Account::from(beneficiary_account_info.clone());
     beneficiary_account.mark_touch();
     beneficiary_account

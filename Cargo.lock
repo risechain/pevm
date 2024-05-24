@@ -703,6 +703,7 @@ dependencies = [
  "revme",
  "serde",
  "serde_json",
+ "smallvec",
  "stacker",
  "tokio",
  "walkdir",

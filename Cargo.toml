@@ -26,6 +26,7 @@ alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9bc51
 alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9bc51c8021ea08535694c44de84222f474e" }
 reqwest = "0.12.4"
 tokio = { version = "1.37.0", features = ["rt-multi-thread"] }
+smallvec = "1.13.2"
 
 [dev-dependencies]
 criterion = "0.5.1"

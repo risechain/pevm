@@ -60,12 +60,12 @@ impl<S: Storage> VmDb<S> {
 
     fn read(
         &mut self,
-        location: &MemoryLocation,
+        location: MemoryLocation,
         tx_idx: TxIdx,
         update_read_set: bool,
     ) -> Result<MemoryValue, ReadError> {
         // Dedicated handling for the beneficiary account
-        if let MemoryLocation::Basic(address) = *location {
+        if let MemoryLocation::Basic(address) = location {
             if address == self.beneficiary_address {
                 // TODO: Fine-tune stack size further.
                 // Currently using a rough "standard" estimate with the heavy
@@ -83,7 +83,7 @@ impl<S: Storage> VmDb<S> {
         }
 
         // Main handling for BlockSTM
-        match self.mv_memory.read_closest(location, tx_idx) {
+        match self.mv_memory.read_closest(&location, tx_idx) {
             ReadMemoryResult::ReadError { blocking_tx_idx } => {
                 Err(ReadError::BlockingIndex(blocking_tx_idx))
             }
@@ -92,14 +92,14 @@ impl<S: Storage> VmDb<S> {
                     self.read_set.push((location.clone(), ReadOrigin::Storage));
                 }
                 match location {
-                    MemoryLocation::Basic(address) => match self.storage.basic(*address) {
+                    MemoryLocation::Basic(address) => match self.storage.basic(address) {
                         Ok(Some(account)) => Ok(MemoryValue::Basic(account.into())),
                         Ok(None) => Err(ReadError::NotFound),
                         Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
                     },
                     MemoryLocation::Storage((address, index)) => self
                         .storage
-                        .storage(*address, *index)
+                        .storage(address, index)
                         .map(MemoryValue::Storage)
                         .map_err(|err| ReadError::StorageError(format!("{err:?}"))),
                 }
@@ -107,7 +107,7 @@ impl<S: Storage> VmDb<S> {
             ReadMemoryResult::Ok { version, value } => {
                 if update_read_set {
                     self.read_set
-                        .push((location.clone(), ReadOrigin::MvMemory(version)));
+                        .push((location, ReadOrigin::MvMemory(version)));
                 }
                 Ok(value)
             }
@@ -148,7 +148,7 @@ impl<S: Storage> VmDb<S> {
                     MemoryValue::Basic(account) => Ok(MemoryValue::Basic(account)),
                     MemoryValue::LazyBeneficiaryBalance(addition) => {
                         // TODO: Better error handling
-                        match self.read(&location, tx_idx - 1, false) {
+                        match self.read(location, tx_idx - 1, false) {
                             Ok(MemoryValue::Basic(mut beneficiary_account)) => {
                                 // TODO: Write this new absolute value to MvMemory
                                 // to avoid future recalculations.
@@ -185,7 +185,7 @@ impl<S: Storage> Database for VmDb<S> {
         if address == self.beneficiary_address && is_preload {
             return Ok(Some(AccountInfo::default()));
         }
-        match self.read(&MemoryLocation::Basic(address), self.tx_idx, !is_preload) {
+        match self.read(MemoryLocation::Basic(address), self.tx_idx, !is_preload) {
             Ok(MemoryValue::Basic(value)) => Ok(Some(value)),
             Err(ReadError::NotFound) => Ok(None),
             Err(err) => Err(err),
@@ -207,11 +207,7 @@ impl<S: Storage> Database for VmDb<S> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        match self.read(
-            &MemoryLocation::Storage((address, index)),
-            self.tx_idx,
-            true,
-        ) {
+        match self.read(MemoryLocation::Storage((address, index)), self.tx_idx, true) {
             Err(err) => Err(err),
             Ok(MemoryValue::Storage(value)) => Ok(value),
             _ => Err(ReadError::InvalidMemoryLocationType),
@@ -229,27 +225,26 @@ impl<S: Storage> Database for VmDb<S> {
 // captures the read & write sets of each execution. Note that a single
 // `Vm` can be shared among threads.
 pub(crate) struct Vm<S: Storage> {
-    storage: Arc<S>,
     spec_id: SpecId,
     block_env: BlockEnv,
-    txs: Arc<Vec<TxEnv>>,
+    txs: Vec<TxEnv>,
+    storage: Arc<S>,
     mv_memory: Arc<MvMemory>,
 }
 
 impl<S: Storage> Vm<S> {
     pub(crate) fn new(
-        storage: S,
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
-        // TODO: Make `Vm` own `MvMemory` away from `BlockSTM::run`?
+        storage: S,
         mv_memory: Arc<MvMemory>,
     ) -> Self {
         Self {
-            storage: Arc::new(storage),
             spec_id,
             block_env,
-            txs: Arc::new(txs),
+            txs,
+            storage: Arc::new(storage),
             mv_memory,
         }
     }
@@ -309,7 +304,7 @@ impl<S: Storage> Vm<S> {
         match evm_result {
             Ok(result_and_state) => {
                 let mut explicitly_wrote_to_coinbase = false;
-                let mut write_set: Vec<(MemoryLocation, MemoryValue)> = result_and_state
+                let mut write_set: AHashMap<MemoryLocation, MemoryValue> = result_and_state
                     .state
                     .iter()
                     .flat_map(|(address, account)| {
@@ -340,15 +335,15 @@ impl<S: Storage> Vm<S> {
                                 MemoryValue::Storage(value.present_value),
                             );
                         }
-                        writes.into_iter().collect::<Vec<_>>()
+                        writes
                     })
                     .collect();
 
                 if !explicitly_wrote_to_coinbase {
-                    write_set.push((
+                    write_set.insert(
                         MemoryLocation::Basic(self.block_env.coinbase),
                         MemoryValue::LazyBeneficiaryBalance(*gas_payment.borrow()),
-                    ));
+                    );
                 }
 
                 VmExecutionResult::Ok {
