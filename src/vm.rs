@@ -1,5 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::{cell::RefCell, sync::Arc};
 
+use ahash::AHashMap;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, EVMError, ResultAndState,
@@ -315,7 +316,7 @@ impl<S: Storage> Vm<S> {
                         // A hash map is critical as there can be multiple state transitions
                         // of the same location in a transaction (think internal txs)!
                         // We only care about the latest state.
-                        let mut writes = HashMap::new();
+                        let mut writes = AHashMap::new();
                         // TODO: Confirm if we're handling self-destructed accounts correctly.
                         if account.is_info_changed() {
                             // TODO: More granularity here to ensure we only notify new

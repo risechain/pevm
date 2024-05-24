@@ -1,6 +1,7 @@
 use crate::common::storage::{
     from_address, from_indices, from_short_string, from_tick, StorageBuilder,
 };
+use ahash::AHashMap;
 use revm::{
     db::PlainAccount,
     primitives::{
@@ -9,7 +10,6 @@ use revm::{
         keccak256, uint, AccountInfo, Address, Bytecode, Bytes, FixedBytes, B256, U256,
     },
 };
-use std::collections::HashMap;
 
 const POOL_FEE: u32 = 3000;
 const TICK_SPACING: i32 = 60;
@@ -62,14 +62,14 @@ impl WETH9 {
 #[derive(Debug, Default)]
 pub struct UniswapV3Factory {
     owner: Address,
-    pools: HashMap<(Address, Address, U256), Address>,
+    pools: AHashMap<(Address, Address, U256), Address>,
 }
 
 impl UniswapV3Factory {
     pub fn new(owner: Address) -> Self {
         Self {
             owner,
-            pools: HashMap::new(),
+            pools: AHashMap::new(),
         }
     }
 
@@ -139,9 +139,9 @@ pub struct UniswapV3Pool {
     token_0: Address,
     token_1: Address,
     factory: Address,
-    positions: HashMap<U256, [U256; 4]>,
-    ticks: HashMap<U256, [U256; 4]>,
-    tick_bitmap: HashMap<U256, U256>,
+    positions: AHashMap<U256, [U256; 4]>,
+    ticks: AHashMap<U256, [U256; 4]>,
+    tick_bitmap: AHashMap<U256, U256>,
 }
 
 impl UniswapV3Pool {
@@ -150,9 +150,9 @@ impl UniswapV3Pool {
             token_0,
             token_1,
             factory,
-            positions: HashMap::new(),
-            ticks: HashMap::new(),
-            tick_bitmap: HashMap::new(),
+            positions: AHashMap::new(),
+            ticks: AHashMap::new(),
+            tick_bitmap: AHashMap::new(),
         }
     }
 

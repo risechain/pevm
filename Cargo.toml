@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# Put this behind a feature flag if there are use cases & users
+# that need more security guarantees even for internally hashing
+# EVM memory locations (we do not persist these hashes).
+ahash = "0.8.11"
 alloy-primitives = "0.7.4"
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9bc51c8021ea08535694c44de84222f474e" }
 dashmap = "5.5.3"

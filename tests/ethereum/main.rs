@@ -8,14 +8,15 @@
 // - We use custom handlers (for lazy-updating the beneficiary account, etc.) that require "re-testing".
 // - Help outline the minimal state commitment logic for BlockSTM.
 
+use ahash::AHashMap;
 use block_stm_revm::BlockStmError;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, Address, BlobExcessGasAndPrice, BlockEnv, Bytecode, Bytes,
-    EVMError, ExecutionResult, HaltReason, InvalidTransaction, Output, ResultAndState, SpecId,
-    SuccessReason, TransactTo, TxEnv, U256,
+    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, Bytes, EVMError,
+    ExecutionResult, HaltReason, InvalidTransaction, Output, ResultAndState, SpecId, SuccessReason,
+    TransactTo, TxEnv, U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -26,7 +27,7 @@ use revme::cmd::statetest::{
 };
 use std::path::Path;
 use std::str::FromStr;
-use std::{collections::HashMap, fs, num::NonZeroUsize};
+use std::{fs, num::NonZeroUsize};
 use walkdir::{DirEntry, WalkDir};
 
 #[path = "../common/mod.rs"]
@@ -115,7 +116,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                 return;
             }
 
-            let mut chain_state: HashMap<Address, PlainAccount> = HashMap::new();
+            let mut chain_state = AHashMap::new();
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
                 let info =
