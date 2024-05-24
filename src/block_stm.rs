@@ -1,10 +1,10 @@
 use std::{
-    collections::HashMap,
     num::NonZeroUsize,
     sync::{Arc, Mutex, RwLock},
     thread,
 };
 
+use ahash::AHashMap;
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, Header};
 use revm::primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv};
@@ -222,9 +222,9 @@ fn preprocess_dependencies(
         (0..block_size).map(|_| Vec::new()).collect();
 
     // Marking transactions from the same sender as dependents (all write to nonce).
-    let mut tx_idxes_by_sender: HashMap<Address, Vec<TxIdx>> = HashMap::new();
+    let mut tx_idxes_by_sender: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
     // Marking transactions to the same address as dependents.
-    let mut tx_idxes_by_recipients: HashMap<Address, Vec<TxIdx>> = HashMap::new();
+    let mut tx_idxes_by_recipients: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
     for (tx_idx, tx) in txs.iter().enumerate() {
         // Sender
         let sender_tx_idxes = tx_idxes_by_sender.entry(tx.caller).or_default();

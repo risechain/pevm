@@ -127,6 +127,7 @@ pub struct RpcStorage {
     // execution on the same block.
     // Using a `Mutex` so we don't (yet) propagate mutability requirements
     // back to our `Storage` trait.
+    // Not using `AHashMap` for public data.
     cache: Mutex<HashMap<Address, PlainAccount>>,
     // TODO: Better async handling.
     runtime: Runtime,

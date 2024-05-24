@@ -40,7 +40,7 @@ pub(crate) enum ReadMemoryResult {
 // version of a corresponding transaction.
 // TODO: Better concurrency control if possible.
 pub(crate) struct MvMemory {
-    data: DashMap<MemoryLocation, BTreeMap<TxIdx, MemoryEntry>>,
+    data: DashMap<MemoryLocation, BTreeMap<TxIdx, MemoryEntry>, ahash::RandomState>,
     // Technically we only need the location and not the value.
     // Storing the whole set is a sad optimization to take
     // ownership of the output writeset instead of clonine its
@@ -52,7 +52,7 @@ pub(crate) struct MvMemory {
 impl MvMemory {
     pub(crate) fn new(block_size: usize) -> Self {
         Self {
-            data: DashMap::new(),
+            data: DashMap::with_hasher(ahash::RandomState::new()),
             last_write_set: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
             last_read_set: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
         }

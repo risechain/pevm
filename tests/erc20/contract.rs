@@ -1,4 +1,5 @@
 use crate::common::storage::{from_address, from_indices, from_short_string, StorageBuilder};
+use ahash::AHashMap;
 use revm::{
     db::PlainAccount,
     primitives::{
@@ -6,7 +7,6 @@ use revm::{
         U256,
     },
 };
-use std::collections::HashMap;
 
 const ERC20_TOKEN: &str = include_str!("./assets/ERC20Token.hex");
 
@@ -17,8 +17,8 @@ pub struct ERC20Token {
     symbol: String,
     decimals: U256,
     initial_supply: U256,
-    balances: HashMap<Address, U256>,
-    allowances: HashMap<(Address, Address), U256>,
+    balances: AHashMap<Address, U256>,
+    allowances: AHashMap<(Address, Address), U256>,
 }
 
 impl ERC20Token {
@@ -32,8 +32,8 @@ impl ERC20Token {
             symbol: String::from(symbol),
             decimals: U256::from(decimals),
             initial_supply: U256::from(initial_supply),
-            balances: HashMap::new(),
-            allowances: HashMap::new(),
+            balances: AHashMap::new(),
+            allowances: AHashMap::new(),
         }
     }
 
