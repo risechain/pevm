@@ -2,6 +2,7 @@
 
 // TODO: Better types & API please
 
+use ahash::AHashMap;
 use revm::primitives::{AccountInfo, Address, U256};
 
 // TODO: More granularity here, for instance, to separate an account's
@@ -102,9 +103,7 @@ type ReadSet = Vec<(MemoryLocation, ReadOrigin)>;
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.
-// While a hash map is cleaner and reduce duplication chances,
-// vectors are noticeably faster in the mainnet benchmark.
-type WriteSet = Vec<(MemoryLocation, MemoryValue)>;
+type WriteSet = AHashMap<MemoryLocation, MemoryValue>;
 
 // TODO: Properly type this
 type ExecutionTask = TxVersion;

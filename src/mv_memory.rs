@@ -41,11 +41,7 @@ pub(crate) enum ReadMemoryResult {
 // TODO: Better concurrency control if possible.
 pub(crate) struct MvMemory {
     data: DashMap<MemoryLocation, BTreeMap<TxIdx, MemoryEntry>, ahash::RandomState>,
-    // Technically we only need the location and not the value.
-    // Storing the whole set is a sad optimization to take
-    // ownership of the output writeset instead of clonine its
-    // locations over.
-    last_write_set: Vec<Mutex<WriteSet>>,
+    last_written_locations: Vec<Mutex<Vec<MemoryLocation>>>,
     last_read_set: Vec<Mutex<ReadSet>>,
 }
 
@@ -53,7 +49,7 @@ impl MvMemory {
     pub(crate) fn new(block_size: usize) -> Self {
         Self {
             data: DashMap::with_hasher(ahash::RandomState::new()),
-            last_write_set: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
+            last_written_locations: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
             last_read_set: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
         }
     }
@@ -89,32 +85,27 @@ impl MvMemory {
         }
 
         // TODO: Better error handling
-        let mut last_write_set = self.last_write_set[tx_version.tx_idx].lock().unwrap();
+        let mut last_written_locations = self.last_written_locations[tx_version.tx_idx]
+            .lock()
+            .unwrap();
 
-        for (prev_location, _) in last_write_set.iter() {
-            // TODO: Faster "difference" function when there are many locations
-            if !write_set
-                .iter()
-                .any(|(new_location, _)| new_location == prev_location)
-            {
+        // TODO: Faster "difference" function when there are many locations
+        for prev_location in last_written_locations.iter() {
+            if !write_set.contains_key(prev_location) {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
                     written_transactions.remove(&tx_version.tx_idx);
                 }
             }
         }
-
         for (new_location, _) in write_set.iter() {
-            if !last_write_set
-                .iter()
-                .any(|(prev_location, _)| prev_location == new_location)
-            {
+            if !last_written_locations.contains(new_location) {
                 // We update right before returning to avoid an early clone.
-                *last_write_set = write_set;
+                *last_written_locations = write_set.into_keys().collect();
                 return true;
             }
         }
         // We update right before returning to avoid an early clone.
-        *last_write_set = write_set;
+        *last_written_locations = write_set.into_keys().collect();
         false
     }
 
@@ -165,7 +156,7 @@ impl MvMemory {
     // that read them.
     pub(crate) fn convert_writes_to_estimates(&self, tx_idx: TxIdx) {
         // TODO: Better error handling
-        for (location, _) in self.last_write_set[tx_idx].lock().unwrap().iter() {
+        for location in self.last_written_locations[tx_idx].lock().unwrap().iter() {
             if let Some(mut written_transactions) = self.data.get_mut(location) {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }
@@ -192,28 +183,29 @@ impl MvMemory {
         location: &MemoryLocation,
         tx_idx: TxIdx,
     ) -> ReadMemoryResult {
-        let mut result: Option<(usize, MemoryEntry)> = None;
         if let Some(written_transactions) = self.data.get(location) {
             for (idx, entry) in written_transactions.iter().rev() {
                 if *idx < tx_idx {
-                    result = Some((*idx, entry.clone()));
-                    break;
+                    match entry {
+                        MemoryEntry::Estimate => {
+                            return ReadMemoryResult::ReadError {
+                                blocking_tx_idx: *idx,
+                            };
+                        }
+                        MemoryEntry::Data(tx_incarnation, value) => {
+                            return ReadMemoryResult::Ok {
+                                version: TxVersion {
+                                    tx_idx: *idx,
+                                    tx_incarnation: *tx_incarnation,
+                                },
+                                value: value.clone(),
+                            }
+                        }
+                    }
                 }
             }
         }
-        match result {
-            None => ReadMemoryResult::NotFound,
-            Some((blocking_tx_idx, MemoryEntry::Estimate)) => {
-                ReadMemoryResult::ReadError { blocking_tx_idx }
-            }
-            Some((max_idx, MemoryEntry::Data(tx_incarnation, value))) => ReadMemoryResult::Ok {
-                version: TxVersion {
-                    tx_idx: max_idx,
-                    tx_incarnation,
-                },
-                value,
-            },
-        }
+        ReadMemoryResult::NotFound
     }
 
     // Things like fully evaluating benficiary accounts need to read absolute indices
