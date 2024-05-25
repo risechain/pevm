@@ -50,9 +50,5 @@ harness = false
 name = "gigagas"
 harness = false
 
-[profile.bench]
-# This curiously improves performance on small µs but actually
-# degrades performance on the heavier ms mainnet benches!
-# lto = true
+[profile.release]
 codegen-units = 1
-debug = true
