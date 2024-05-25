@@ -1,6 +1,6 @@
 use std::{
     num::NonZeroUsize,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex, OnceLock},
     thread,
 };
 
@@ -110,7 +110,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     }
 
     // Start multithreading mainline
-    let execution_error = RwLock::new(None);
+    let mut execution_error = OnceLock::new();
     let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
 
     // TODO: Better thread handling
@@ -126,7 +126,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                     // verifiers may want to exit early to save CPU cycles, while testers
                     // may want to collect all execution results. We are exiting early as
                     // the default behaviour for now.
-                    if execution_error.read().unwrap().is_some() {
+                    if execution_error.get().is_some() {
                         break;
                     }
 
@@ -180,8 +180,8 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         }
     });
 
-    if let Some(err) = execution_error.read().unwrap().as_ref() {
-        return Err(BlockStmError::ExecutionError(err.clone()));
+    if let Some(err) = execution_error.take() {
+        return Err(BlockStmError::ExecutionError(err));
     }
 
     // We lazily evaluate the final beneficiary account's balance at the end of each transaction
@@ -281,7 +281,7 @@ fn try_execute<S: Storage>(
     mv_memory: &Arc<MvMemory>,
     vm: &Vm<S>,
     scheduler: &Scheduler,
-    execution_error: &RwLock<Option<ExecutionError>>,
+    execution_error: &OnceLock<ExecutionError>,
     execution_results: &Vec<Mutex<Option<ResultAndState>>>,
     tx_version: TxVersion,
 ) -> Option<ValidationTask> {
@@ -302,7 +302,8 @@ fn try_execute<S: Storage>(
             None
         }
         VmExecutionResult::ExecutionError(err) => {
-            *execution_error.write().unwrap() = Some(err);
+            // TODO: Better error handling
+            execution_error.set(err).unwrap();
             None
         }
         VmExecutionResult::Ok {
