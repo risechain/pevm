@@ -398,7 +398,7 @@ fn post_process_beneficiary(
 ) -> Account {
     match value {
         MemoryValue::Basic(info) => {
-            *beneficiary_account_info = info;
+            *beneficiary_account_info = *info;
         }
         MemoryValue::LazyBeneficiaryBalance(addition) => {
             beneficiary_account_info.balance += addition;

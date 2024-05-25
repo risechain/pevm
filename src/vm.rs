@@ -93,7 +93,7 @@ impl<S: Storage> VmDb<S> {
                 }
                 match location {
                     MemoryLocation::Basic(address) => match self.storage.basic(address) {
-                        Ok(Some(account)) => Ok(MemoryValue::Basic(account.into())),
+                        Ok(Some(account)) => Ok(MemoryValue::Basic(Box::new(account.into()))),
                         Ok(None) => Err(ReadError::NotFound),
                         Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
                     },
@@ -128,7 +128,7 @@ impl<S: Storage> VmDb<S> {
                 self.read_set.push((location, ReadOrigin::Storage));
             }
             return match self.storage.basic(self.beneficiary_address) {
-                Ok(Some(account)) => Ok(MemoryValue::Basic(account.into())),
+                Ok(Some(account)) => Ok(MemoryValue::Basic(Box::new(account.into()))),
                 Ok(None) => Err(ReadError::NotFound),
                 Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
             };
@@ -186,7 +186,7 @@ impl<S: Storage> Database for VmDb<S> {
             return Ok(Some(AccountInfo::default()));
         }
         match self.read(MemoryLocation::Basic(address), self.tx_idx, !is_preload) {
-            Ok(MemoryValue::Basic(value)) => Ok(Some(value)),
+            Ok(MemoryValue::Basic(value)) => Ok(Some(*value)),
             Err(ReadError::NotFound) => Ok(None),
             Err(err) => Err(err),
             _ => Err(ReadError::InvalidMemoryLocationType),
@@ -326,7 +326,7 @@ impl<S: Storage> Vm<S> {
                             }
                             writes.insert(
                                 MemoryLocation::Basic(*address),
-                                MemoryValue::Basic(account_info),
+                                MemoryValue::Basic(Box::new(account_info)),
                             );
                         }
                         for (slot, value) in account.changed_storage_slots() {

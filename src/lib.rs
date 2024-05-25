@@ -22,7 +22,7 @@ enum MemoryLocation {
 
 #[derive(Debug, Clone)]
 enum MemoryValue {
-    Basic(AccountInfo),
+    Basic(Box<AccountInfo>),
     // We lazily update the beneficiary balance to avoid continuous
     // dependencies as all transactions read and write to it. We
     // either evaluate all these beneficiary account states at the
