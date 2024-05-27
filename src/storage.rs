@@ -24,6 +24,8 @@ pub struct AccountBasic {
     pub nonce: u64,
     /// The code of the account.
     pub code: Bytes,
+    /// The optional code hash to avoid rehashing during execution
+    pub code_hash: Option<B256>,
 }
 
 impl Default for AccountBasic {
@@ -32,6 +34,7 @@ impl Default for AccountBasic {
             balance: U256::ZERO,
             nonce: 0,
             code: Bytes::new(),
+            code_hash: None,
         }
     }
 }
@@ -39,7 +42,13 @@ impl Default for AccountBasic {
 impl From<AccountBasic> for AccountInfo {
     fn from(account: AccountBasic) -> Self {
         let code = Bytecode::new_raw(account.code);
-        AccountInfo::new(account.balance, account.nonce, code.hash_slow(), code)
+        AccountInfo::new(
+            account.balance,
+            account.nonce,
+            // TODO: try faster hashing with `asm-keccak`, `native-keccak`, etc.
+            account.code_hash.unwrap_or_else(|| code.hash_slow()),
+            code,
+        )
     }
 }
 
@@ -49,6 +58,7 @@ impl From<AccountInfo> for AccountBasic {
             balance: account.balance,
             nonce: account.nonce,
             code: account.code.unwrap_or_default().original_bytes(),
+            code_hash: Some(account.code_hash),
         }
     }
 }
