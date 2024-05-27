@@ -64,8 +64,7 @@ impl MvMemory {
         read_set: ReadSet,
         write_set: WriteSet,
     ) -> bool {
-        // TODO: Better error handling
-        *self.last_read_set[tx_version.tx_idx].lock().unwrap() = read_set;
+        *index_mutex!(self.last_read_set, tx_version.tx_idx) = read_set;
 
         let new_locations: Vec<MemoryLocation> = write_set.keys().cloned().collect();
         for (location, value) in write_set.into_iter() {
@@ -80,15 +79,14 @@ impl MvMemory {
                         .insert(tx_version.tx_idx, entry);
                 }
                 Entry::Vacant(vacant) => {
-                    vacant.insert([(tx_version.tx_idx, entry)].into_iter().collect());
+                    vacant.insert(BTreeMap::from([(tx_version.tx_idx, entry)]));
                 }
             }
         }
 
         // TODO: Better error handling
-        let mut last_written_locations = self.last_written_locations[tx_version.tx_idx]
-            .lock()
-            .unwrap();
+        let mut last_written_locations =
+            index_mutex!(self.last_written_locations, tx_version.tx_idx);
 
         // TODO: Faster "difference" function when there are many locations
         for prev_location in last_written_locations.iter() {
@@ -129,7 +127,7 @@ impl MvMemory {
     // incarnation can be aborted at most once).
     pub(crate) fn validate_read_set(&self, tx_idx: TxIdx) -> bool {
         // TODO: Better error handling
-        for (location, prior_origin) in self.last_read_set[tx_idx].lock().unwrap().iter() {
+        for (location, prior_origin) in index_mutex!(self.last_read_set, tx_idx).iter() {
             // TODO: Do we need to check for the beneficiary account to use
             // `read_absolute` instead?
             match self.read_closest(location, tx_idx) {
@@ -157,7 +155,7 @@ impl MvMemory {
     // that read them.
     pub(crate) fn convert_writes_to_estimates(&self, tx_idx: TxIdx) {
         // TODO: Better error handling
-        for location in self.last_written_locations[tx_idx].lock().unwrap().iter() {
+        for location in index_mutex!(self.last_written_locations, tx_idx).iter() {
             if let Some(mut written_transactions) = self.data.get_mut(location) {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }

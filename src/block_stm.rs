@@ -244,8 +244,14 @@ fn preprocess_dependencies(
     let mut tx_idxes_by_recipients: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
     for (tx_idx, tx) in txs.iter().enumerate() {
         let mut register_dependency = |dependency_idx: usize| {
-            transactions_status[tx_idx] = TxIncarnationStatus::Aborting(0);
-            transactions_dependents[dependency_idx].insert(tx_idx);
+            // SAFETY: The dependency index is guaranteed to be smaller than the block
+            // size in this scope.
+            unsafe {
+                *transactions_status.get_unchecked_mut(tx_idx) = TxIncarnationStatus::Aborting(0);
+                transactions_dependents
+                    .get_unchecked_mut(dependency_idx)
+                    .insert(tx_idx);
+            }
             transactions_dependencies
                 .entry(tx_idx)
                 .or_default()
@@ -362,7 +368,7 @@ fn try_execute<S: Storage>(
             read_set,
             write_set,
         } => {
-            *execution_results[tx_version.tx_idx].lock().unwrap() = Some(result_and_state);
+            *index_mutex!(execution_results, tx_version.tx_idx) = Some(result_and_state);
             let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
             scheduler.finish_execution(tx_version, wrote_new_location)
         }
