@@ -1,5 +1,5 @@
 use std::{
-    cmp::min,
+    cmp::{max, min},
     sync::{
         // TODO: Fine-tune all atomic `Ordering`s.
         // We're starting with `Relaxed` for maximum performance
@@ -45,6 +45,8 @@ use crate::{
 pub(crate) struct Scheduler {
     /// The number of transactions in this block.
     block_size: usize,
+    /// The first transaction going parallel that needs validation.
+    starting_validation_idx: usize,
     /// The next transaction to try and execute.
     execution_idx: AtomicUsize,
     /// The next tranasction to try and validate.
@@ -79,11 +81,13 @@ impl Scheduler {
         transactions_status: TransactionsStatus,
         transactions_dependents: TransactionsDependents,
         transactions_dependencies: TransactionsDependencies,
+        starting_validation_idx: usize,
     ) -> Self {
         Self {
             block_size,
+            starting_validation_idx,
             execution_idx: AtomicUsize::new(0),
-            validation_idx: AtomicUsize::new(0),
+            validation_idx: AtomicUsize::new(starting_validation_idx),
             decrease_cnt: AtomicUsize::new(0),
             transactions_status: transactions_status.into_iter().map(Mutex::new).collect(),
             transactions_dependents: transactions_dependents
@@ -271,16 +275,20 @@ impl Scheduler {
             if let Some(min_idx) = min_dependent_idx {
                 self.decrease_execution_idx(min_idx);
             }
-
             if self.validation_idx.load(Relaxed) > tx_version.tx_idx {
                 // This incarnation wrote to a new location, so we must
                 // re-evaluate it (via the immediately returned task returned
                 // immediately) and all higher transactions in case they read
                 // the new location.
                 if wrote_new_location {
-                    self.decrease_validation_idx(tx_version.tx_idx + 1);
+                    self.decrease_validation_idx(max(
+                        tx_version.tx_idx + 1,
+                        self.starting_validation_idx,
+                    ));
                 }
-                return Some(tx_version);
+                if tx_version.tx_idx >= self.starting_validation_idx {
+                    return Some(tx_version);
+                }
             }
         } else {
             // TODO: Better error handling
