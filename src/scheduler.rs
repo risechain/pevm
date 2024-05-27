@@ -130,7 +130,7 @@ impl Scheduler {
 
     fn try_incarnate(&self, mut tx_idx: TxIdx) -> Option<TxVersion> {
         while tx_idx < self.block_size {
-            let mut transaction_status = self.transactions_status[tx_idx].lock().unwrap();
+            let mut transaction_status = index_mutex!(self.transactions_status, tx_idx);
             if let TxIncarnationStatus::ReadyToExecute(i) = *transaction_status {
                 *transaction_status = TxIncarnationStatus::Executing(i);
                 return Some(TxVersion {
@@ -163,7 +163,7 @@ impl Scheduler {
         self.num_active_tasks.fetch_add(1, Relaxed);
         let mut validation_idx = self.validation_idx.fetch_add(1, Relaxed);
         while validation_idx < self.block_size {
-            let transaction_status = self.transactions_status[validation_idx].lock().unwrap();
+            let transaction_status = index_mutex!(self.transactions_status, validation_idx);
             if let TxIncarnationStatus::Executed(i) = *transaction_status {
                 return Some(TxVersion {
                     tx_idx: validation_idx,
@@ -193,20 +193,19 @@ impl Scheduler {
     pub(crate) fn add_dependency(&self, tx_idx: TxIdx, blocking_tx_idx: TxIdx) -> bool {
         // This is an important lock to prevent a race condition where the blocking
         // transaction completes re-execution before this dependecy can be added.
-        let blocking_transaction_status = self.transactions_status[blocking_tx_idx].lock().unwrap();
+        let blocking_transaction_status = index_mutex!(self.transactions_status, blocking_tx_idx);
         if let TxIncarnationStatus::Executed(_) = *blocking_transaction_status {
             return false;
         }
 
-        let mut transaction_status = self.transactions_status[tx_idx].lock().unwrap();
+        let mut transaction_status = index_mutex!(self.transactions_status, tx_idx);
         if let TxIncarnationStatus::Executing(i) = *transaction_status {
             *transaction_status = TxIncarnationStatus::Aborting(i);
             drop(transaction_status);
 
             // TODO: Better error handling here
-            let mut blocking_dependents = self.transactions_dependents[blocking_tx_idx]
-                .lock()
-                .unwrap();
+            let mut blocking_dependents =
+                index_mutex!(self.transactions_dependents, blocking_tx_idx);
             blocking_dependents.insert(tx_idx);
             drop(blocking_dependents);
 
@@ -221,7 +220,7 @@ impl Scheduler {
     // easy to dead-lock.
     fn set_ready_status(&self, tx_idx: TxIdx) {
         // TODO: Better error handling
-        let mut transaction_status = self.transactions_status[tx_idx].lock().unwrap();
+        let mut transaction_status = index_mutex!(self.transactions_status, tx_idx);
         if let TxIncarnationStatus::Aborting(i) = *transaction_status {
             *transaction_status = TxIncarnationStatus::ReadyToExecute(i + 1)
         } else {
@@ -240,18 +239,14 @@ impl Scheduler {
         wrote_new_location: bool,
     ) -> Option<ValidationTask> {
         // TODO: Better error handling
-        let mut transaction_status = self.transactions_status[tx_version.tx_idx].lock().unwrap();
+        let mut transaction_status = index_mutex!(self.transactions_status, tx_version.tx_idx);
         if let TxIncarnationStatus::Executing(i) = *transaction_status {
             // TODO: Assert that `i` equals `tx_version.tx_incarnation`?
             *transaction_status = TxIncarnationStatus::Executed(i);
             drop(transaction_status);
 
-            // TODO: Better error handling
-            let mut dependents = self.transactions_dependents[tx_version.tx_idx]
-                .lock()
-                .unwrap();
-
             // Resume dependent transactions
+            let mut dependents = index_mutex!(self.transactions_dependents, tx_version.tx_idx);
             let mut min_dependent_idx = None;
             for tx_idx in dependents.iter() {
                 if let Some(deps) = self.transactions_dependencies.get(tx_idx) {
@@ -301,7 +296,7 @@ impl Scheduler {
     // one failing validation per version can lead to a successful abort.
     pub(crate) fn try_validation_abort(&self, tx_version: &TxVersion) -> bool {
         // TODO: Better error handling
-        let mut transaction_status = self.transactions_status[tx_version.tx_idx].lock().unwrap();
+        let mut transaction_status = index_mutex!(self.transactions_status, tx_version.tx_idx);
         if let TxIncarnationStatus::Executed(i) = *transaction_status {
             *transaction_status = TxIncarnationStatus::Aborting(i);
             true

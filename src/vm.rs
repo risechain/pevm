@@ -294,7 +294,8 @@ impl<S: Storage> Vm<S> {
             .with_db(&mut db)
             .with_spec_id(self.spec_id)
             .with_block_env(self.block_env.clone())
-            .with_tx_env(self.txs[tx_idx].clone())
+            // SATEFY: A correct scheduler would guarantee this index to be inbound.
+            .with_tx_env(unsafe { self.txs.get_unchecked(tx_idx) }.clone())
             .with_handler(handler)
             .build();
 
