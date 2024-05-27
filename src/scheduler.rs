@@ -128,9 +128,8 @@ impl Scheduler {
         }
     }
 
-    fn try_incarnate(&self, tx_idx: TxIdx) -> Option<TxVersion> {
-        // TODO: Better error handling
-        if tx_idx < self.block_size {
+    fn try_incarnate(&self, mut tx_idx: TxIdx) -> Option<TxVersion> {
+        while tx_idx < self.block_size {
             let mut transaction_status = self.transactions_status[tx_idx].lock().unwrap();
             if let TxIncarnationStatus::ReadyToExecute(i) = *transaction_status {
                 *transaction_status = TxIncarnationStatus::Executing(i);
@@ -138,10 +137,9 @@ impl Scheduler {
                     tx_idx,
                     tx_incarnation: i,
                 });
-            } else {
-                drop(transaction_status);
-                return self.try_incarnate(self.execution_idx.fetch_add(1, Relaxed));
             }
+            drop(transaction_status);
+            tx_idx = self.execution_idx.fetch_add(1, Relaxed);
         }
         self.num_active_tasks.fetch_sub(1, Relaxed);
         None
@@ -163,20 +161,17 @@ impl Scheduler {
             return None;
         }
         self.num_active_tasks.fetch_add(1, Relaxed);
-        let validation_idx = self.validation_idx.fetch_add(1, Relaxed);
-        if validation_idx < self.block_size {
-            // TODO: Better error handling
+        let mut validation_idx = self.validation_idx.fetch_add(1, Relaxed);
+        while validation_idx < self.block_size {
             let transaction_status = self.transactions_status[validation_idx].lock().unwrap();
             if let TxIncarnationStatus::Executed(i) = *transaction_status {
                 return Some(TxVersion {
                     tx_idx: validation_idx,
                     tx_incarnation: i,
                 });
-            } else {
-                drop(transaction_status);
-                self.num_active_tasks.fetch_sub(1, Relaxed);
-                return self.next_version_to_validate();
             }
+            drop(transaction_status);
+            validation_idx = self.validation_idx.fetch_add(1, Relaxed);
         }
         self.num_active_tasks.fetch_sub(1, Relaxed);
         None
