@@ -82,12 +82,14 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         transactions_dependents,
         transactions_dependencies,
         max_concurrency_level,
+        starting_validation_idx,
     ) = preprocess_dependencies(&beneficiary_address, &txs);
     let scheduler = Scheduler::new(
         block_size,
         transactions_status,
         transactions_dependents,
         transactions_dependencies,
+        starting_validation_idx,
     );
     let mv_memory = Arc::new(MvMemory::new(block_size));
     let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
@@ -225,10 +227,17 @@ fn preprocess_dependencies(
     TransactionsDependents,
     TransactionsDependencies,
     NonZeroUsize,
+    usize,
 ) {
     let block_size = txs.len();
     if block_size == 0 {
-        return (Vec::new(), Vec::new(), AHashMap::new(), NonZeroUsize::MIN);
+        return (
+            Vec::new(),
+            Vec::new(),
+            AHashMap::new(),
+            NonZeroUsize::MIN,
+            0,
+        );
     }
 
     let mut transactions_status: TransactionsStatus = (0..block_size)
@@ -319,11 +328,18 @@ fn preprocess_dependencies(
         .unwrap_or(min_concurrency_level)
         .max(min_concurrency_level);
 
+    // Don't bother to evaluate the first fully sequential chain
+    let mut starting_validation_idx = 1;
+    while transactions_dependents[starting_validation_idx - 1].contains(&starting_validation_idx) {
+        starting_validation_idx += 1;
+    }
+
     (
         transactions_status,
         transactions_dependents,
         transactions_dependencies,
         max_concurrency_level,
+        starting_validation_idx,
     )
 }
 
