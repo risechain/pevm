@@ -67,12 +67,13 @@ impl MvMemory {
         // TODO: Better error handling
         *self.last_read_set[tx_version.tx_idx].lock().unwrap() = read_set;
 
-        for (location, value) in write_set.iter() {
-            let entry = MemoryEntry::Data(tx_version.tx_incarnation, value.clone());
+        let new_locations: Vec<MemoryLocation> = write_set.keys().cloned().collect();
+        for (location, value) in write_set.into_iter() {
+            let entry = MemoryEntry::Data(tx_version.tx_incarnation, value);
             // We must not use `get_mut` here, else there's a race condition where
             // two threads get `None` first, then the latter's `insert` overwrote
             // the former's.
-            match self.data.entry(location.clone()) {
+            match self.data.entry(location) {
                 Entry::Occupied(mut written_transactions) => {
                     written_transactions
                         .get_mut()
@@ -91,21 +92,21 @@ impl MvMemory {
 
         // TODO: Faster "difference" function when there are many locations
         for prev_location in last_written_locations.iter() {
-            if !write_set.contains_key(prev_location) {
+            if !new_locations.contains(prev_location) {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
                     written_transactions.remove(&tx_version.tx_idx);
                 }
             }
         }
-        for (new_location, _) in write_set.iter() {
+        for new_location in new_locations.iter() {
             if !last_written_locations.contains(new_location) {
                 // We update right before returning to avoid an early clone.
-                *last_written_locations = write_set.into_keys().collect();
+                *last_written_locations = new_locations;
                 return true;
             }
         }
         // We update right before returning to avoid an early clone.
-        *last_written_locations = write_set.into_keys().collect();
+        *last_written_locations = new_locations;
         false
     }
 
