@@ -14,8 +14,8 @@ use std::{
 
 use alloy_primitives::Address;
 use alloy_rpc_types::Block;
-use block_stm_revm::{execute_revm, get_block_env, get_block_spec, get_tx_envs};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use pevm::{execute_revm, get_block_env, get_block_spec, get_tx_envs};
 use revm::{db::PlainAccount, primitives::KECCAK_EMPTY};
 
 // Better project structure

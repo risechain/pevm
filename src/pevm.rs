@@ -19,9 +19,9 @@ use crate::{
     ValidationTask,
 };
 
-/// Errors when executing a block with BlockSTM.
+/// Errors when executing a block with PEVM.
 #[derive(Debug)]
-pub enum BlockStmError {
+pub enum PevmError {
     /// Cannot derive the chain spec from the block header.
     UnknownBlockSpec,
     /// Block header lacks information for execution.
@@ -35,8 +35,8 @@ pub enum BlockStmError {
     UnreachableError,
 }
 
-/// Execution result of BlockSTM.
-pub type BlockStmResult = Result<Vec<ResultAndState>, BlockStmError>;
+/// Execution result of PEVM.
+pub type PevmResult = Result<Vec<ResultAndState>, PevmError>;
 
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
@@ -45,15 +45,15 @@ pub fn execute<S: Storage + Send + Sync>(
     block: Block,
     parent_header: Option<Header>,
     concurrency_level: NonZeroUsize,
-) -> BlockStmResult {
+) -> PevmResult {
     let Some(spec_id) = get_block_spec(&block.header) else {
-        return Err(BlockStmError::UnknownBlockSpec);
+        return Err(PevmError::UnknownBlockSpec);
     };
     let Some(block_env) = get_block_env(&block.header, parent_header.as_ref()) else {
-        return Err(BlockStmError::MissingHeaderData);
+        return Err(PevmError::MissingHeaderData);
     };
     let Some(tx_envs) = get_tx_envs(&block.transactions) else {
-        return Err(BlockStmError::MissingTransactionData);
+        return Err(PevmError::MissingTransactionData);
     };
     execute_revm(storage, spec_id, block_env, tx_envs, concurrency_level)
 }
@@ -66,7 +66,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
     concurrency_level: NonZeroUsize,
-) -> BlockStmResult {
+) -> PevmResult {
     // Beneficiary setup for post-processing
     let beneficiary_address = block_env.coinbase;
     let beneficiary_location = MemoryLocation::Basic(beneficiary_address);
@@ -100,7 +100,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // to act as the standalone DB for sequential execution.
     if block_size == 1 {
         return match vm.execute(0) {
-            VmExecutionResult::ExecutionError(err) => Err(BlockStmError::ExecutionError(err)),
+            VmExecutionResult::ExecutionError(err) => Err(PevmError::ExecutionError(err)),
             VmExecutionResult::Ok {
                 mut result_and_state,
                 write_set,
@@ -117,7 +117,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 }
                 Ok(vec![result_and_state])
             }
-            _ => Err(BlockStmError::UnreachableError),
+            _ => Err(PevmError::UnreachableError),
         };
     }
 
@@ -193,7 +193,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     });
 
     if let Some(err) = execution_error.take() {
-        return Err(BlockStmError::ExecutionError(err));
+        return Err(PevmError::ExecutionError(err));
     }
 
     // We lazily evaluate the final beneficiary account's balance at the end of each transaction

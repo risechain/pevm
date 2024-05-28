@@ -685,31 +685,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "block-stm-revm"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "alloy-primitives",
- "alloy-provider",
- "alloy-rpc-types",
- "alloy-transport",
- "alloy-transport-http",
- "criterion",
- "dashmap",
- "rand",
- "rayon",
- "reqwest 0.12.4",
- "revm",
- "revme",
- "serde",
- "serde_json",
- "snmalloc-rs",
- "stacker",
- "tokio",
- "walkdir",
-]
-
-[[package]]
 name = "blst"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2427,6 +2402,31 @@ dependencies = [
  "memchr",
  "thiserror",
  "ucd-trie",
+]
+
+[[package]]
+name = "pevm"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types",
+ "alloy-transport",
+ "alloy-transport-http",
+ "criterion",
+ "dashmap",
+ "rand",
+ "rayon",
+ "reqwest 0.12.4",
+ "revm",
+ "revme",
+ "serde",
+ "serde_json",
+ "snmalloc-rs",
+ "stacker",
+ "tokio",
+ "walkdir",
 ]
 
 [[package]]
