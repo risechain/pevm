@@ -6,6 +6,8 @@ use revm::{
     primitives::{uint, AccountInfo, Address, TransactTo, TxEnv, U256},
 };
 
+pub const GAS_LIMIT: u64 = 26_938;
+
 fn generate_addresses(length: usize) -> Vec<Address> {
     (0..length).map(|_| Address::new(rand::random())).collect()
 }
@@ -27,7 +29,7 @@ pub fn generate_cluster(
         .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
         .build();
 
-    let mut state = Vec::from(&[(gld_address, gld_account)]);
+    let mut state = vec![(gld_address, gld_account)];
     let mut txs = Vec::new();
 
     for person in people_addresses.iter() {
@@ -43,10 +45,9 @@ pub fn generate_cluster(
 
                 txs.push(TxEnv {
                     caller: *person,
-                    gas_limit: 16_777_216u64,
+                    gas_limit: GAS_LIMIT,
                     gas_price: U256::from(0xb2d05e07u64),
                     transact_to: TransactTo::Call(gld_address),
-                    value: U256::ZERO,
                     data: calldata,
                     nonce: Some(nonce as u64),
                     ..TxEnv::default()

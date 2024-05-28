@@ -17,9 +17,9 @@ use revm::{
 
 #[test]
 fn erc20_independent() {
-    const N: usize = 1024;
+    const N: usize = 37123;
     let (mut state, txs) = generate_cluster(N, 1, 1);
-    state.push((Address::ZERO, PlainAccount::default()));
+    state.push((Address::ZERO, PlainAccount::default())); // Beneficiary
     test_execute_revm(
         common::build_inmem_db(state),
         SpecId::LATEST,
@@ -30,12 +30,12 @@ fn erc20_independent() {
 
 #[test]
 fn erc20_clusters() {
-    const NUM_CLUSTERS: usize = 8;
-    const NUM_FAMILIES_PER_CLUSTER: usize = 16;
-    const NUM_PEOPLE_PER_FAMILY: usize = 6;
-    const NUM_TRANSFERS_PER_PERSON: usize = 12;
+    const NUM_CLUSTERS: usize = 10;
+    const NUM_FAMILIES_PER_CLUSTER: usize = 15;
+    const NUM_PEOPLE_PER_FAMILY: usize = 15;
+    const NUM_TRANSFERS_PER_PERSON: usize = 15;
 
-    let mut final_state = Vec::from(&[(Address::ZERO, PlainAccount::default())]);
+    let mut final_state = vec![(Address::ZERO, PlainAccount::default())]; // Beneficiary
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..NUM_CLUSTERS {
         let (state, txs) = generate_cluster(

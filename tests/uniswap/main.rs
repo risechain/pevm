@@ -19,11 +19,11 @@ use revm::{
 
 #[test]
 fn uniswap_clusters() {
-    const NUM_CLUSTERS: usize = 8;
-    const NUM_PEOPLE_PER_CLUSTER: usize = 4;
-    const NUM_SWAPS_PER_PERSON: usize = 16;
+    const NUM_CLUSTERS: usize = 20;
+    const NUM_PEOPLE_PER_CLUSTER: usize = 20;
+    const NUM_SWAPS_PER_PERSON: usize = 20;
 
-    let mut final_state = Vec::from(&[(Address::ZERO, PlainAccount::default())]);
+    let mut final_state = vec![(Address::ZERO, PlainAccount::default())]; // Beneficiary
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..NUM_CLUSTERS {
         let (state, txs) = generate_cluster(NUM_PEOPLE_PER_CLUSTER, NUM_SWAPS_PER_PERSON);
