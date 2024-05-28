@@ -7,6 +7,8 @@ use revm::{
     primitives::{fixed_bytes, uint, AccountInfo, Address, Bytes, TransactTo, TxEnv, B256, U256},
 };
 
+pub const GAS_LIMIT: u64 = 155_934;
+
 pub fn generate_cluster(
     num_people: usize,
     num_swaps_per_person: usize,
@@ -96,7 +98,7 @@ pub fn generate_cluster(
     let single_swap_account =
         SingleSwap::new(swap_router_address, dai_address, usdc_address).build();
 
-    let mut state = Vec::from(&[
+    let mut state = vec![
         (weth9_address, weth9_account),
         (dai_address, dai_account),
         (usdc_address, usdc_account),
@@ -104,7 +106,7 @@ pub fn generate_cluster(
         (pool_address, pool_account),
         (swap_router_address, swap_router_account),
         (single_swap_address, single_swap_account),
-    ]);
+    ];
 
     for person in people_addresses.iter() {
         let info = AccountInfo::from_balance(uint!(4_567_000_000_000_000_000_000_U256));
@@ -147,17 +149,12 @@ pub fn generate_cluster(
 
             txs.push(TxEnv {
                 caller: *person,
-                gas_limit: 16_777_216u64,
+                gas_limit: GAS_LIMIT,
                 gas_price: U256::from(0xb2d05e07u64),
                 transact_to: TransactTo::Call(single_swap_address),
-                value: U256::ZERO,
                 data: Bytes::from(data_bytes),
                 nonce: Some(nonce as u64),
-                chain_id: None,
-                access_list: Vec::new(),
-                gas_priority_fee: None,
-                blob_hashes: Vec::new(),
-                max_fee_per_blob_gas: None,
+                ..TxEnv::default()
             })
         }
     }

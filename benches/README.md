@@ -66,8 +66,10 @@ This benchmark includes a few transactions for each Ethereum hardfork that chang
 
 ## Gigagas
 
-This benchmark includes mocked blocks that exceed 1 Gigagas to see how PEVM can speed up building and syncing large blocks in the future. All blocks are currently in the CANCUN spec.
+This benchmark includes mocked blocks that exceed 1 Gigagas to see how PEVM can speed up building and syncing large blocks going forward. All blocks are in the CANCUN spec with no dependencies to measure the maximum speedup.
 
-|                           | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | P / S    |
-| ------------------------- | ---------------- | ------------- | -------------------- | ------------------ | -------- |
-| Independent Raw Transfers | 47,620           | 1,000,020,000 | 194.37 ms            | 153.66 ms          | **0.79** |
+|                 | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | P / S    |
+| --------------- | ---------------- | ------------- | -------------------- | ------------------ | -------- |
+| Raw Transfers   | 47,620           | 1,000,020,000 | 149.74 ms            | 111.98 ms          | **0.75** |
+| ERC20 Transfers | 37,123           | 1,000,019,374 | 225.16 ms            | 85.193 ms          | **0.38** |
+| Uniswap Swaps   | 6,413            | 1,000,004,742 | 563.92 ms            | 65.363 ms          | **0.12** |
