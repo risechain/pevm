@@ -1,4 +1,4 @@
-//! Blazingly fast Block-STM implementation for EVM.
+//! Blazingly fast Parallel EVM for EVM.
 
 // TODO: Better types & API please
 
@@ -142,8 +142,8 @@ macro_rules! index_mutex {
     };
 }
 
-mod block_stm;
-pub use block_stm::{execute, execute_revm, BlockStmError, BlockStmResult};
+mod pevm;
+pub use pevm::{execute, execute_revm, PevmError, PevmResult};
 mod mv_memory;
 mod primitives;
 pub use primitives::{get_block_env, get_block_spec, get_tx_envs};

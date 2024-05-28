@@ -1,5 +1,5 @@
 use alloy_rpc_types::{Block, Header};
-use block_stm_revm::{get_block_env, get_block_spec, get_tx_envs, BlockStmError, BlockStmResult};
+use pevm::{get_block_env, get_block_spec, get_tx_envs, PevmError, PevmResult};
 use revm::{
     db::PlainAccount,
     primitives::{
@@ -35,7 +35,7 @@ pub fn build_inmem_db(accounts: impl IntoIterator<Item = (Address, PlainAccount)
     db
 }
 
-// The source-of-truth sequential execution result that BlockSTM must match.
+// The source-of-truth sequential execution result that PEVM must match.
 // Currently early returning the first encountered EVM error if there is any.
 pub fn execute_sequential<D: DatabaseRef + DatabaseCommit>(
     mut db: D,
@@ -68,44 +68,45 @@ pub fn execute_sequential<D: DatabaseRef + DatabaseCommit>(
 // TODO: More elegant solution?
 fn assert_evm_errors<DBError1: Debug, DBError2: Debug>(
     seq_err: &EVMError<DBError1>,
-    block_stm_err: &EVMError<DBError2>,
+    pevm_err: &EVMError<DBError2>,
 ) {
-    match (seq_err, block_stm_err) {
+    match (seq_err, pevm_err) {
         (EVMError::Transaction(e1), EVMError::Transaction(e2)) => assert_eq!(e1, e2),
         (EVMError::Header(e1), EVMError::Header(e2)) => assert_eq!(e1, e2),
         (EVMError::Custom(e1), EVMError::Custom(e2)) => assert_eq!(e1, e2),
         // We treat all database errors as inequality.
         // Warning: This can be dangerous when `EVMError` introduces a new variation.
-        (e1, e2) =>
-            panic!("Block-STM's execution error doesn't match Sequential's\nSequential: {e1:?}\nBlock-STM: {e2:?}"),
+        (e1, e2) => panic!(
+            "PEVM's execution error doesn't match Sequential's\nSequential: {e1:?}\nPEVM: {e2:?}"
+        ),
     }
 }
 
 fn assert_execution_result<D: DatabaseRef>(
     sequential_result: Result<Vec<ResultAndState>, EVMError<D::Error>>,
-    block_stm_result: BlockStmResult,
+    pevm_result: PevmResult,
     must_succeed: bool,
 ) where
     D::Error: Debug,
 {
-    match (sequential_result, block_stm_result) {
+    match (sequential_result, pevm_result) {
         (Ok(sequential_results), Ok(parallel_results)) => {
             assert_eq!(sequential_results, parallel_results)
         }
         // TODO: Support extracting and comparing multiple errors in the input block.
         // This only works for now as most tests have just one (potentially error) transaction.
-        (Err(sequential_error), Err(BlockStmError::ExecutionError(parallel_error))) => {
+        (Err(sequential_error), Err(PevmError::ExecutionError(parallel_error))) => {
             if must_succeed {
                 panic!("This block must succeed!");
             } else {
                 assert_evm_errors(&sequential_error, &parallel_error);
             }
         }
-        _ => panic!("Block-STM's execution result doesn't match Sequential's"),
+        _ => panic!("PEVM's execution result doesn't match Sequential's"),
     };
 }
 
-// Execute an REVM block sequentially & with BlockSTM and assert that
+// Execute an REVM block sequentially & with PEVM and assert that
 // the execution results match.
 pub fn test_execute_revm<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
     db: D,
@@ -118,12 +119,12 @@ pub fn test_execute_revm<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result::<D>(
         execute_sequential(db.clone(), spec_id, block_env.clone(), &txs),
-        block_stm_revm::execute_revm(db, spec_id, block_env, txs, concurrency_level),
+        pevm::execute_revm(db, spec_id, block_env, txs, concurrency_level),
         false, // TODO: Parameterize this
     );
 }
 
-// Execute an Alloy block sequentially & with BlockSTM and assert that
+// Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
 pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
     db: D,
@@ -141,7 +142,7 @@ pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>
             get_block_env(&block.header, parent_header.as_ref()).unwrap(),
             &get_tx_envs(&block.transactions).unwrap(),
         ),
-        block_stm_revm::execute(db, block, parent_header, concurrency_level),
+        pevm::execute(db, block, parent_header, concurrency_level),
         must_succeed,
     );
 }

@@ -6,10 +6,10 @@
 // - REVM doesn't test very tightly (not matching on expected failures, skipping tests, etc.).
 // - We must use a REVM fork (for distinguishing explicit & implicit reads, etc.).
 // - We use custom handlers (for lazy-updating the beneficiary account, etc.) that require "re-testing".
-// - Help outline the minimal state commitment logic for BlockSTM.
+// - Help outline the minimal state commitment logic for PEVM.
 
 use ahash::AHashMap;
-use block_stm_revm::BlockStmError;
+use pevm::PevmError;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
@@ -132,7 +132,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
 
             match (
                 test.expect_exception.as_deref(),
-                block_stm_revm::execute_revm(
+                pevm::execute_revm(
                     common::build_inmem_db(chain_state.clone()),
                     spec_id,
                     build_block_env(&unit.env),
@@ -169,7 +169,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     ));
                 }
                 // Remaining tests that expect execution to fail -> match error
-                (Some(exception), Err(BlockStmError::ExecutionError(error))) => {
+                (Some(exception), Err(PevmError::ExecutionError(error))) => {
                     // TODO: Ideally the REVM errors would match the descriptive expectations more.
                     if exception != "TR_TypeNotSupported" && !matches!(
                         (exception, &error),
@@ -260,7 +260,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     assert_eq!(logs_root, test.logs, "Mismatched logs root for {path:?}");
 
                     // This is a good reference for a minimal state/DB commitment logic for
-                    // BlockSTM/REVM to meet the Ethereum specs throughout the eras.
+                    // PEVM/REVM to meet the Ethereum specs throughout the eras.
                     for (address, account) in state {
                         if !account.is_touched() {
                             continue;
@@ -284,7 +284,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     assert_eq!(state_root, test.hash, "Mismatched state root for {path:?}");
                 }
                 _ => {
-                    panic!("BlockSTM doesn't match the test's expectation for {path:?}")
+                    panic!("PEVM doesn't match the test's expectation for {path:?}")
                 }
             }
         });

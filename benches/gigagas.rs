@@ -7,8 +7,8 @@
 use std::{num::NonZeroUsize, thread};
 
 use alloy_primitives::{Address, U160, U256};
-use block_stm_revm::execute_revm;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use pevm::execute_revm;
 use revm::{
     db::PlainAccount,
     primitives::{BlockEnv, SpecId, TransactTo, TxEnv},
