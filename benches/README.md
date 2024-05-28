@@ -10,6 +10,18 @@ This benchmark includes several transactions for each Ethereum hardfork that alt
 
 The current hardcoded concurrency level is 8, which has performed best for Ethereum blocks thus far. Increasing it will improve results for blocks with more parallelism but hurt small or highly interdependent blocks due to thread overheads. Ideally, our static analysis will be smart enough to auto-tune this better.
 
+To run the benchmark:
+
+```sh
+$ cargo bench --bench mainnet
+```
+
+To benchmark with profiling for development (preferably after commenting out the sequential run):
+
+```sh
+CARGO_PROFILE_BENCH_DEBUG=true cargo flamegraph --bench mainnet -- --bench
+```
+
 | Block Number | Spec            | No. Transactions | Gas Used   | Sequential Execution | Parallel Execution | Speedup    |
 | ------------ | --------------- | ---------------- | ---------- | -------------------- | ------------------ | ---------- |
 | 46147        | FRONTIER        | 1                | 21,000     | 3.8133 µs            | 5.5464 µs          | 🔴1.45     |
