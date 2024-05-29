@@ -8,6 +8,9 @@ use revm::{
 
 pub const GAS_LIMIT: u64 = 26_938;
 
+// TODO: Better randomness control. Sometimes we want duplicates to test
+// dependent transactions, sometimes we want to guarantee non-duplicates
+// for independent benchmarks.
 fn generate_addresses(length: usize) -> Vec<Address> {
     (0..length).map(|_| Address::new(rand::random())).collect()
 }

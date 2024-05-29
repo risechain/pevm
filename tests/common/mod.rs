@@ -33,3 +33,5 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     parent_beacon_block_root: None,
     requests_root: None,
 };
+
+pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
