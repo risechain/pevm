@@ -13,6 +13,9 @@ pub fn generate_cluster(
     num_people: usize,
     num_swaps_per_person: usize,
 ) -> (Vec<(Address, PlainAccount)>, Vec<TxEnv>) {
+    // TODO: Better randomness control. Sometimes we want duplicates to test
+    // dependent transactions, sometimes we want to guarantee non-duplicates
+    // for independent benchmarks.
     let people_addresses: Vec<Address> = (0..num_people)
         .map(|_| Address::new(rand::random()))
         .collect();

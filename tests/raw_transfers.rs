@@ -25,6 +25,7 @@ fn raw_transfers_independent() {
                     caller: address,
                     transact_to: TransactTo::Call(address),
                     value: U256::from(1),
+                    gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
                     gas_price: U256::from(1),
                     ..TxEnv::default()
                 }
@@ -62,6 +63,7 @@ fn raw_transfers_same_sender_multiple_txs() {
                     caller: address,
                     transact_to: TransactTo::Call(address),
                     value: U256::from(1),
+                    gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
                     gas_price: U256::from(1),
                     nonce: Some(nonce),
                     ..TxEnv::default()
@@ -89,8 +91,8 @@ fn raw_transfers_independent_alloy() {
                             from: address,
                             to: Some(address),
                             value: U256::from(1),
+                            gas: common::RAW_TRANSFER_GAS_LIMIT.into(),
                             gas_price: Some(1),
-                            gas: u64::MAX.into(),
                             ..Transaction::default()
                         }
                     })

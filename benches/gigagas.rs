@@ -60,8 +60,7 @@ pub fn bench(c: &mut Criterion, name: &str, db: InMemoryDB, txs: Vec<TxEnv>) {
 }
 
 pub fn bench_raw_transfers(c: &mut Criterion) {
-    let gas_limit = 21_000;
-    let block_size = (GIGA_GAS as f64 / gas_limit as f64).ceil() as usize;
+    let block_size = (GIGA_GAS as f64 / common::RAW_TRANSFER_GAS_LIMIT as f64).ceil() as usize;
     bench(
         c,
         "Independent Raw Transfers",
@@ -73,7 +72,7 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
                     caller: address,
                     transact_to: TransactTo::Call(address),
                     value: U256::from(1),
-                    gas_limit,
+                    gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
                     gas_price: U256::from(1),
                     ..TxEnv::default()
                 }
