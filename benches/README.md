@@ -2,11 +2,25 @@
 
 Current benchmarks are run on a Linux machine with an Intel i9-12900K (24 CPUs @5.20 GHz) and 32 GB RAM. Future benchmarks will be run on more standard cloud services on which operators tend to run nodes.
 
-We use [criterion.rs](https://github.com/bheisler/criterion.rs) to bench 100 samples for each sequential and parallel execution of a block. All state needed is loaded into memory before execution.
+We use [criterion.rs](https://github.com/bheisler/criterion.rs) to benchmark 100 samples for each sequential and parallel execution of a block. All state needed is loaded into memory before execution.
+
+## Gigagas Blocks
+
+This benchmark includes mocked 1-Gigagas blocks to see how PEVM aids in building and syncing large blocks going forward. This explores performance for large layer 2 blocks. All blocks are in the CANCUN spec with no dependencies, and we benchmark with `snmalloc` as the global memory allocator to measure the maximum speedup. The benchmark runs with a single transaction type, this is not representative of real-world blocks on a universal layer 2, however it may be representative of application specific layer 2s. 
+
+```sh
+$ cargo bench --bench gigagas
+```
+
+|                 | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | P / S      |
+| --------------- | ---------------- | ------------- | -------------------- | ------------------ | ---------- |
+| Raw Transfers   | 47,620           | 1,000,020,000 | 149.74 ms            | 111.98 ms          | 🟢1.34     |
+| ERC20 Transfers | 37,123           | 1,000,019,374 | 225.16 ms            | 85.193 ms          | 🟢2.64     |
+| Uniswap Swaps   | 6,413            | 1,000,004,742 | 563.92 ms            | 65.363 ms          | 🟢**8.63** |
 
 ## Ethereum Mainnet Blocks
 
-This benchmark includes several transactions for each Ethereum hardfork that alters the EVM spec. We include blocks with high parallelism, highly inter-dependent blocks, and some random blocks to ensure we bench against all scenarios. It is also a good testing platform for aggressively running blocks to find race conditions if there are any.
+This benchmark includes several transactions for each Ethereum hardfork that alters the EVM spec. We include blocks with high parallelism, highly inter-dependent blocks, and some random blocks to ensure we benchmark against all scenarios. It is also a good testing platform for aggressively running blocks to find race conditions if there are any.
 
 The current hardcoded concurrency level is 8, which has performed best for Ethereum blocks thus far. Increasing it will improve results for blocks with more parallelism but hurt small or highly interdependent blocks due to thread overheads. Ideally, our static analysis will be smart enough to auto-tune this better.
 
@@ -80,21 +94,7 @@ CARGO_PROFILE_BENCH_DEBUG=true cargo flamegraph --bench mainnet -- --bench
 
 - We are currently **~1.6 times faster than sequential execution** on average.
 - The **max speed up is x3.42** for a large block with few dependencies.
-- The **max slow down is x1.94** for a small block with many dependencies.
+- The **max slow down is 0.52** for a small block with many dependencies.
 - We will need more optimizations throughout Alpha and Beta to become **3~5 times faster**.
 
 Intuitively, we have consistently been faster in recent eras and slower in early eras when most transactions were simple transfers that don't justify the parallel overheads. As it stands, syncing nodes can execute sequentially until Spurious Dragon before switching on PEVM. Ideally, PEVM would minimize the worst-case to under 25% overhead.
-
-## Gigagas
-
-This benchmark includes mocked 1-Gigagas blocks to see how PEVM aids in building and syncing large blocks going forward. All blocks are in the CANCUN spec with no dependencies, and we bench with `snmalloc` as the global memory allocator to measure the maximum speedup.
-
-```sh
-$ cargo bench --bench gigagas
-```
-
-|                 | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | P / S      |
-| --------------- | ---------------- | ------------- | -------------------- | ------------------ | ---------- |
-| Raw Transfers   | 47,620           | 1,000,020,000 | 149.74 ms            | 111.98 ms          | 🟢1.34     |
-| ERC20 Transfers | 37,123           | 1,000,019,374 | 225.16 ms            | 85.193 ms          | 🟢2.64     |
-| Uniswap Swaps   | 6,413            | 1,000,004,742 | 563.92 ms            | 65.363 ms          | 🟢**8.63** |
