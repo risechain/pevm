@@ -35,10 +35,9 @@ $ cargo build
 - Build a Block-STM engine to improve on.
 - Complete the first test & benchmark suites.
 - Lazily update gas payments to the beneficiary account as implicit reads & writes.
-- Preprocess dependencies among transactions with the same sender or recipient or explicitly interact with the beneficiary account.
-- Dynamic concurrency level based on preprocessed dependencies.
+- Preprocess dependencies among transactions with the same sender or recipient or explicitly interacting with the beneficiary account.
 - Aggressively find tasks to save scheduling cycles.
-- Early-existing thread workers to avoid thread overheads and join faster.
+- Early-exiting worker threads to avoid thread overheads and join faster.
 
 ### Alpha TODO
 
@@ -51,7 +50,7 @@ $ cargo build
 ### Beta TODO
 
 - Optimize concurrent data structures to maximize CPU cache and stack memory.
-- Optimize the scheduler, thread workers, and synchronization based on common block scenarios.
+- Optimize the scheduler, worker threads, and synchronization based on common block scenarios.
 - More granular memory locations (like breaking `AccountInfo` down into `balance`, `nonce`, and `code`) to avoid false positive dependencies.
 - Add pre-provided metadata from a statically analysed mempool or upstream nodes.
 - Write custom memory allocators for the whole execution phase and the multi-version data structure. Early experiments with `jemalloc`, `mimalloc`, and `snmalloc` show potential up to 50% improvements. This is understandable when we optimize to the microseconds.
@@ -70,7 +69,7 @@ We have three test groups:
 
 ```sh
 $ git submodule update --init
-# Running our heavy tests simutaenously would congest resources.
+# Running our heavy tests simultaneously would congest resources.
 # Each parallel test still executes parallelly anyway.
 $ cargo test --release -- --test-threads=1
 ```
