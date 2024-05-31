@@ -73,7 +73,6 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
     // Beneficiary setup for post-processing
     let beneficiary_address = block_env.coinbase;
-    let beneficiary_location = MemoryLocation::Basic(beneficiary_address);
     let mut beneficiary_account_info = match storage.basic(beneficiary_address) {
         Ok(Some(account)) => account.into(),
         _ => AccountInfo::default(),
@@ -95,7 +94,10 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         transactions_dependencies,
         starting_validation_idx,
     );
-    let mv_memory = Arc::new(MvMemory::new(block_size));
+    let mv_memory = Arc::new(MvMemory::new(
+        block_size,
+        MemoryLocation::Basic(beneficiary_address),
+    ));
     let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
 
     // Edge case that is pretty common
@@ -111,7 +113,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 ..
             } => {
                 for (location, value) in write_set {
-                    if location == beneficiary_location {
+                    if location == MemoryLocation::Basic(beneficiary_address) {
                         result_and_state.state.insert(
                             beneficiary_address,
                             post_process_beneficiary(&mut beneficiary_account_info, value),
@@ -203,7 +205,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // We lazily evaluate the final beneficiary account's balance at the end of each transaction
     // to avoid "implicit" dependency among consecutive transactions that read & write there.
     // TODO: Refactor, improve speed & error handling.
-    let beneficiary_values = mv_memory.read_remove(&beneficiary_location);
+    let beneficiary_values = mv_memory.consume_beneficiary();
     Ok(execution_results
         .into_iter()
         .zip(beneficiary_values)
@@ -238,77 +240,76 @@ fn preprocess_dependencies(
         (0..block_size).map(|_| AHashSet::new()).collect();
     let mut transactions_dependencies: TransactionsDependencies = AHashMap::new();
 
-    // Marking transactions from the same sender as dependents (all write to nonce).
-    let mut tx_idxes_by_sender: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
-    // Marking transactions to the same address as dependents.
-    let mut tx_idxes_by_recipients: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
+    // Marking transactions across same sender & recipient as dependents as they
+    // cross-depend at the `AccountInfo` level (reading & writing to nonce & balance).
+    // This is critical to avoid this nasty race condition:
+    // 1. A spends money
+    // 2. B sends money to A
+    // 3. A spends money
+    // Without (3) depending on (2), (2) may race and write to A first, then (1) comes
+    // second flagging (2) for re-execution and execute (3) as dependency. (3) would
+    // panic with a nonce error reading from (2) before it rewrites the new nonce
+    // reading from (1).
+    let mut tx_idxes_by_address: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
     for (tx_idx, tx) in txs.iter().enumerate() {
-        let mut register_dependency = |dependency_idx: usize| {
-            // SAFETY: The dependency index is guaranteed to be smaller than the block
-            // size in this scope.
-            unsafe {
-                *transactions_status.get_unchecked_mut(tx_idx) = TxIncarnationStatus::Aborting(0);
-                transactions_dependents
-                    .get_unchecked_mut(dependency_idx)
-                    .insert(tx_idx);
+        // We check for a non-empty value that guarantees to update the balance of the
+        // recipient, to avoid smart contract interactions that only some storage.
+        let mut recipient_with_changed_balance = None;
+        if let TransactTo::Call(to) = tx.transact_to {
+            if tx.value != U256::ZERO {
+                recipient_with_changed_balance = Some(to);
             }
-            transactions_dependencies
-                .entry(tx_idx)
-                .or_default()
-                .insert(dependency_idx);
-        };
+        }
 
-        if &tx.caller == beneficiary_address && tx_idx > 0 {
-            register_dependency(tx_idx - 1);
-        }
-        // Sender as Sender
-        if let Some(prev_idx) = tx_idxes_by_sender
-            .get(&tx.caller)
-            .and_then(|tx_idxs| tx_idxs.last())
-        {
-            register_dependency(*prev_idx);
-        }
-        // Sender as Recipient
-        // This is critical to avoid this nasty race condition:
-        // 1. A spends money
-        // 2. B sends money to A
-        // 3. A spends money
-        // Without (3) depending on (2), (2) may race and write to A first, then (1) comes
-        // second flagging (2) for re-execution and execute (3) as dependency. (3) would
-        // panic with a nonce error reading from (2) before it rewrites the new nonce
-        // reading from (1).
-        if let Some(prev_idx) = tx_idxes_by_recipients
-            .get(&tx.caller)
-            .and_then(|tx_idxs| tx_idxs.last())
-        {
-            register_dependency(*prev_idx);
-        }
-        // We check for a non-empty value that guarantees to update the balance of the recipient,
-        // to avoid smart contract interactions that only change some storage slots, etc.
-        if tx.value != U256::ZERO {
-            if let TransactTo::Call(to) = tx.transact_to {
-                if &to == beneficiary_address && tx_idx > 0 {
-                    register_dependency(tx_idx - 1);
+        // The first transaction never has dependencies.
+        if tx_idx > 0 {
+            // Register a lower transaction as this one's dependency.
+            let mut register_dependency = |dependency_idx: usize| {
+                // SAFETY: The dependency index is guaranteed to be smaller than the block
+                // size in this scope.
+                unsafe {
+                    *transactions_status.get_unchecked_mut(tx_idx) =
+                        TxIncarnationStatus::Aborting(0);
+                    transactions_dependents
+                        .get_unchecked_mut(dependency_idx)
+                        .insert(tx_idx);
                 }
-                // Recipient as Sender
-                if let Some(prev_idx) = tx_idxes_by_sender
-                    .get(&to)
+                transactions_dependencies
+                    .entry(tx_idx)
+                    .or_default()
+                    .insert(dependency_idx);
+            };
+
+            if &tx.caller == beneficiary_address
+                || recipient_with_changed_balance.is_some_and(|to| &to == beneficiary_address)
+            {
+                register_dependency(tx_idx - 1);
+            } else {
+                if let Some(prev_idx) = tx_idxes_by_address
+                    .get(&tx.caller)
                     .and_then(|tx_idxs| tx_idxs.last())
                 {
                     register_dependency(*prev_idx);
                 }
-                // Recipient as Recipient
-                let recipient_tx_idxes = tx_idxes_by_recipients.entry(to).or_default();
-                if let Some(prev_idx) = recipient_tx_idxes.last() {
-                    register_dependency(*prev_idx);
+                if let Some(to) = recipient_with_changed_balance {
+                    if let Some(prev_idx) = tx_idxes_by_address
+                        .get(&to)
+                        .and_then(|tx_idxs| tx_idxs.last())
+                    {
+                        register_dependency(*prev_idx);
+                    }
                 }
-                recipient_tx_idxes.push(tx_idx);
             }
         }
-        tx_idxes_by_sender
+
+        // Register this transaction to the sender & recipient index maps.
+        tx_idxes_by_address
             .entry(tx.caller)
             .or_default()
             .push(tx_idx);
+        if let Some(to) = recipient_with_changed_balance {
+            tx_idxes_by_address.entry(to).or_default().push(tx_idx);
+        }
     }
 
     let min_concurrency_level = NonZeroUsize::new(2).unwrap();

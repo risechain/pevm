@@ -12,7 +12,8 @@ use revm::{
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
-    MemoryLocation, MemoryValue, ReadError, ReadOrigin, ReadSet, Storage, TxIdx, WriteSet,
+    MemoryEntry, MemoryLocation, MemoryValue, ReadError, ReadOrigin, ReadSet, Storage, TxIdx,
+    WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -36,6 +37,7 @@ pub(crate) enum VmExecutionResult {
 // structure & storage, and tracks the read set of the current execution.
 struct VmDb<S: Storage> {
     beneficiary_address: Address,
+    beneficiary_location: MemoryLocation,
     tx_idx: TxIdx,
     mv_memory: Arc<MvMemory>,
     storage: Arc<S>,
@@ -51,47 +53,37 @@ impl<S: Storage> VmDb<S> {
     ) -> Self {
         Self {
             beneficiary_address,
+            beneficiary_location: MemoryLocation::Basic(beneficiary_address),
             tx_idx,
             mv_memory,
             storage,
-            // There are at least two locations most of the time: the sender
-            // and the recipient accounts.
-            read_set: Vec::with_capacity(2),
+            read_set: ReadSet {
+                // There are at least two locations most of the time: the sender
+                // and the recipient accounts.
+                common: Vec::with_capacity(2),
+                beneficiary: Vec::new(),
+            },
         }
     }
 
     fn read(
         &mut self,
         location: MemoryLocation,
-        tx_idx: TxIdx,
         update_read_set: bool,
     ) -> Result<MemoryValue, ReadError> {
-        // Dedicated handling for the beneficiary account
-        if let MemoryLocation::Basic(address) = location {
-            if address == self.beneficiary_address {
-                // TODO: Fine-tune stack size further.
-                // Currently using a rough "standard" estimate with the heavy
-                // evaluation test guarding a potential stack overflow. Raise
-                // these numbers if the test fails. Ideally the numbers would
-                // be proportional to the transaction index, i.e, the max
-                // recursive depth.
-                // If it's too hard to optimize for this case, just pre-check
-                // the block and go sequential up to the transaction that
-                // updates beneficiary, or just go full sequential for this.
-                return stacker::maybe_grow(32 * 1024, 64 * 1024, || {
-                    self.read_beneficiary(tx_idx, update_read_set)
-                });
-            }
+        if location == self.beneficiary_location {
+            return self.read_beneficiary();
         }
 
-        // Main handling for BlockSTM
-        match self.mv_memory.read_closest(&location, tx_idx) {
+        match self.mv_memory.read_closest(&location, self.tx_idx) {
             ReadMemoryResult::ReadError { blocking_tx_idx } => {
                 Err(ReadError::BlockingIndex(blocking_tx_idx))
             }
             ReadMemoryResult::NotFound => {
                 if update_read_set {
-                    self.read_set.push((location.clone(), ReadOrigin::Storage));
+                    self.read_set
+                        .common
+                        .push((location.clone(), ReadOrigin::Storage));
                 }
                 match location {
                     MemoryLocation::Basic(address) => match self.storage.basic(address) {
@@ -109,6 +101,7 @@ impl<S: Storage> VmDb<S> {
             ReadMemoryResult::Ok { version, value } => {
                 if update_read_set {
                     self.read_set
+                        .common
                         .push((location, ReadOrigin::MvMemory(version)));
                 }
                 Ok(value)
@@ -116,55 +109,62 @@ impl<S: Storage> VmDb<S> {
         }
     }
 
-    // This may recurse deeply back to the top of the block
-    // to fully evaluate the (lazily updated) beneficiary account.
-    // TODO: Refactor this more.
-    fn read_beneficiary(
-        &mut self,
-        tx_idx: TxIdx,
-        update_read_set: bool,
-    ) -> Result<MemoryValue, ReadError> {
-        let location = MemoryLocation::Basic(self.beneficiary_address);
-        if tx_idx == 0 {
-            if update_read_set {
-                self.read_set.push((location, ReadOrigin::Storage));
-            }
-            return match self.storage.basic(self.beneficiary_address) {
-                Ok(Some(account)) => Ok(MemoryValue::Basic(Box::new(account.into()))),
-                Ok(None) => Err(ReadError::NotFound),
-                Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
-            };
+    fn read_beneficiary(&mut self) -> Result<MemoryValue, ReadError> {
+        if self.tx_idx == 0 {
+            return Ok(MemoryValue::Basic(Box::new(
+                self.read_beneficiary_from_storage()?,
+            )));
         }
 
         // We simply register this transaction as dependency of the previous in
         // the racing cases that the previous transactions aren't yet ready.
-        let reschedule = Err(ReadError::BlockingIndex(tx_idx - 1));
+        // TODO: Only reschedule up to a certain number of times.
+        let reschedule = Err(ReadError::BlockingIndex(self.tx_idx - 1));
 
-        match self.mv_memory.read_absolute(&location, tx_idx - 1) {
-            ReadMemoryResult::Ok { version, value } => {
-                if update_read_set {
+        let Some(written_beneficiary) = self.mv_memory.read_beneficiary() else {
+            return reschedule;
+        };
+
+        let mut balance_addition = U256::ZERO;
+        let mut tx_idx = self.tx_idx - 1;
+        loop {
+            match written_beneficiary.get(&tx_idx) {
+                Some(MemoryEntry::Data(tx_incarnation, value)) => {
                     self.read_set
-                        .push((location.clone(), ReadOrigin::MvMemory(version)));
-                }
-                match value {
-                    MemoryValue::Basic(account) => Ok(MemoryValue::Basic(account)),
-                    MemoryValue::LazyBeneficiaryBalance(addition) => {
-                        // TODO: Better error handling
-                        match self.read(location, tx_idx - 1, false) {
-                            Ok(MemoryValue::Basic(mut beneficiary_account)) => {
-                                // TODO: Write this new absolute value to MvMemory
-                                // to avoid future recalculations.
-                                beneficiary_account.balance += addition;
-                                Ok(MemoryValue::Basic(beneficiary_account))
-                            }
-
-                            _ => reschedule, // Very unlikely
+                        .beneficiary
+                        .push(ReadOrigin::MvMemory(crate::TxVersion {
+                            tx_idx,
+                            tx_incarnation: *tx_incarnation,
+                        }));
+                    match value {
+                        MemoryValue::Basic(account) => {
+                            let mut account = account.clone();
+                            account.balance += balance_addition;
+                            return Ok(MemoryValue::Basic(account));
                         }
+                        MemoryValue::LazyBeneficiaryBalance(addition) => {
+                            // TODO: Be careful with overflows
+                            balance_addition += addition;
+                        }
+                        _ => unreachable!("Unexpected storage value for beneficiary account info"),
                     }
-                    _ => reschedule, // Very unlikely
                 }
+                _ => return reschedule,
             }
-            _ => reschedule, // Very unlikely
+            if tx_idx == 0 {
+                let mut account = self.read_beneficiary_from_storage()?;
+                account.balance += balance_addition;
+                return Ok(MemoryValue::Basic(Box::new(account)));
+            }
+            tx_idx -= 1;
+        }
+    }
+
+    fn read_beneficiary_from_storage(&self) -> Result<AccountInfo, ReadError> {
+        match self.storage.basic(self.beneficiary_address) {
+            Ok(Some(account)) => Ok(account.into()),
+            Ok(None) => Err(ReadError::NotFound),
+            Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
         }
     }
 }
@@ -187,7 +187,7 @@ impl<S: Storage> Database for VmDb<S> {
         if address == self.beneficiary_address && is_preload {
             return Ok(Some(AccountInfo::default()));
         }
-        match self.read(MemoryLocation::Basic(address), self.tx_idx, !is_preload) {
+        match self.read(MemoryLocation::Basic(address), !is_preload) {
             Ok(MemoryValue::Basic(value)) => Ok(Some(*value)),
             Err(ReadError::NotFound) => Ok(None),
             Err(err) => Err(err),
@@ -209,7 +209,7 @@ impl<S: Storage> Database for VmDb<S> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        match self.read(MemoryLocation::Storage((address, index)), self.tx_idx, true) {
+        match self.read(MemoryLocation::Storage((address, index)), true) {
             Err(err) => Err(err),
             Ok(MemoryValue::Storage(value)) => Ok(value),
             _ => Err(ReadError::InvalidMemoryLocationType),
