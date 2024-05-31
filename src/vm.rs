@@ -1,4 +1,4 @@
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::OnceCell, sync::Arc};
 
 use ahash::AHashMap;
 use revm::{
@@ -54,7 +54,9 @@ impl<S: Storage> VmDb<S> {
             tx_idx,
             mv_memory,
             storage,
-            read_set: Vec::new(),
+            // There are at least two locations most of the time: the sender
+            // and the recipient accounts.
+            read_set: Vec::with_capacity(2),
         }
     }
 
@@ -276,74 +278,68 @@ impl<S: Storage> Vm<S> {
         );
         // The amount this transaction needs to pay to the beneficiary account for
         // atomic update.
-        let gas_payment = RefCell::new(U256::ZERO);
+        let mut gas_payment = OnceCell::new();
         // TODO: Support OP handlers
         let mut handler = Handler::mainnet_with_spec(self.spec_id);
-        // TODO: Bring to `self` instead of constructing every call?
         handler.post_execution.reward_beneficiary = Arc::new(|context, gas| {
             let mut gas_price = context.evm.env.effective_gas_price();
             if self.spec_id.is_enabled_in(LONDON) {
                 gas_price = gas_price.saturating_sub(context.evm.env.block.basefee);
             }
-
-            *gas_payment.borrow_mut() = gas_price * U256::from(gas.spent() - gas.refunded() as u64);
+            gas_payment
+                .set(gas_price * U256::from(gas.spent() - gas.refunded() as u64))
+                .unwrap();
             Ok(())
         });
 
-        let mut evm = Evm::builder()
+        let evm_result = Evm::builder()
             .with_db(&mut db)
             .with_spec_id(self.spec_id)
             .with_block_env(self.block_env.clone())
             // SATEFY: A correct scheduler would guarantee this index to be inbound.
             .with_tx_env(unsafe { self.txs.get_unchecked(tx_idx) }.clone())
             .with_handler(handler)
-            .build();
-
-        let evm_result = evm.transact();
-        drop(evm); // to reclaim the DB
+            .build()
+            .transact();
 
         match evm_result {
             Ok(result_and_state) => {
-                let mut explicitly_wrote_to_coinbase = false;
-                let mut write_set: AHashMap<MemoryLocation, MemoryValue> = result_and_state
-                    .state
-                    .iter()
-                    .flat_map(|(address, account)| {
-                        // A hash map is critical as there can be multiple state transitions
-                        // of the same location in a transaction (think internal txs)!
-                        // We only care about the latest state.
-                        let mut writes = AHashMap::new();
-                        // TODO: Confirm if we're handling self-destructed accounts correctly.
-                        if account.is_info_changed() {
-                            // TODO: More granularity here to ensure we only notify new
-                            // memory writes, for instance, only an account's balance instead
-                            // of the whole account. That way we may also generalize beneficiary
-                            // balance's lazy update behaviour into `MemoryValue` for more use cases.
-                            // TODO: Confirm that we're not missing anything, like bytecode.
-                            let mut account_info = account.info.clone();
-                            if address == &self.block_env.coinbase {
-                                account_info.balance += *gas_payment.borrow();
-                                explicitly_wrote_to_coinbase = true;
-                            }
-                            writes.insert(
-                                MemoryLocation::Basic(*address),
-                                MemoryValue::Basic(Box::new(account_info)),
-                            );
+                // A hash map is critical as there can be multiple state transitions
+                // of the same location in a transaction (think internal txs)!
+                // We only care about the latest state.
+                let mut write_set: AHashMap<MemoryLocation, MemoryValue> =
+                    // There are at least three locations most of the time: the sender,
+                    // the recipient, and the beneficiary accounts.
+                    AHashMap::with_capacity(3);
+                for (address, account) in result_and_state.state.iter() {
+                    if account.is_info_changed() {
+                        // TODO: More granularity here to ensure we only notify new
+                        // memory writes, for instance, only an account's balance instead
+                        // of the whole account. That way we may also generalize beneficiary
+                        // balance's lazy update behaviour into `MemoryValue` for more use cases.
+                        // TODO: Confirm that we're not missing anything, like bytecode.
+                        let mut account_info = account.info.clone();
+                        if address == &self.block_env.coinbase {
+                            account_info.balance += gas_payment.take().unwrap();
                         }
-                        for (slot, value) in account.changed_storage_slots() {
-                            writes.insert(
-                                MemoryLocation::Storage((*address, *slot)),
-                                MemoryValue::Storage(value.present_value),
-                            );
-                        }
-                        writes
-                    })
-                    .collect();
+                        write_set.insert(
+                            MemoryLocation::Basic(*address),
+                            MemoryValue::Basic(Box::new(account_info)),
+                        );
+                    }
+                    for (slot, value) in account.changed_storage_slots() {
+                        write_set.insert(
+                            MemoryLocation::Storage((*address, *slot)),
+                            MemoryValue::Storage(value.present_value),
+                        );
+                    }
+                }
 
-                if !explicitly_wrote_to_coinbase {
+                // A non-existent explicit write hasn't taken the cell.
+                if let Some(gas_payment) = gas_payment.into_inner() {
                     write_set.insert(
                         MemoryLocation::Basic(self.block_env.coinbase),
-                        MemoryValue::LazyBeneficiaryBalance(*gas_payment.borrow()),
+                        MemoryValue::LazyBeneficiaryBalance(gas_payment),
                     );
                 }
 

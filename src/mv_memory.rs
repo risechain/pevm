@@ -229,4 +229,17 @@ impl MvMemory {
             value: value.clone(),
         }
     }
+
+    // Very useful for evaluating beneficiary at the end of the block.
+    // TODO: Better error handling.
+    pub(crate) fn read_remove(
+        &self,
+        location: &MemoryLocation,
+    ) -> impl IntoIterator<Item = MemoryValue> {
+        let (_, tree) = self.data.remove(location).unwrap();
+        tree.into_values().map(|entry| match entry {
+            MemoryEntry::Data(_, value) => value,
+            MemoryEntry::Estimate => unreachable!("Trying to remove unfinalized data!"),
+        })
+    }
 }
