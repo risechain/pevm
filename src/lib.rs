@@ -35,6 +35,21 @@ enum MemoryValue {
     Storage(U256),
 }
 
+enum MemoryEntry {
+    Data(TxIncarnation, MemoryValue),
+    // When an incarnation is aborted due to a validation failure, the
+    // entries in the multi-version data structure corresponding to its
+    // write set are replaced with this special ESTIMATE marker.
+    // This signifies that the next incarnation is estimated to write to the
+    // same memory locations. An incarnation stops and is immediately aborted
+    // whenever it reads a value marked as an ESTIMATE written by a lower
+    // transaction, instead of potentially wasting a full execution and aborting
+    // during validation.
+    // The ESTIMATE markers that are not overwritten are removed by the next
+    // incarnation.
+    Estimate,
+}
+
 // The index of the transaction in the block.
 type TxIdx = usize;
 
@@ -111,7 +126,23 @@ pub enum ReadError {
 // The memory locations needed to execute an incarnation.
 // While a hash map is cleaner and reduce duplication chances,
 // vectors are noticeably faster in the mainnet benchmark.
-type ReadSet = Vec<(MemoryLocation, ReadOrigin)>;
+struct ReadSet {
+    common: Vec<(MemoryLocation, ReadOrigin)>,
+    // An explicity beneficiary read may read from multiple lazily
+    // updated values. A micro-optimization here is to have a
+    // read origin with only an incarnation index instead of a
+    // while transaction version, as the latter is consecutive
+    // here (counting down from the reading transaction).
+    beneficiary: Vec<ReadOrigin>,
+}
+impl ReadSet {
+    fn new() -> Self {
+        Self {
+            common: Vec::new(),
+            beneficiary: Vec::new(),
+        }
+    }
+}
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.

@@ -8,9 +8,6 @@ use revm::primitives::{
 
 pub mod common;
 
-// Let's keep bumping this as execution performance improves,
-// to ensure that the heavyweight cases are well tested and to
-// not stack overflow, etc.
 const BLOCK_SIZE: usize = 100_000;
 
 fn test_beneficiary(get_address: fn(usize) -> Address) {
@@ -52,9 +49,8 @@ fn beneficiary_random() {
 #[test]
 fn beneficiary_heavy_evaluation() {
     test_beneficiary(|i| {
-        // Setting only the last tx as beneficiary for a
-        // heavy evaluation/recursion all the way to the
-        // top of the block.
+        // Setting only the last tx as beneficiary for a heavy
+        // evaluation all the way to the top of the block.
         if i == BLOCK_SIZE {
             Address::from(U160::from(0))
         } else {

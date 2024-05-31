@@ -1,28 +1,16 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
 // ~x2 performance gain over a naive `RwLock<HashMap>`!
-use dashmap::{mapref::entry::Entry, DashMap};
+use dashmap::{
+    mapref::{entry::Entry, one::Ref},
+    DashMap,
+};
 
 use crate::{
-    MemoryLocation, MemoryValue, ReadOrigin, ReadSet, TxIdx, TxIncarnation, TxVersion, WriteSet,
+    MemoryEntry, MemoryLocation, MemoryValue, ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
 };
 
 #[derive(Debug, Clone)]
-enum MemoryEntry {
-    Data(TxIncarnation, MemoryValue),
-    // When an incarnation is aborted due to a validation failure, the
-    // entries in the multi-version data structure corresponding to its
-    // write set are replaced with this special ESTIMATE marker.
-    // This signifies that the next incarnation is estimated to write to the
-    // same memory locations. An incarnation stops and is immediately aborted
-    // whenever it reads a value marked as an ESTIMATE written by a lower
-    // transaction, instead of potentially wasting a full execution and aborting
-    // during validation.
-    // The ESTIMATE markers that are not overwritten are removed by the next
-    // incarnation.
-    Estimate,
-}
-
 pub(crate) enum ReadMemoryResult {
     NotFound,
     ReadError {
@@ -40,17 +28,21 @@ pub(crate) enum ReadMemoryResult {
 // version of a corresponding transaction.
 // TODO: Better concurrency control if possible.
 pub(crate) struct MvMemory {
+    beneficiary_location: MemoryLocation,
     data: DashMap<MemoryLocation, BTreeMap<TxIdx, MemoryEntry>, ahash::RandomState>,
     last_written_locations: Vec<Mutex<Vec<MemoryLocation>>>,
     last_read_set: Vec<Mutex<ReadSet>>,
 }
 
 impl MvMemory {
-    pub(crate) fn new(block_size: usize) -> Self {
+    pub(crate) fn new(block_size: usize, beneficiary_location: MemoryLocation) -> Self {
         Self {
+            beneficiary_location,
             data: DashMap::with_hasher(ahash::RandomState::new()),
             last_written_locations: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
-            last_read_set: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
+            last_read_set: (0..block_size)
+                .map(|_| Mutex::new(ReadSet::new()))
+                .collect(),
         }
     }
 
@@ -127,9 +119,8 @@ impl MvMemory {
     // incarnation can be aborted at most once).
     pub(crate) fn validate_read_set(&self, tx_idx: TxIdx) -> bool {
         // TODO: Better error handling
-        for (location, prior_origin) in index_mutex!(self.last_read_set, tx_idx).iter() {
-            // TODO: Do we need to check for the beneficiary account to use
-            // `read_absolute` instead?
+        let last_read_set = index_mutex!(self.last_read_set, tx_idx);
+        for (location, prior_origin) in last_read_set.common.iter() {
             match self.read_closest(location, tx_idx) {
                 ReadMemoryResult::ReadError { .. } => return false,
                 ReadMemoryResult::NotFound => {
@@ -145,6 +136,24 @@ impl MvMemory {
                         }
                     }
                 },
+            }
+        }
+        // TODO: Fewer nests without sacrificing performance please.
+        if !last_read_set.beneficiary.is_empty() {
+            // TODO: Can we really skip checking for storage reads here?
+            if let Some(written_beneficiary) = self.read_beneficiary() {
+                for prior_origin in last_read_set.beneficiary.iter() {
+                    if let ReadOrigin::MvMemory(prior_version) = prior_origin {
+                        match written_beneficiary.get(&prior_version.tx_idx) {
+                            Some(MemoryEntry::Data(tx_incarnation, _)) => {
+                                if *tx_incarnation != prior_version.tx_incarnation {
+                                    return false;
+                                }
+                            }
+                            _ => return false,
+                        }
+                    }
+                }
             }
         }
         true
@@ -207,39 +216,19 @@ impl MvMemory {
         ReadMemoryResult::NotFound
     }
 
-    // Things like fully evaluating benficiary accounts need to read absolute indices
-    // like the exact previous transaction index, instead of reading the cloest one.
-    pub(crate) fn read_absolute(
+    // For evaluating & validating explicit beneficiary reads.
+    pub(crate) fn read_beneficiary(
         &self,
-        location: &MemoryLocation,
-        tx_idx: TxIdx,
-    ) -> ReadMemoryResult {
-        let Some(written_transactions) = self.data.get(location) else {
-            return ReadMemoryResult::NotFound;
-        };
-        let Some(MemoryEntry::Data(tx_incarnation, value)) = written_transactions.get(&tx_idx)
-        else {
-            return ReadMemoryResult::NotFound;
-        };
-        ReadMemoryResult::Ok {
-            version: TxVersion {
-                tx_idx,
-                tx_incarnation: *tx_incarnation,
-            },
-            value: value.clone(),
-        }
+    ) -> Option<Ref<MemoryLocation, BTreeMap<usize, MemoryEntry>, ahash::RandomState>> {
+        self.data.get(&self.beneficiary_location)
     }
 
-    // Very useful for evaluating beneficiary at the end of the block.
-    // TODO: Better error handling.
-    pub(crate) fn read_remove(
-        &self,
-        location: &MemoryLocation,
-    ) -> impl IntoIterator<Item = MemoryValue> {
-        let (_, tree) = self.data.remove(location).unwrap();
+    // For evaluating beneficiary at the end of the block.
+    pub(crate) fn consume_beneficiary(&self) -> impl IntoIterator<Item = MemoryValue> {
+        let (_, tree) = self.data.remove(&self.beneficiary_location).unwrap();
         tree.into_values().map(|entry| match entry {
             MemoryEntry::Data(_, value) => value,
-            MemoryEntry::Estimate => unreachable!("Trying to remove unfinalized data!"),
+            MemoryEntry::Estimate => unreachable!("Trying to consume unfinalized data!"),
         })
     }
 }
