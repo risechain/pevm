@@ -174,7 +174,7 @@ impl DatabaseRef for RpcStorage {
         if let Some(account) = self.cache.lock().unwrap().get(&address) {
             return Ok(Some(account.info.clone()));
         }
-        thread::sleep(Duration::from_millis(1)); // Avoid rate-limiting in CI.
+        thread::sleep(Duration::from_millis(3)); // Avoid rate-limiting in CI.
         self.runtime.block_on(async {
             // TODO: Request these concurrently
             let (balance, nonce, code) = tokio::join!(
