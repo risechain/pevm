@@ -10,7 +10,7 @@ use alloy_rpc_types::{Block, Header};
 use revm::primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv};
 
 use crate::{
-    mv_memory::{MvMemory, ReadMemoryResult},
+    mv_memory::MvMemory,
     primitives::{get_block_env, get_block_spec, get_tx_envs},
     scheduler::Scheduler,
     vm::{ExecutionError, Vm, VmExecutionResult},
@@ -67,6 +67,10 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     txs: Vec<TxEnv>,
     concurrency_level: NonZeroUsize,
 ) -> PevmResult {
+    if txs.is_empty() {
+        return PevmResult::Ok(Vec::new());
+    }
+
     // Beneficiary setup for post-processing
     let beneficiary_address = block_env.coinbase;
     let beneficiary_location = MemoryLocation::Basic(beneficiary_address);
@@ -199,21 +203,17 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // We lazily evaluate the final beneficiary account's balance at the end of each transaction
     // to avoid "implicit" dependency among consecutive transactions that read & write there.
     // TODO: Refactor, improve speed & error handling.
+    let beneficiary_values = mv_memory.read_remove(&beneficiary_location);
     Ok(execution_results
-        .iter()
-        .map(|m| m.lock().unwrap().take().unwrap())
-        .enumerate()
-        .map(|(tx_idx, mut result_and_state)| {
-            match mv_memory.read_absolute(&beneficiary_location, tx_idx) {
-                ReadMemoryResult::Ok { value, .. } => {
-                    result_and_state.state.insert(
-                        beneficiary_address,
-                        post_process_beneficiary(&mut beneficiary_account_info, value),
-                    );
-                    result_and_state
-                }
-                _ => unreachable!(),
-            }
+        .into_iter()
+        .zip(beneficiary_values)
+        .map(|(mutex, value)| {
+            let mut result_and_state = mutex.into_inner().unwrap().unwrap();
+            result_and_state.state.insert(
+                beneficiary_address,
+                post_process_beneficiary(&mut beneficiary_account_info, value),
+            );
+            result_and_state
         })
         .collect())
 }
@@ -230,15 +230,6 @@ fn preprocess_dependencies(
     usize,
 ) {
     let block_size = txs.len();
-    if block_size == 0 {
-        return (
-            Vec::new(),
-            Vec::new(),
-            AHashMap::new(),
-            NonZeroUsize::MIN,
-            0,
-        );
-    }
 
     let mut transactions_status: TransactionsStatus = (0..block_size)
         .map(|_| TxIncarnationStatus::ReadyToExecute(0))
