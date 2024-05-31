@@ -1,6 +1,14 @@
-pub mod runner;
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    io::BufReader,
+};
+
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
-use alloy_rpc_types::Header;
+use alloy_rpc_types::{Block, Header};
+use revm::{db::PlainAccount, primitives::KECCAK_EMPTY, InMemoryDB};
+
+pub mod runner;
 pub use runner::{
     build_inmem_db, execute_sequential, mock_account, test_execute_alloy, test_execute_revm,
 };
@@ -35,3 +43,37 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
 };
 
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
+
+// TODO: Put somewhere better?
+pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryDB)) {
+    for block_path in fs::read_dir("blocks").unwrap() {
+        let block_path = block_path.unwrap().path();
+        let block_number = block_path.file_name().unwrap().to_str().unwrap();
+
+        // Parse block
+        let block: Block = serde_json::from_reader(BufReader::new(
+            File::open(format!("blocks/{block_number}/block.json")).unwrap(),
+        ))
+        .unwrap();
+
+        // Parse state
+        let mut accounts: HashMap<Address, PlainAccount> = serde_json::from_reader(BufReader::new(
+            File::open(format!("blocks/{block_number}/state_for_execution.json")).unwrap(),
+        ))
+        .unwrap();
+        // Hacky but we don't serialize the whole account info to save space
+        // So we need to resconstruct intermediate values upon deserializing.
+        for (_, account) in accounts.iter_mut() {
+            account.info.previous_or_original_balance = account.info.balance;
+            account.info.previous_or_original_nonce = account.info.nonce;
+            if let Some(code) = account.info.code.clone() {
+                let code_hash = code.hash_slow();
+                account.info.code_hash = code_hash;
+                account.info.previous_or_original_code_hash = code_hash;
+            } else {
+                account.info.code_hash = KECCAK_EMPTY;
+            }
+        }
+        handler(block, build_inmem_db(accounts));
+    }
+}

@@ -1,4 +1,6 @@
-use std::{collections::HashMap, fmt::Debug, future::IntoFuture, sync::Mutex};
+use std::{
+    collections::HashMap, fmt::Debug, future::IntoFuture, sync::Mutex, thread, time::Duration,
+};
 
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{Provider, RootProvider};
@@ -172,6 +174,7 @@ impl DatabaseRef for RpcStorage {
         if let Some(account) = self.cache.lock().unwrap().get(&address) {
             return Ok(Some(account.info.clone()));
         }
+        thread::sleep(Duration::from_millis(1)); // Avoid rate-limiting in CI.
         self.runtime.block_on(async {
             // TODO: Request these concurrently
             let (balance, nonce, code) = tokio::join!(
@@ -215,6 +218,7 @@ impl DatabaseRef for RpcStorage {
                 return Ok(*value);
             }
         }
+        thread::sleep(Duration::from_millis(1)); // Avoid rate-limiting in CI.
         let value = self.runtime.block_on(
             self.provider
                 .get_storage_at(address, index)
@@ -237,6 +241,7 @@ impl DatabaseRef for RpcStorage {
 
     // TODO: Proper error handling & testing.
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+        thread::sleep(Duration::from_millis(1)); // Avoid rate-limiting in CI.
         self.runtime
             .block_on(
                 self.provider
