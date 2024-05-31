@@ -11,21 +11,27 @@ env:
   RUSTFLAGS: -Dwarnings
 
 jobs:
-  lint:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cargo clippy --all-targets --all-features
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run tests
+      # TODO: Tighter cache control.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo
+            ./target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Lint
+        run: cargo clippy --all-targets --all-features
+
+      - name: Test
         env:
           RPC_URL: ${{ secrets.RPC_URL }}
-        # Our tests are heavy, avoid running them in parallel to not risk nuking RAM.
-        # Each parallel test still executes parallelly up to the number of CPUs anyway.
+        # Running our heavy tests simultaneously would congest resources.
+        # Each parallel test still executes parallelly anyway.
         run: |
           git submodule update --init
           cargo test --release -- --test-threads=1
