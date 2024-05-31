@@ -12,17 +12,33 @@ use tokio::runtime::Runtime;
 
 pub mod common;
 
-fn test_blocks(block_numbers: &[u64]) {
-    // Minor but we can also turn this into a lazy static for reuse.
+#[test]
+fn mainnet_blocks_from_rpc() {
     let rpc_url: Url = std::env::var("RPC_URL")
         .unwrap_or("https://eth.llamarpc.com".to_string())
         .parse()
         .unwrap();
-    let runtime = Runtime::new().unwrap();
-    for block_number in block_numbers {
+
+    // First block under 50 transactions of each EVM-spec-changing fork
+    for block_number in [
+        46147, // FRONTIER
+        1150000, // HOMESTEAD
+               // TODO: Enable these when CI is less flaky.
+               // 2463002,  // TANGERINE
+               // 2675000,  // SPURIOUS_DRAGON
+               // 4370003,  // BYZANTIUM
+               // 7280003,  // PETERSBURG
+               // 9069001,  // ISTANBUL
+               // 12244002, // BERLIN
+               // 12965034, // LONDON
+               // 15537395, // MERGE
+               // 17035010, // SHANGHAI
+               // 19426587, // CANCUN
+    ] {
+        let runtime = Runtime::new().unwrap();
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
         let block = runtime
-            .block_on(provider.get_block(BlockId::number(*block_number), true))
+            .block_on(provider.get_block(BlockId::number(block_number), true))
             .unwrap()
             .unwrap();
         let rpc_storage = RpcStorage::new(provider, BlockId::number(block_number - 1));
@@ -30,70 +46,23 @@ fn test_blocks(block_numbers: &[u64]) {
         common::test_execute_alloy(db, block.clone(), None, true);
 
         // Snapshot blocks (for benchmark)
+        // TODO: Port to a dedicated CLI instead?
         // TODO: Binary formats to save disk?
-        // TODO: Put behind a feature flag?
-        let dir = format!("blocks/{block_number}");
-        fs::create_dir_all(dir.clone()).unwrap();
-        let file_block = File::create(format!("{dir}/block.json")).unwrap();
-        serde_json::to_writer(file_block, &block).unwrap();
-        let file_state = File::create(format!("{dir}/state_for_execution.json")).unwrap();
-        serde_json::to_writer(file_state, &rpc_storage.get_cache()).unwrap();
+        if std::env::var("SNAPSHOT_BLOCKS") == Ok("1".to_string()) {
+            let dir = format!("blocks/{block_number}");
+            fs::create_dir_all(dir.clone()).unwrap();
+            let file_block = File::create(format!("{dir}/block.json")).unwrap();
+            serde_json::to_writer(file_block, &block).unwrap();
+            let file_state = File::create(format!("{dir}/state_for_execution.json")).unwrap();
+            serde_json::to_writer(file_state, &rpc_storage.get_cache()).unwrap();
+        }
     }
 }
 
-// Grouping together to avoid running in parallel
-// that would trigger rate-limiting in CI.
-// TODO: Use a feature flag to disable large tests
-// on CI instead of commenting them out.
 #[test]
-fn ethereum_mainnet_blocks() {
-    test_blocks(&[
-        // FRONTIER
-        46147, // First block with a transaction
-              // 930196,  // Relatively large block
-              // HOMESTEAD
-              // 1150000, // First block
-              // 2179522, // Relatively large block
-              // 2462997, // Last block with a transaction
-              // TANGERINE
-              // 2641321, // Relatively large block
-              // 2674998, // Last block with a transaction
-              // SPURIOUS_DRAGON
-              // 2675000, // First block
-              // 4330482, // Relatively large block
-              // 4369999, // Last block
-              // BYZANTIUM
-              // 4370000, // First block
-              // 5891667, // Relatively large block
-              // 7279999, // Last block
-              // PETERSBURG
-              // 7280000, // First block
-              // 8889776, // Relatively large block
-              // 9068998, // Last block with a transaction
-              // ISTANBUL
-              // 9069000, // First block
-              // 11814555, // Relatively large block
-              // 12243999, // Last block
-              // BERLIN
-              // 12244000, // First block
-              // 12520364, // Relatively large block
-              // 12964999, // Last block
-              // LONDON
-              // 12965000, // First block
-              // 13217637, // Relatively large block
-              // 15537393, // Last block
-              // MERGE
-              // 15537394, // First block
-              // 16146267, // Relatively large block
-              // 17034869, // Last block
-              // SHANGHAI
-              // 17034870, // First block
-              // 17666333, // Relatively large block
-              // 19426586, // Last block
-              // CANCUN
-              // 19426587, // First block
-              // 19638737, // Relatively large block
-    ])
+fn mainnet_blocks_from_disk() {
+    common::for_each_block_from_disk(|block, db| {
+        // TODO: Run several times to try catching a race condition if there is any.
+        common::test_execute_alloy(db.clone(), block.clone(), None, true)
+    });
 }
-
-// TODO: Read from `/blocks` and `test_execute_alloy` them.
