@@ -62,7 +62,10 @@ fn mainnet_blocks_from_rpc() {
 #[test]
 fn mainnet_blocks_from_disk() {
     common::for_each_block_from_disk(|block, db| {
-        // TODO: Run several times to try catching a race condition if there is any.
-        common::test_execute_alloy(db.clone(), block.clone(), None, true)
+        // Run several times to try catching a race condition if there is any.
+        // 1000~2000 is a better choice for local testing after major changes.
+        for _ in 0..3 {
+            common::test_execute_alloy(db.clone(), block.clone(), None, true)
+        }
     });
 }

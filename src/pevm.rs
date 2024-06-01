@@ -80,32 +80,17 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
     // Initialize main components
     let block_size = txs.len();
-    let (
-        transactions_status,
-        transactions_dependents,
-        transactions_dependencies,
-        max_concurrency_level,
-        starting_validation_idx,
-    ) = preprocess_dependencies(&beneficiary_address, &txs);
-    let scheduler = Scheduler::new(
-        block_size,
-        transactions_status,
-        transactions_dependents,
-        transactions_dependencies,
-        starting_validation_idx,
-    );
     let mv_memory = Arc::new(MvMemory::new(
         block_size,
         MemoryLocation::Basic(beneficiary_address),
     ));
-    let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
 
     // Edge case that is pretty common
     // TODO: Shortcut even before initializing the main parallel components.
     // It would require structuring a cleaner trait interface for any Storage
     // to act as the standalone DB for sequential execution.
     if block_size == 1 {
-        return match vm.execute(0) {
+        return match Vm::new(spec_id, block_env, txs, storage, mv_memory.clone()).execute(0) {
             VmExecutionResult::ExecutionError(err) => Err(PevmError::ExecutionError(err)),
             VmExecutionResult::Ok {
                 mut result_and_state,
@@ -126,6 +111,23 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             _ => Err(PevmError::UnreachableError),
         };
     }
+
+    let (
+        transactions_status,
+        transactions_dependents,
+        transactions_dependencies,
+        max_concurrency_level,
+        starting_validation_idx,
+    ) = preprocess_dependencies(&beneficiary_address, &txs);
+    let scheduler = Scheduler::new(
+        block_size,
+        transactions_status,
+        transactions_dependents,
+        transactions_dependencies,
+        starting_validation_idx,
+    );
+    let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
+    // End of main components initialization
 
     // Start multithreading mainline
     let mut execution_error = OnceLock::new();
