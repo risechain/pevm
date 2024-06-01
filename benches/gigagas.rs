@@ -41,7 +41,7 @@ pub fn bench(c: &mut Criterion, name: &str, db: InMemoryDB, txs: Vec<TxEnv>) {
                 black_box(db.clone()),
                 black_box(spec_id),
                 black_box(block_env.clone()),
-                black_box(&txs),
+                black_box(txs.clone()),
             )
         })
     });
