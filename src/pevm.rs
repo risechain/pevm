@@ -253,7 +253,14 @@ fn preprocess_dependencies(
     // panic with a nonce error reading from (2) before it rewrites the new nonce
     // reading from (1).
     let mut tx_idxes_by_address: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
+    // We evaluate from the first transaction with data, since raw transfers' dependencies
+    // are already properly ordered here.
+    let mut starting_validation_idx = block_size;
     for (tx_idx, tx) in txs.iter().enumerate() {
+        if starting_validation_idx == block_size && tx_idx > 0 && !tx.data.is_empty() {
+            starting_validation_idx = tx_idx;
+        }
+
         // We check for a non-empty value that guarantees to update the balance of the
         // recipient, to avoid smart contract interactions that only some storage.
         let mut recipient_with_changed_balance = None;
@@ -321,12 +328,6 @@ fn preprocess_dependencies(
     let max_concurrency_level = NonZeroUsize::new(block_size / 2)
         .unwrap_or(min_concurrency_level)
         .max(min_concurrency_level);
-
-    // Don't bother to evaluate the first fully sequential chain
-    let mut starting_validation_idx = 1;
-    while transactions_dependents[starting_validation_idx - 1].contains(&starting_validation_idx) {
-        starting_validation_idx += 1;
-    }
 
     (
         transactions_status,
