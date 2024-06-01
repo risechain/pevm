@@ -38,7 +38,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     black_box(db.clone()),
                     black_box(spec_id),
                     black_box(block_env.clone()),
-                    black_box(&tx_envs),
+                    black_box(tx_envs.clone()),
                 )
             })
         });

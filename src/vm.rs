@@ -1,13 +1,13 @@
-use std::{cell::OnceCell, sync::Arc};
+use std::{cmp::min, sync::Arc};
 
 use ahash::AHashMap;
 use revm::{
     primitives::{
-        AccountInfo, Address, BlockEnv, Bytecode, EVMError, ResultAndState,
+        AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, ResultAndState,
         SpecId::{self, LONDON},
         TxEnv, B256, U256,
     },
-    Database, Evm, Handler,
+    Context, Database, Evm, EvmContext, Handler,
 };
 
 use crate::{
@@ -270,39 +270,50 @@ impl<S: Storage> Vm<S> {
     // execution).
     #[allow(clippy::arc_with_non_send_sync)] // TODO: Fix at REVM?
     pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
+        // Set up DB
         let mut db = VmDb::new(
             self.block_env.coinbase,
             tx_idx,
             self.mv_memory.clone(),
             self.storage.clone(),
         );
-        // The amount this transaction needs to pay to the beneficiary account for
-        // atomic update.
-        let mut gas_payment = OnceCell::new();
+
+        // Set up REVM
+        // This is much uglier than the builder interface but can be up to 50% faster!!
+        // SATEFY: A correct scheduler would guarantee this index to be inbound.
+        let tx = unsafe { self.txs.get_unchecked(tx_idx) }.clone();
+        // Gas price
+        let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
+            min(tx.gas_price, priority_fee + self.block_env.basefee)
+        } else {
+            tx.gas_price
+        };
+        if self.spec_id.is_enabled_in(LONDON) {
+            gas_price = gas_price.saturating_sub(self.block_env.basefee);
+        }
+        // Context
+        let context = Context {
+            evm: EvmContext::new_with_env(
+                &mut db,
+                Env::boxed(
+                    // TODO: Should we turn off byte code analysis?
+                    CfgEnv::default(),
+                    self.block_env.clone(),
+                    tx,
+                ),
+            ),
+            external: (),
+        };
         // TODO: Support OP handlers
-        let mut handler = Handler::mainnet_with_spec(self.spec_id);
-        handler.post_execution.reward_beneficiary = Arc::new(|context, gas| {
-            let mut gas_price = context.evm.env.effective_gas_price();
-            if self.spec_id.is_enabled_in(LONDON) {
-                gas_price = gas_price.saturating_sub(context.evm.env.block.basefee);
-            }
-            gas_payment
-                .set(gas_price * U256::from(gas.spent() - gas.refunded() as u64))
-                .unwrap();
-            Ok(())
-        });
+        let handler = Handler::mainnet_with_spec(self.spec_id, false);
+        // End of REVM setup
 
-        let evm_result = Evm::builder()
-            .with_db(&mut db)
-            .with_block_env(self.block_env.clone())
-            // SATEFY: A correct scheduler would guarantee this index to be inbound.
-            .with_tx_env(unsafe { self.txs.get_unchecked(tx_idx) }.clone())
-            .with_handler(handler)
-            .build()
-            .transact();
-
+        let evm_result = Evm::new(context, handler).transact();
         match evm_result {
             Ok(result_and_state) => {
+                let mut gas_payment =
+                    Some(gas_price * U256::from(result_and_state.result.gas_used()));
+
                 // A hash map is critical as there can be multiple state transitions
                 // of the same location in a transaction (think internal txs)!
                 // We only care about the latest state.
@@ -335,7 +346,7 @@ impl<S: Storage> Vm<S> {
                 }
 
                 // A non-existent explicit write hasn't taken the cell.
-                if let Some(gas_payment) = gas_payment.into_inner() {
+                if let Some(gas_payment) = gas_payment {
                     write_set.insert(
                         MemoryLocation::Basic(self.block_env.coinbase),
                         MemoryValue::LazyBeneficiaryBalance(gas_payment),
