@@ -11,8 +11,7 @@ use revm::{db::PlainAccount, primitives::KECCAK_EMPTY};
 
 pub mod runner;
 pub use runner::{
-    assert_execution_result, build_in_mem, execute_sequential, mock_account, test_execute_alloy,
-    test_execute_revm,
+    assert_execution_result, build_in_mem, mock_account, test_execute_alloy, test_execute_revm,
 };
 pub mod storage;
 

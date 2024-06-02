@@ -1,15 +1,11 @@
 // TODO: Move this into `tests/ethereum`.
 // TODO: `tokio::test`?
 
-use std::{
-    fs::{self, File},
-    num::NonZeroUsize,
-    thread,
-};
+use std::fs::{self, File};
 
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::BlockId;
-use pevm::{get_block_env, get_block_spec, get_tx_envs, RpcStorage};
+use pevm::RpcStorage;
 use reqwest::Url;
 use revm::db::CacheDB;
 use tokio::runtime::Runtime;
@@ -47,22 +43,7 @@ fn mainnet_blocks_from_rpc() {
             .unwrap();
         let rpc_storage = RpcStorage::new(provider, BlockId::number(block_number - 1));
         let db = CacheDB::new(&rpc_storage);
-        // TODO: Generalize `runner::test_execute_alloy` to also cover this case.
-        common::assert_execution_result::<CacheDB<&RpcStorage>>(
-            common::execute_sequential(
-                db.clone(),
-                get_block_spec(&block.header).unwrap(),
-                get_block_env(&block.header, None).unwrap(),
-                get_tx_envs(&block.transactions).unwrap(),
-            ),
-            pevm::execute(
-                db.clone(),
-                block.clone(),
-                None,
-                thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
-            ),
-            true,
-        );
+        common::test_execute_alloy(db.clone(), block.clone(), None, true);
 
         // Snapshot blocks (for benchmark)
         // TODO: Port to a dedicated CLI instead?
@@ -84,7 +65,12 @@ fn mainnet_blocks_from_disk() {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(state.clone(), block.clone(), None, true)
+            common::test_execute_alloy(
+                common::build_in_mem(state.clone()),
+                block.clone(),
+                None,
+                true,
+            )
         }
     });
 }

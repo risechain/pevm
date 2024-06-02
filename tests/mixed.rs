@@ -58,7 +58,7 @@ fn mixed_block() {
         }
     }
     common::test_execute_revm(
-        final_state,
+        common::build_in_mem(final_state),
         SpecId::LATEST,
         BlockEnv::default(),
         // TODO: Shuffle transactions to scatter dependencies around the block.
