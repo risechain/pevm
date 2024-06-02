@@ -12,11 +12,11 @@ This benchmark includes mocked 1-Gigagas blocks to see how PEVM aids in building
 $ cargo bench --bench gigagas
 ```
 
-|                 | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | P / S     |
-| --------------- | ---------------- | ------------- | -------------------- | ------------------ | --------- |
-| Raw Transfers   | 47,620           | 1,000,020,000 | 121.67 ms            | 88.781 ms          | 🟢1.37    |
-| ERC20 Transfers | 37,123           | 1,000,019,374 | 212.59 ms            | 78.252 ms          | 🟢2.72    |
-| Uniswap Swaps   | 6,413            | 1,000,004,742 | 607.78 ms            | 66.073 ms          | 🟢**9.2** |
+|                 | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | P / S      |
+| --------------- | ---------------- | ------------- | -------------------- | ------------------ | ---------- |
+| Raw Transfers   | 47,620           | 1,000,020,000 | 132.14 ms            | 84.002 ms          | 🟢1.57     |
+| ERC20 Transfers | 37,123           | 1,000,019,374 | 223.58 ms            | 74.631 ms          | 🟢3        |
+| Uniswap Swaps   | 6,413            | 1,000,004,742 | 585.76 ms            | 59.806 ms          | 🟢**9.79** |
 
 ## Ethereum Mainnet Blocks
 
