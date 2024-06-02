@@ -180,6 +180,6 @@ mod primitives;
 pub use primitives::{get_block_env, get_block_spec, get_tx_envs};
 mod scheduler;
 mod storage;
-pub use storage::{AccountBasic, RpcStorage, Storage};
+pub use storage::{AccountBasic, InMemoryAccount, InMemoryStorage, RpcStorage, Storage};
 mod vm;
 pub use vm::ExecutionError;

@@ -1,10 +1,13 @@
 pub mod contract;
 
+use ahash::AHashMap;
 use contract::ERC20Token;
 use revm::{
     db::PlainAccount,
     primitives::{uint, AccountInfo, Address, TransactTo, TxEnv, U256},
 };
+
+use crate::common::ChainState;
 
 pub const GAS_LIMIT: u64 = 26_938;
 
@@ -19,7 +22,7 @@ pub fn generate_cluster(
     num_families: usize,
     num_people_per_family: usize,
     num_transfers_per_person: usize,
-) -> (Vec<(Address, PlainAccount)>, Vec<TxEnv>) {
+) -> (ChainState, Vec<TxEnv>) {
     let families: Vec<Vec<Address>> = (0..num_families)
         .map(|_| generate_addresses(num_people_per_family))
         .collect();
@@ -32,12 +35,12 @@ pub fn generate_cluster(
         .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
         .build();
 
-    let mut state = vec![(gld_address, gld_account)];
+    let mut state = AHashMap::from([(gld_address, gld_account)]);
     let mut txs = Vec::new();
 
     for person in people_addresses.iter() {
         let info = AccountInfo::from_balance(uint!(4_567_000_000_000_000_000_000_U256));
-        state.push((*person, PlainAccount::from(info)));
+        state.insert(*person, PlainAccount::from(info));
     }
 
     for nonce in 0..num_transfers_per_person {

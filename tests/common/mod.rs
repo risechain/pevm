@@ -4,15 +4,19 @@ use std::{
     io::BufReader,
 };
 
+use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use revm::{db::PlainAccount, primitives::KECCAK_EMPTY, InMemoryDB};
+use revm::{db::PlainAccount, primitives::KECCAK_EMPTY};
 
 pub mod runner;
 pub use runner::{
-    build_inmem_db, execute_sequential, mock_account, test_execute_alloy, test_execute_revm,
+    assert_execution_result, build_in_mem, execute_sequential, mock_account, test_execute_alloy,
+    test_execute_revm,
 };
 pub mod storage;
+
+pub type ChainState = AHashMap<Address, PlainAccount>;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     // Minimal requirements for execution
@@ -45,7 +49,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryDB)) {
+pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, ChainState)) {
     for block_path in fs::read_dir("blocks").unwrap() {
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
@@ -74,6 +78,6 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryDB)) {
                 account.info.code_hash = KECCAK_EMPTY;
             }
         }
-        handler(block, build_inmem_db(accounts));
+        handler(block, accounts.into_iter().collect());
     }
 }

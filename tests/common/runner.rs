@@ -1,5 +1,5 @@
 use alloy_rpc_types::{Block, Header};
-use pevm::{get_block_env, get_block_spec, get_tx_envs, PevmError, PevmResult};
+use pevm::{get_block_env, get_block_spec, get_tx_envs, InMemoryStorage, PevmError, PevmResult};
 use revm::{
     db::{PlainAccount, WrapDatabaseRef},
     primitives::{
@@ -9,6 +9,8 @@ use revm::{
     Context, DatabaseCommit, DatabaseRef, Evm, EvmContext, Handler, InMemoryDB,
 };
 use std::{fmt::Debug, num::NonZeroUsize, thread};
+
+use super::ChainState;
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -22,17 +24,18 @@ pub fn mock_account(idx: usize) -> (Address, PlainAccount) {
     )
 }
 
-// Build an inmemory database from a preset state of accounts.
-pub fn build_inmem_db(accounts: impl IntoIterator<Item = (Address, PlainAccount)>) -> InMemoryDB {
+// Build an in-memory database for sequential execution and an in-memory
+// storage for parallel execution.
+pub fn build_in_mem(state: ChainState) -> (InMemoryDB, InMemoryStorage) {
     let mut db = InMemoryDB::default();
-    for (address, account) in accounts {
-        db.insert_account_info(address, account.info.clone());
+    for (address, account) in state.iter() {
+        db.insert_account_info(*address, account.info.clone());
         for (slot, value) in account.storage.iter() {
             // TODO: Better error handling
-            db.insert_account_storage(address, *slot, *value).unwrap();
+            db.insert_account_storage(*address, *slot, *value).unwrap();
         }
     }
-    db
+    (db, state.into())
 }
 
 // The source-of-truth sequential execution result that PEVM must match.
@@ -88,7 +91,7 @@ fn assert_evm_errors<DBError1: Debug, DBError2: Debug>(
     }
 }
 
-fn assert_execution_result<D: DatabaseRef>(
+pub fn assert_execution_result<D: DatabaseRef>(
     sequential_result: Result<Vec<ResultAndState>, EVMError<D::Error>>,
     pevm_result: PevmResult,
     must_succeed: bool,
@@ -114,41 +117,34 @@ fn assert_execution_result<D: DatabaseRef>(
 
 // Execute an REVM block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_revm<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
-    db: D,
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    txs: Vec<TxEnv>,
-) where
-    D::Error: Debug,
-{
+pub fn test_execute_revm(state: ChainState, spec_id: SpecId, block_env: BlockEnv, txs: Vec<TxEnv>) {
+    let (db, storage) = build_in_mem(state);
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    assert_execution_result::<D>(
-        execute_sequential(db.clone(), spec_id, block_env.clone(), txs.clone()),
-        pevm::execute_revm(db, spec_id, block_env, txs, concurrency_level),
+    assert_execution_result::<InMemoryDB>(
+        execute_sequential(db, spec_id, block_env.clone(), txs.clone()),
+        pevm::execute_revm(storage, spec_id, block_env, txs, concurrency_level),
         false, // TODO: Parameterize this
     );
 }
 
 // Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_alloy<D: DatabaseRef + DatabaseCommit + Send + Sync + Clone>(
-    db: D,
+pub fn test_execute_alloy(
+    state: ChainState,
     block: Block,
     parent_header: Option<Header>,
     must_succeed: bool,
-) where
-    D::Error: Debug,
-{
+) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    assert_execution_result::<D>(
+    let (db, storage) = build_in_mem(state);
+    assert_execution_result::<InMemoryDB>(
         execute_sequential(
             db.clone(),
             get_block_spec(&block.header).unwrap(),
             get_block_env(&block.header, parent_header.as_ref()).unwrap(),
             get_tx_envs(&block.transactions).unwrap(),
         ),
-        pevm::execute(db, block, parent_header, concurrency_level),
+        pevm::execute(storage, block, parent_header, concurrency_level),
         must_succeed,
     );
 }
