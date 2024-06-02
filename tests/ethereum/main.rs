@@ -14,9 +14,9 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, Bytes, EVMError,
-    ExecutionResult, HaltReason, InvalidTransaction, Output, ResultAndState, SpecId, SuccessReason,
-    TransactTo, TxEnv, U256,
+    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, Bytes,
+    ExecutionResult, HaltReason, Output, ResultAndState, SpecId, SuccessReason, TransactTo, TxEnv,
+    U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -142,7 +142,6 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
             ) {
                 // EIP-2681
                 (Some("TR_NonceHasMaxValue"), Ok(exec_results)) => {
-                    // TODO: We really should test with blocks with more than 1 tx
                     assert!(exec_results.len() == 1);
                     assert!(match exec_results[0].result.clone() {
                         ExecutionResult::Success {
@@ -155,7 +154,6 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                 // Special cases where REVM returns `Ok` instead of `Err` on unsupported features.
                 // Requiring stopping or halting reasons for now.
                 (Some("TR_TypeNotSupported"), Ok(exec_results)) => {
-                    // TODO: We really should test with blocks with more than 1 tx
                     assert!(exec_results.len() == 1);
                     assert!(matches!(
                         exec_results[0].result,
@@ -170,89 +168,38 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                 }
                 // Remaining tests that expect execution to fail -> match error
                 (Some(exception), Err(PevmError::ExecutionError(error))) => {
-                    // TODO: Ideally the REVM errors would match the descriptive expectations more.
-                    if exception != "TR_TypeNotSupported" && !matches!(
-                        (exception, &error),
-                        (
-                            "TR_BLOBLIST_OVERSIZE",
-                            EVMError::Transaction(InvalidTransaction::TooManyBlobs{..})
-                        ) | (
-                            "TR_BLOBCREATE",
-                            EVMError::Transaction(InvalidTransaction::BlobCreateTransaction)
-                        ) | (
-                            "TR_EMPTYBLOB",
-                            EVMError::Transaction(InvalidTransaction::EmptyBlobs)
-                        ) | (
-                            "TR_BLOBVERSION_INVALID",
-                            EVMError::Transaction(InvalidTransaction::BlobVersionNotSupported)
-                        ) | (
-                            "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS",
-                            EVMError::Transaction(InvalidTransaction::MaxFeePerBlobGasNotSupported)
-                        ) | (
-                            "TransactionException.TYPE_3_TX_PRE_FORK",
-                            EVMError::Transaction(InvalidTransaction::BlobVersionedHashesNotSupported)
-                        ) | (
-                            "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS",
-                            EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee{..})
-                        ) | (
-                            "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH",
-                            EVMError::Transaction(InvalidTransaction::BlobVersionNotSupported)
-                        ) | (
-                            "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS",
-                            EVMError::Transaction(InvalidTransaction::GasPriceLessThanBasefee)
-                        ) | (
-                            "TransactionException.TYPE_3_TX_ZERO_BLOBS",
-                            EVMError::Transaction(InvalidTransaction::EmptyBlobs)
-                        ) | (
-                            "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED",
-                            EVMError::Transaction(InvalidTransaction::TooManyBlobs{..})
-                        ) | (
-                            "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS",
-                            EVMError::Transaction(InvalidTransaction::BlobGasPriceGreaterThanMax)
-                        ) | (
-                            "TransactionException.INITCODE_SIZE_EXCEEDED",
-                            EVMError::Transaction(InvalidTransaction::CreateInitCodeSizeLimit)
-                        ) | (
-                            "TransactionException.INTRINSIC_GAS_TOO_LOW",
-                            EVMError::Transaction(InvalidTransaction::CallGasCostMoreThanGasLimit)
-                        ) | (
-                            "TR_InitCodeLimitExceeded",
-                            EVMError::Transaction(InvalidTransaction::CreateInitCodeSizeLimit)
-                        ) | (
-                            "TR_IntrinsicGas",
-                            EVMError::Transaction(InvalidTransaction::CallGasCostMoreThanGasLimit)
-                        ) | (
-                            "TR_FeeCapLessThanBlocks",
-                            EVMError::Transaction(InvalidTransaction::GasPriceLessThanBasefee)
-                        ) | (
-                            "TR_NoFunds",
-                            EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee{..})
-                        ) | (
-                            "TR_TipGtFeeCap",
-                            EVMError::Transaction(InvalidTransaction::PriorityFeeGreaterThanMaxFee)
-                        ) | (
-                            "SenderNotEOA",
-                            EVMError::Transaction(InvalidTransaction::RejectCallerWithCode)
-                        ) | (
-                            "TR_NoFundsX",
-                            EVMError::Transaction(InvalidTransaction::OverflowPaymentInTransaction)
-                        ) | (
-                            "TR_NoFundsOrGas",
-                            EVMError::Transaction(InvalidTransaction::CallGasCostMoreThanGasLimit)
-                        ) | (
-                            "IntrinsicGas",
-                            EVMError::Transaction(InvalidTransaction::CallGasCostMoreThanGasLimit)
-                        ) | (
-                            "TR_GasLimitReached",
-                            EVMError::Transaction(InvalidTransaction::CallerGasLimitMoreThanBlock)
-                        )
-                    ) {
-                        panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}");
-                    }
+                    // TODO: Cleaner code would be nice..
+                    assert!(match exception {
+                        "TR_TypeNotSupported" => true, // REVM is yielding arbitrary errors in these cases.
+                        "SenderNotEOA" => error == "Transaction(RejectCallerWithCode)",
+                        "TR_NoFunds" => error[..31].to_string() == "Transaction(LackOfFundForMaxFee",
+                        "TR_NoFundsOrGas" => error == "Transaction(CallGasCostMoreThanGasLimit)",
+                        "IntrinsicGas" => error == "Transaction(CallGasCostMoreThanGasLimit)",
+                        "TR_NoFundsX" => error == "Transaction(OverflowPaymentInTransaction)",
+                        "TR_IntrinsicGas" => error == "Transaction(CallGasCostMoreThanGasLimit)",
+                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => error == "Transaction(BlobGasPriceGreaterThanMax)",
+                        "TR_FeeCapLessThanBlocks" => error == "Transaction(GasPriceLessThanBasefee)",
+                        "TransactionException.INTRINSIC_GAS_TOO_LOW" => error == "Transaction(CallGasCostMoreThanGasLimit)",
+                        "TR_BLOBLIST_OVERSIZE" => error[..24].to_string() == "Transaction(TooManyBlobs",
+                        "TR_BLOBCREATE" => error == "Transaction(BlobCreateTransaction)",
+                        "TransactionException.INITCODE_SIZE_EXCEEDED" => error == "Transaction(CreateInitCodeSizeLimit)",
+                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS" => error == "Transaction(GasPriceLessThanBasefee)",
+                        "TR_GasLimitReached" => error == "Transaction(CallerGasLimitMoreThanBlock)",
+                        "TR_EMPTYBLOB" => error == "Transaction(EmptyBlobs)",
+                        "TR_BLOBVERSION_INVALID" => error == "Transaction(BlobVersionNotSupported)",
+                        "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" => error[..31].to_string() == "Transaction(LackOfFundForMaxFee",
+                        "TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(EmptyBlobs)",
+                        "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => error[..24].to_string() == "Transaction(TooManyBlobs",
+                        "TR_TipGtFeeCap" => error == "Transaction(PriorityFeeGreaterThanMaxFee)",
+                        "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == "Transaction(BlobVersionNotSupported)",
+                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(MaxFeePerBlobGasNotSupported)",
+                        "TransactionException.TYPE_3_TX_PRE_FORK" => error == "Transaction(BlobVersionedHashesNotSupported)",
+                        "TR_InitCodeLimitExceeded" => error == "Transaction(CreateInitCodeSizeLimit)",
+                        _ => panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}")
+                    });
                 }
                 // Tests that exepect execution to succeed -> match post state root
                 (None, Ok(exec_results)) => {
-                    // TODO: We really should test with blocks with more than 1 tx
                     assert!(exec_results.len() == 1);
                     let ResultAndState { result, state } = exec_results[0].clone();
 

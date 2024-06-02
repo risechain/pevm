@@ -9,7 +9,7 @@ use std::{num::NonZeroUsize, thread};
 use ahash::AHashMap;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::execute_revm;
+use pevm::{execute_revm, execute_revm_sequential};
 use revm::{
     db::PlainAccount,
     primitives::{BlockEnv, SpecId, TransactTo, TxEnv},
@@ -34,12 +34,12 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
-    let (db, storage) = common::build_in_mem(state);
+    let storage = common::build_in_mem(state);
     let mut group = c.benchmark_group(name);
     group.bench_function("Sequential", |b| {
         b.iter(|| {
-            common::execute_sequential(
-                black_box(db.clone()),
+            execute_revm_sequential(
+                black_box(storage.clone()),
                 black_box(spec_id),
                 black_box(block_env.clone()),
                 black_box(txs.clone()),

@@ -7,7 +7,7 @@
 use std::{num::NonZeroUsize, thread};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::{execute_revm, get_block_env, get_block_spec, get_tx_envs};
+use pevm::execute;
 
 // Better project structure
 #[path = "../tests/common/mod.rs"]
@@ -22,11 +22,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         .min(NonZeroUsize::new(8).unwrap());
 
     common::for_each_block_from_disk(|block, state| {
-        let spec_id = get_block_spec(&block.header).unwrap();
-        let block_env = get_block_env(&block.header, None).unwrap();
-        let tx_envs = get_tx_envs(&block.transactions).unwrap();
-        let (db, storage) = common::build_in_mem(state);
-
+        let storage = common::build_in_mem(state);
         let mut group = c.benchmark_group(format!(
             "Block {}({} txs, {} gas)",
             block.header.number.unwrap(),
@@ -35,22 +31,23 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         ));
         group.bench_function("Sequential", |b| {
             b.iter(|| {
-                common::execute_sequential(
-                    black_box(db.clone()),
-                    black_box(spec_id),
-                    black_box(block_env.clone()),
-                    black_box(tx_envs.clone()),
+                execute(
+                    black_box(storage.clone()),
+                    black_box(block.clone()),
+                    black_box(None),
+                    black_box(concurrency_level),
+                    black_box(true),
                 )
             })
         });
         group.bench_function("Parallel", |b| {
             b.iter(|| {
-                execute_revm(
+                execute(
                     black_box(storage.clone()),
-                    black_box(spec_id),
-                    black_box(block_env.clone()),
-                    black_box(tx_envs.clone()),
+                    black_box(block.clone()),
+                    black_box(None),
                     black_box(concurrency_level),
+                    black_box(false),
                 )
             })
         });

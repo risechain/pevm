@@ -278,8 +278,6 @@ impl<S: Storage> Vm<S> {
             self.storage.clone(),
         );
 
-        // Set up REVM
-        // This is much uglier than the builder interface but can be up to 50% faster!!
         // SATEFY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_idx) }.clone();
         // Gas price
@@ -291,25 +289,7 @@ impl<S: Storage> Vm<S> {
         if self.spec_id.is_enabled_in(LONDON) {
             gas_price = gas_price.saturating_sub(self.block_env.basefee);
         }
-        // Context
-        let context = Context {
-            evm: EvmContext::new_with_env(
-                &mut db,
-                Env::boxed(
-                    // TODO: Should we turn off byte code analysis?
-                    CfgEnv::default(),
-                    self.block_env.clone(),
-                    tx,
-                ),
-            ),
-            external: (),
-        };
-        // TODO: Support OP handlers
-        let handler = Handler::mainnet_with_spec(self.spec_id, false);
-        // End of REVM setup
-
-        let evm_result = Evm::new(context, handler).transact();
-        match evm_result {
+        match execute_tx(&mut db, self.spec_id, self.block_env.clone(), tx, false) {
             Ok(result_and_state) => {
                 let mut gas_payment =
                     Some(gas_price * U256::from(result_and_state.result.gas_used()));
@@ -365,4 +345,30 @@ impl<S: Storage> Vm<S> {
             Err(err) => VmExecutionResult::ExecutionError(err),
         }
     }
+}
+
+// TODO: Move to better place?
+pub(crate) fn execute_tx<D: Database>(
+    mut db: D,
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    tx: TxEnv,
+    with_reward_beneficiary: bool,
+) -> Result<ResultAndState, EVMError<D::Error>> {
+    // This is much uglier than the builder interface but can be up to 50% faster!!
+    let context = Context {
+        evm: EvmContext::new_with_env(
+            &mut db,
+            Env::boxed(
+                // TODO: Should we turn off byte code analysis?
+                CfgEnv::default(),
+                block_env.clone(),
+                tx,
+            ),
+        ),
+        external: (),
+    };
+    // TODO: Support OP handlers
+    let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
+    Evm::new(context, handler).transact()
 }

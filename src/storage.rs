@@ -80,11 +80,10 @@ pub trait Storage {
     fn block_hash(&self, number: U256) -> Result<B256, Self::Error>;
 }
 
-// We can use any REVM database as storage provider.
-// There are some unfortunate back-and-forth conversions between
-// account & byte types, which hopefully it is minor enough.
-// TODO: Reverse this: to use Storage as Database for sequential
-// execution instead!
+// We can use any REVM database as storage provider. Convenient for
+// testing blocks fetched from RPC via REVM's CachedDB. Otherwise, use
+// our `Storage` types to avoid redundant conversions.
+// TODO: Do something equivalent to `CachedDB` ourselves and remove this.
 impl<D: DatabaseRef> Storage for D
 where
     D::Error: Debug,
@@ -109,6 +108,34 @@ where
 
     fn block_hash(&self, number: U256) -> Result<B256, Self::Error> {
         D::block_hash_ref(self, number)
+    }
+}
+
+// We want to use the Storage as REVM's DatabaseRef to provide data for
+// things like sequential execution fallback.
+pub(crate) struct StorageWrapper<S: Storage>(pub(crate) S);
+
+impl<S: Storage> DatabaseRef for StorageWrapper<S> {
+    type Error = S::Error;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        S::basic(&self.0, address).map(|account| account.map(AccountBasic::into))
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        S::code_by_hash(&self.0, code_hash).map(Bytecode::new_raw)
+    }
+
+    fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
+        S::has_storage(&self.0, address)
+    }
+
+    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        S::storage(&self.0, address, index)
+    }
+
+    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+        S::block_hash(&self.0, number)
     }
 }
 

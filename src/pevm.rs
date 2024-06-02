@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     num::NonZeroUsize,
     sync::{Arc, Mutex, OnceLock},
     thread,
@@ -7,20 +8,25 @@ use std::{
 use ahash::{AHashMap, AHashSet};
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, Header};
-use revm::primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv};
+use revm::{
+    db::CacheDB,
+    primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv},
+    DatabaseCommit,
+};
 
 use crate::{
     mv_memory::MvMemory,
     primitives::{get_block_env, get_block_spec, get_tx_envs},
     scheduler::Scheduler,
-    vm::{ExecutionError, Vm, VmExecutionResult},
+    storage::StorageWrapper,
+    vm::{execute_tx, ExecutionError, Vm, VmExecutionResult},
     ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependencies,
     TransactionsDependents, TransactionsStatus, TxIdx, TxIncarnationStatus, TxVersion,
     ValidationTask,
 };
 
 /// Errors when executing a block with PEVM.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum PevmError {
     /// Cannot derive the chain spec from the block header.
     UnknownBlockSpec,
@@ -29,7 +35,8 @@ pub enum PevmError {
     /// Transactions lack information for execution.
     MissingTransactionData,
     /// EVM execution error.
-    ExecutionError(ExecutionError),
+    // TODO: More concrete types than just an arbitrary string.
+    ExecutionError(String),
     /// Impractical errors that should be unreachable.
     /// The library has bugs if this is yielded.
     UnreachableError,
@@ -45,6 +52,7 @@ pub fn execute<S: Storage + Send + Sync>(
     block: Block,
     parent_header: Option<Header>,
     concurrency_level: NonZeroUsize,
+    force_sequential: bool,
 ) -> PevmResult {
     let Some(spec_id) = get_block_spec(&block.header) else {
         return Err(PevmError::UnknownBlockSpec);
@@ -55,11 +63,21 @@ pub fn execute<S: Storage + Send + Sync>(
     let Some(tx_envs) = get_tx_envs(&block.transactions) else {
         return Err(PevmError::MissingTransactionData);
     };
-    execute_revm(storage, spec_id, block_env, tx_envs, concurrency_level)
+
+    // TODO: Continue to fine tune this condition.
+    // For instance, to still execute sequentially when used gas is high
+    // but preprocessing yields little to no parallelism.
+    if force_sequential || tx_envs.len() < 2 || block.header.gas_used <= 378000 {
+        execute_revm_sequential(storage, spec_id, block_env, tx_envs)
+    } else {
+        execute_revm(storage, spec_id, block_env, tx_envs, concurrency_level)
+    }
 }
 
 /// Execute an REVM block.
-// TODO: Better error handling.
+// TODO: Do not expose this. Only exposing for ease of testing.
+// The end goal is to mock Alloy blocks for test and not leak
+// REVM anywhere.
 pub fn execute_revm<S: Storage + Send + Sync>(
     storage: S,
     spec_id: SpecId,
@@ -84,34 +102,6 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         block_size,
         MemoryLocation::Basic(beneficiary_address),
     ));
-
-    // Edge case that is pretty common
-    // TODO: Shortcut even before initializing the main parallel components.
-    // It would require structuring a cleaner trait interface for any Storage
-    // to act as the standalone DB for sequential execution.
-    if block_size == 1 {
-        return match Vm::new(spec_id, block_env, txs, storage, mv_memory.clone()).execute(0) {
-            VmExecutionResult::ExecutionError(err) => Err(PevmError::ExecutionError(err)),
-            VmExecutionResult::Ok {
-                mut result_and_state,
-                write_set,
-                ..
-            } => {
-                for (location, value) in write_set {
-                    if location == MemoryLocation::Basic(beneficiary_address) {
-                        result_and_state.state.insert(
-                            beneficiary_address,
-                            post_process_beneficiary(&mut beneficiary_account_info, value),
-                        );
-                        break;
-                    }
-                }
-                Ok(vec![result_and_state])
-            }
-            _ => Err(PevmError::UnreachableError),
-        };
-    }
-
     let (
         transactions_status,
         transactions_dependents,
@@ -127,9 +117,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         starting_validation_idx,
     );
     let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
-    // End of main components initialization
 
-    // Start multithreading mainline
     let mut execution_error = OnceLock::new();
     let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
 
@@ -201,7 +189,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     });
 
     if let Some(err) = execution_error.take() {
-        return Err(PevmError::ExecutionError(err));
+        return Err(PevmError::ExecutionError(format!("{err:?}")));
     }
 
     // We lazily evaluate the final beneficiary account's balance at the end of each transaction
@@ -220,6 +208,29 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             result_and_state
         })
         .collect())
+}
+
+/// Execute REVM transactions sequentially.
+// Useful for fallback back for a small block,
+// TODO: Use this for a long chain of sequential transactions even in parallel mode.
+pub fn execute_revm_sequential<S: Storage>(
+    storage: S,
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    txs: Vec<TxEnv>,
+) -> Result<Vec<ResultAndState>, PevmError> {
+    let mut results = Vec::with_capacity(txs.len());
+    let mut db = CacheDB::new(StorageWrapper(storage));
+    for tx in txs {
+        match execute_tx(&mut db, spec_id, block_env.clone(), tx, true) {
+            Ok(result_and_state) => {
+                db.commit(result_and_state.state.clone());
+                results.push(result_and_state);
+            }
+            Err(err) => return Err(PevmError::ExecutionError(format!("{err:?}"))),
+        }
+    }
+    Ok(results)
 }
 
 // TODO: Make this as fast as possible.
