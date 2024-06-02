@@ -1,19 +1,17 @@
 // Test small blocks that we have specific handling for, like implicity fine-tuning
 // the concurrency level, falling back to sequential processing, etc.
 
+use ahash::AHashMap;
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use revm::{
-    primitives::{BlockEnv, SpecId, TransactTo, TxEnv},
-    InMemoryDB,
-};
+use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
 
 pub mod common;
 
 #[test]
 fn empty_alloy_block() {
     common::test_execute_alloy(
-        InMemoryDB::default(),
+        AHashMap::new(),
         Block {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
             transactions: BlockTransactions::Full(Vec::new()),
@@ -27,7 +25,7 @@ fn empty_alloy_block() {
 #[test]
 fn empty_revm_block() {
     common::test_execute_revm(
-        InMemoryDB::default(),
+        AHashMap::new(),
         SpecId::LATEST,
         BlockEnv::default(),
         Vec::new(),
@@ -37,7 +35,7 @@ fn empty_revm_block() {
 #[test]
 fn one_tx_alloy_block() {
     common::test_execute_alloy(
-        common::build_inmem_db(vec![common::mock_account(0)]),
+        AHashMap::from([common::mock_account(0)]),
         Block {
             // Legit header but with no transactions
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
@@ -59,7 +57,7 @@ fn one_tx_alloy_block() {
 #[test]
 fn one_tx_revm_block() {
     common::test_execute_revm(
-        common::build_inmem_db(vec![common::mock_account(0)]),
+        AHashMap::from([common::mock_account(0)]),
         SpecId::LATEST,
         BlockEnv::default(),
         vec![TxEnv {

@@ -8,6 +8,7 @@ pub mod common;
 #[path = "./mod.rs"]
 pub mod erc20;
 
+use ahash::AHashMap;
 use common::test_execute_revm;
 use erc20::generate_cluster;
 use revm::{
@@ -19,13 +20,8 @@ use revm::{
 fn erc20_independent() {
     const N: usize = 37123;
     let (mut state, txs) = generate_cluster(N, 1, 1);
-    state.push((Address::ZERO, PlainAccount::default())); // Beneficiary
-    test_execute_revm(
-        common::build_inmem_db(state),
-        SpecId::LATEST,
-        BlockEnv::default(),
-        txs,
-    );
+    state.insert(Address::ZERO, PlainAccount::default()); // Beneficiary
+    test_execute_revm(state, SpecId::LATEST, BlockEnv::default(), txs);
 }
 
 #[test]
@@ -35,7 +31,7 @@ fn erc20_clusters() {
     const NUM_PEOPLE_PER_FAMILY: usize = 15;
     const NUM_TRANSFERS_PER_PERSON: usize = 15;
 
-    let mut final_state = vec![(Address::ZERO, PlainAccount::default())]; // Beneficiary
+    let mut final_state = AHashMap::from([(Address::ZERO, PlainAccount::default())]); // Beneficiary
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..NUM_CLUSTERS {
         let (state, txs) = generate_cluster(
@@ -46,10 +42,5 @@ fn erc20_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(
-        common::build_inmem_db(final_state),
-        SpecId::LATEST,
-        BlockEnv::default(),
-        final_txs,
-    )
+    common::test_execute_revm(final_state, SpecId::LATEST, BlockEnv::default(), final_txs)
 }

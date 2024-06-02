@@ -1,6 +1,7 @@
 pub mod contract;
 
-use crate::erc20::contract::ERC20Token;
+use crate::{common::ChainState, erc20::contract::ERC20Token};
+use ahash::AHashMap;
 use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
 use revm::{
     db::PlainAccount,
@@ -12,7 +13,7 @@ pub const GAS_LIMIT: u64 = 155_934;
 pub fn generate_cluster(
     num_people: usize,
     num_swaps_per_person: usize,
-) -> (Vec<(Address, PlainAccount)>, Vec<TxEnv>) {
+) -> (ChainState, Vec<TxEnv>) {
     // TODO: Better randomness control. Sometimes we want duplicates to test
     // dependent transactions, sometimes we want to guarantee non-duplicates
     // for independent benchmarks.
@@ -101,7 +102,7 @@ pub fn generate_cluster(
     let single_swap_account =
         SingleSwap::new(swap_router_address, dai_address, usdc_address).build();
 
-    let mut state = vec![
+    let mut state = AHashMap::from([
         (weth9_address, weth9_account),
         (dai_address, dai_account),
         (usdc_address, usdc_account),
@@ -109,11 +110,11 @@ pub fn generate_cluster(
         (pool_address, pool_account),
         (swap_router_address, swap_router_account),
         (single_swap_address, single_swap_account),
-    ];
+    ]);
 
     for person in people_addresses.iter() {
         let info = AccountInfo::from_balance(uint!(4_567_000_000_000_000_000_000_U256));
-        state.push((*person, PlainAccount::from(info)));
+        state.insert(*person, PlainAccount::from(info));
     }
 
     let mut txs = Vec::new();

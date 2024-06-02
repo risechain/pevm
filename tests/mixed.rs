@@ -1,7 +1,6 @@
 // Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
 
-use std::collections::HashMap;
-
+use ahash::AHashMap;
 use alloy_primitives::U160;
 use rand::random;
 use revm::{
@@ -19,7 +18,7 @@ fn mixed_block() {
 
     // TODO: Run a few times
     let mut block_size = 0;
-    let mut final_state = HashMap::new();
+    let mut final_state = AHashMap::new();
     final_state.insert(Address::ZERO, PlainAccount::default()); // Beneficiary
     let mut final_txs = Vec::new();
     // 1 to 10
@@ -59,7 +58,7 @@ fn mixed_block() {
         }
     }
     common::test_execute_revm(
-        common::build_inmem_db(final_state),
+        final_state,
         SpecId::LATEST,
         BlockEnv::default(),
         // TODO: Shuffle transactions to scatter dependencies around the block.

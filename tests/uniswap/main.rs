@@ -12,6 +12,7 @@ pub mod erc20;
 pub mod uniswap;
 
 use crate::uniswap::generate_cluster;
+use ahash::AHashMap;
 use revm::{
     db::PlainAccount,
     primitives::{Address, BlockEnv, SpecId, TxEnv},
@@ -23,17 +24,12 @@ fn uniswap_clusters() {
     const NUM_PEOPLE_PER_CLUSTER: usize = 20;
     const NUM_SWAPS_PER_PERSON: usize = 20;
 
-    let mut final_state = vec![(Address::ZERO, PlainAccount::default())]; // Beneficiary
+    let mut final_state = AHashMap::from([(Address::ZERO, PlainAccount::default())]); // Beneficiary
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..NUM_CLUSTERS {
         let (state, txs) = generate_cluster(NUM_PEOPLE_PER_CLUSTER, NUM_SWAPS_PER_PERSON);
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(
-        common::build_inmem_db(final_state),
-        SpecId::LATEST,
-        BlockEnv::default(),
-        final_txs,
-    )
+    common::test_execute_revm(final_state, SpecId::LATEST, BlockEnv::default(), final_txs)
 }
