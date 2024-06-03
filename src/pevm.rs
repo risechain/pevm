@@ -7,10 +7,13 @@ use std::{
 
 use ahash::{AHashMap, AHashSet};
 use alloy_primitives::{Address, U256};
-use alloy_rpc_types::{Block, Header};
+use alloy_rpc_types::{Block, Header, Receipt};
 use revm::{
     db::CacheDB,
-    primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv},
+    primitives::{
+        Account, AccountInfo, BlockEnv, EvmState, ExecutionResult, ResultAndState, SpecId,
+        TransactTo, TxEnv,
+    },
     DatabaseCommit,
 };
 
@@ -42,8 +45,37 @@ pub enum PevmError {
     UnreachableError,
 }
 
-/// Execution result of PEVM.
-pub type PevmResult = Result<Vec<ResultAndState>, PevmError>;
+/// Execution result of a transaction
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PevmTxExecutionResult {
+    /// Receipt of execution
+    pub receipt: Receipt,
+    /// State that got updated
+    pub state: EvmState,
+}
+
+fn collect_receipts(inputs: Vec<ResultAndState>) -> Vec<PevmTxExecutionResult> {
+    let mut cumulative_gas_used: u128 = 0;
+    let mut outputs = Vec::new();
+
+    for ResultAndState { result, state } in inputs {
+        cumulative_gas_used += result.gas_used() as u128;
+        let receipt = Receipt {
+            status: result.is_success(),
+            cumulative_gas_used,
+            logs: match result {
+                ExecutionResult::Success { logs, .. } => logs,
+                _ => Vec::new(),
+            },
+        };
+        outputs.push(PevmTxExecutionResult { receipt, state });
+    }
+    outputs
+}
+
+/// Execution result of a block
+pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
@@ -186,7 +218,8 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // to avoid "implicit" dependency among consecutive transactions that read & write there.
     // TODO: Refactor, improve speed & error handling.
     let beneficiary_values = mv_memory.consume_beneficiary();
-    Ok(execution_results
+
+    let results = execution_results
         .into_iter()
         .zip(beneficiary_values)
         .map(|(mutex, value)| {
@@ -197,7 +230,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             );
             result_and_state
         })
-        .collect())
+        .collect::<Vec<_>>();
+
+    Ok(collect_receipts(results))
 }
 
 /// Execute REVM transactions sequentially.
@@ -208,7 +243,7 @@ pub fn execute_revm_sequential<S: Storage>(
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
-) -> Result<Vec<ResultAndState>, PevmError> {
+) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
     let mut results = Vec::with_capacity(txs.len());
     let mut db = CacheDB::new(StorageWrapper(storage));
     for tx in txs {
@@ -220,7 +255,7 @@ pub fn execute_revm_sequential<S: Storage>(
             Err(err) => return Err(PevmError::ExecutionError(format!("{err:?}"))),
         }
     }
-    Ok(results)
+    Ok(collect_receipts(results))
 }
 
 // Return `None` to signal falling back to sequential execution as we detected too many
