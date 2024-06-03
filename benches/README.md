@@ -12,7 +12,7 @@ This benchmark includes mocked 1-Gigagas blocks to see how PEVM aids in building
 $ cargo bench --bench gigagas
 ```
 
-|                 | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | P / S       |
+|                 | No. Transactions | Gas Used      | Sequential Execution | Parallel Execution | Speedup     |
 | --------------- | ---------------- | ------------- | -------------------- | ------------------ | ----------- |
 | Raw Transfers   | 47,620           | 1,000,020,000 | 131.56 ms            | 84.405 ms          | 🟢1.56      |
 | ERC20 Transfers | 37,123           | 1,000,019,374 | 224.57 ms            | 71.100 ms          | 🟢3.16      |
@@ -33,8 +33,19 @@ $ cargo bench --bench mainnet
 To benchmark with profiling for development (preferably after commenting out the sequential run):
 
 ```sh
-CARGO_PROFILE_BENCH_DEBUG=true cargo flamegraph --bench mainnet -- --bench
+# Higher level with flamegraph
+$ CARGO_PROFILE_BENCH_DEBUG=true cargo flamegraph --bench mainnet -- --bench
+
+# Lower level with perf
+$ CARGO_PROFILE_BENCH_DEBUG=true cargo bench --bench mainnet
+$ perf record target/release/deps/mainnet-??? --bench
+$ perf report
 ```
+
+Blocks marked with `--` are small blocks that PEVM falls back to sequential execution. Spawning scoped threads and dropping the multi-version data structure alone may take longer than executing the whole block sequentially. Currently, these blocks either:
+
+- Have fewer than two transactions.
+- Use less than 378,000 gas.
 
 | Block Number | Spec            | No. Transactions | Gas Used   | Sequential Execution | Parallel Execution | Speedup    |
 | ------------ | --------------- | ---------------- | ---------- | -------------------- | ------------------ | ---------- |
@@ -96,8 +107,3 @@ CARGO_PROFILE_BENCH_DEBUG=true cargo flamegraph --bench mainnet -- --bench
 - The **max speed up is x3.62** for a large block with few dependencies.
 - The **max slow down is x0.57** for a small block with many dependencies.
 - We will need more optimizations throughout Alpha and Beta to become **3~5 times faster**.
-
-(\*) Blocks marked with `--` are small blocks that PEVM falls back to sequential execution. Spawning scoped threads and dropping the multi-version data structure alone may take longer than executing the whole block sequentially. Currently, these blocks either:
-
-- Have fewer than two transactions.
-- Use less than 378,000 gas.
