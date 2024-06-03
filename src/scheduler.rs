@@ -11,6 +11,7 @@ use std::{
 };
 
 use ahash::{AHashMap, AHashSet};
+use crossbeam::utils::CachePadded;
 
 use crate::{
     ExecutionTask, Task, TransactionsDependencies, TransactionsDependents, TransactionsStatus,
@@ -42,20 +43,35 @@ use crate::{
 // transactions. Threads that perform these tasks can already detect validation
 // failure due to the ESTIMATE markers on memory locations, instead of waiting
 // for a subsequent incarnation to finish.
+//
+// To fight false-sharing, instead of blindly padding everything, we run
+// $ CARGO_PROFILE_BENCH_DEBUG=true cargo bench --bench mainnet
+// $ perf record target/release/deps/mainnet-??? --bench
+// $ perf report
+// To identify then pad atomics with the highest overheads.
+// Current tops:
+// - `execution_idx`
+// - `validation_idx`
+// - The ones inside `transactions_status` `Mutex`es
+// We also align the struct and each field up to `transactions_status`
+// to start at a new 64-or-128-bytes cache line.
+#[repr(align(64))]
 pub(crate) struct Scheduler {
     /// The number of transactions in this block.
     block_size: usize,
     /// The first transaction going parallel that needs validation.
     starting_validation_idx: usize,
     /// The next transaction to try and execute.
-    execution_idx: AtomicUsize,
+    execution_idx: CachePadded<AtomicUsize>,
     /// The next tranasction to try and validate.
-    validation_idx: AtomicUsize,
+    validation_idx: CachePadded<AtomicUsize>,
+    /// Number of ongoing execution and validation tasks.
+    num_active_tasks: AtomicUsize,
     /// Number of times a task index was decreased.
     decrease_cnt: AtomicUsize,
     /// The most up-to-date incarnation number (initially 0) and
     /// the status of this incarnation.
-    transactions_status: Vec<Mutex<TxIncarnationStatus>>,
+    transactions_status: Vec<CachePadded<Mutex<TxIncarnationStatus>>>,
     /// The list of dependent transactions to resumne when the
     /// key transaction is re-executed.
     transactions_dependents: Vec<Mutex<AHashSet<TxIdx>>>,
@@ -69,8 +85,6 @@ pub(crate) struct Scheduler {
     /// ready, making it forever unexecuted.
     // TODO: Build a fuller dependency graph.
     transactions_dependencies: AHashMap<TxIdx, Mutex<AHashSet<TxIdx>>>,
-    /// Number of ongoing execution and validation tasks.
-    num_active_tasks: AtomicUsize,
     /// Marker for completion
     done_marker: AtomicBool,
 }
@@ -86,10 +100,14 @@ impl Scheduler {
         Self {
             block_size,
             starting_validation_idx,
-            execution_idx: AtomicUsize::new(0),
-            validation_idx: AtomicUsize::new(starting_validation_idx),
+            execution_idx: CachePadded::new(AtomicUsize::new(0)),
+            validation_idx: CachePadded::new(AtomicUsize::new(starting_validation_idx)),
+            num_active_tasks: AtomicUsize::new(0),
             decrease_cnt: AtomicUsize::new(0),
-            transactions_status: transactions_status.into_iter().map(Mutex::new).collect(),
+            transactions_status: transactions_status
+                .into_iter()
+                .map(|status| CachePadded::new(Mutex::new(status)))
+                .collect(),
             transactions_dependents: transactions_dependents
                 .into_iter()
                 .map(Mutex::new)
@@ -98,7 +116,6 @@ impl Scheduler {
                 .into_iter()
                 .map(|(tx_idx, deps)| (tx_idx, Mutex::new(deps)))
                 .collect(),
-            num_active_tasks: AtomicUsize::new(0),
             done_marker: AtomicBool::new(false),
         }
     }
