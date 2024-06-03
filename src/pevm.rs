@@ -67,7 +67,7 @@ pub fn execute<S: Storage + Send + Sync>(
     // TODO: Continue to fine tune this condition.
     // For instance, to still execute sequentially when used gas is high
     // but preprocessing yields little to no parallelism.
-    if force_sequential || tx_envs.len() < 2 || block.header.gas_used <= 378000 {
+    if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
         execute_revm_sequential(storage, spec_id, block_env, tx_envs)
     } else {
         execute_revm(storage, spec_id, block_env, tx_envs, concurrency_level)
@@ -309,8 +309,8 @@ fn preprocess_dependencies(
             }
 
             // TODO: Continue to fine tune this ratio.
-            // Intuitively we should quit way before 95%.
-            if transactions_dependencies.len() as f64 / block_size as f64 > 0.95 {
+            // Intuitively we should quit way before 90%.
+            if transactions_dependencies.len() as f64 / block_size as f64 > 0.9 {
                 return None;
             }
         }
