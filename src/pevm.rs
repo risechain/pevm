@@ -89,33 +89,23 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return PevmResult::Ok(Vec::new());
     }
 
-    // Beneficiary setup for post-processing
     let beneficiary_address = block_env.coinbase;
+    let Some((scheduler, max_concurrency_level)) =
+        preprocess_dependencies(&beneficiary_address, &txs)
+    else {
+        return execute_revm_sequential(storage, spec_id, block_env, txs);
+    };
+
     let mut beneficiary_account_info = match storage.basic(beneficiary_address) {
         Ok(Some(account)) => account.into(),
         _ => AccountInfo::default(),
     };
 
-    // Initialize main components
     let block_size = txs.len();
     let mv_memory = Arc::new(MvMemory::new(
         block_size,
         MemoryLocation::Basic(beneficiary_address),
     ));
-    let (
-        transactions_status,
-        transactions_dependents,
-        transactions_dependencies,
-        max_concurrency_level,
-        starting_validation_idx,
-    ) = preprocess_dependencies(&beneficiary_address, &txs);
-    let scheduler = Scheduler::new(
-        block_size,
-        transactions_status,
-        transactions_dependents,
-        transactions_dependencies,
-        starting_validation_idx,
-    );
     let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
 
     let mut execution_error = OnceLock::new();
@@ -233,17 +223,14 @@ pub fn execute_revm_sequential<S: Storage>(
     Ok(results)
 }
 
-// TODO: Make this as fast as possible.
+// Return `None` to signal falling back to sequential execution as we detected too many
+// dependencies. Otherwise return a tuned scheduler and the max concurrency level.
+// TODO: Clearer interface & make this as fast as possible.
+// For instance, to use an enum return type and `SmallVec` over `AHashSet`.
 fn preprocess_dependencies(
     beneficiary_address: &Address,
     txs: &[TxEnv],
-) -> (
-    TransactionsStatus,
-    TransactionsDependents,
-    TransactionsDependencies,
-    NonZeroUsize,
-    usize,
-) {
+) -> Option<(Scheduler, NonZeroUsize)> {
     let block_size = txs.len();
 
     let mut transactions_status: TransactionsStatus = (0..block_size)
@@ -320,6 +307,12 @@ fn preprocess_dependencies(
                     }
                 }
             }
+
+            // TODO: Continue to fine tune this ratio.
+            // Intuitively we should quit way before 95%.
+            if transactions_dependencies.len() as f64 / block_size as f64 > 0.95 {
+                return None;
+            }
         }
 
         // Register this transaction to the sender & recipient index maps.
@@ -340,13 +333,16 @@ fn preprocess_dependencies(
         .unwrap_or(min_concurrency_level)
         .max(min_concurrency_level);
 
-    (
-        transactions_status,
-        transactions_dependents,
-        transactions_dependencies,
+    Some((
+        Scheduler::new(
+            block_size,
+            transactions_status,
+            transactions_dependents,
+            transactions_dependencies,
+            starting_validation_idx,
+        ),
         max_concurrency_level,
-        starting_validation_idx,
-    )
+    ))
 }
 
 // Execute the next incarnation of a transaction.
