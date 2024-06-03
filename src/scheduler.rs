@@ -46,7 +46,7 @@ use crate::{
 //
 // To fight false-sharing, instead of blindly padding everything, we run
 // $ CARGO_PROFILE_BENCH_DEBUG=true cargo bench --bench mainnet
-// $ perf record target/release/deps/mainnet-??? --bench
+// $ perf record -e cache-misses target/release/deps/mainnet-??? --bench
 // $ perf report
 // To identify then pad atomics with the highest overheads.
 // Current tops:
@@ -57,21 +57,21 @@ use crate::{
 // to start at a new 64-or-128-bytes cache line.
 #[repr(align(64))]
 pub(crate) struct Scheduler {
-    /// The number of transactions in this block.
-    block_size: usize,
-    /// The first transaction going parallel that needs validation.
-    starting_validation_idx: usize,
     /// The next transaction to try and execute.
     execution_idx: CachePadded<AtomicUsize>,
     /// The next tranasction to try and validate.
     validation_idx: CachePadded<AtomicUsize>,
+    /// The most up-to-date incarnation number (initially 0) and
+    /// the status of this incarnation.
+    transactions_status: Vec<CachePadded<Mutex<TxIncarnationStatus>>>,
+    /// The number of transactions in this block.
+    block_size: usize,
+    /// The first transaction going parallel that needs validation.
+    starting_validation_idx: usize,
     /// Number of ongoing execution and validation tasks.
     num_active_tasks: AtomicUsize,
     /// Number of times a task index was decreased.
     decrease_cnt: AtomicUsize,
-    /// The most up-to-date incarnation number (initially 0) and
-    /// the status of this incarnation.
-    transactions_status: Vec<CachePadded<Mutex<TxIncarnationStatus>>>,
     /// The list of dependent transactions to resumne when the
     /// key transaction is re-executed.
     transactions_dependents: Vec<Mutex<AHashSet<TxIdx>>>,
