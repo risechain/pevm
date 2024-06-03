@@ -13,6 +13,9 @@ use pevm::execute;
 #[path = "../tests/common/mod.rs"]
 pub mod common;
 
+#[global_allocator]
+static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+
 pub fn criterion_benchmark(c: &mut Criterion) {
     let concurrency_level = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
