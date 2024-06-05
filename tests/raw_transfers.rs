@@ -102,7 +102,6 @@ fn raw_transfers_independent_alloy() {
             ..Block::default()
         },
         None,
-        true,
         false,
     );
 }

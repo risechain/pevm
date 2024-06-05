@@ -11,8 +11,7 @@ use alloy_rpc_types::{Block, Header, Receipt};
 use revm::{
     db::CacheDB,
     primitives::{
-        Account, AccountInfo, BlockEnv, EvmState, ExecutionResult, ResultAndState, SpecId,
-        TransactTo, TxEnv,
+        Account, AccountInfo, BlockEnv, EvmState, ResultAndState, SpecId, TransactTo, TxEnv,
     },
     DatabaseCommit,
 };
@@ -50,28 +49,11 @@ pub enum PevmError {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PevmTxExecutionResult {
     /// Receipt of execution
+    // TODO: Consider promoting to `ReceiptEnvelope` if there is high demand
     pub receipt: Receipt,
     /// State that got updated
+    // TODO: Use our own type to not leak REVM types to library users.
     pub state: EvmState,
-}
-
-fn collect_receipts(inputs: Vec<ResultAndState>) -> Vec<PevmTxExecutionResult> {
-    let mut cumulative_gas_used: u128 = 0;
-    let mut outputs = Vec::new();
-
-    for ResultAndState { result, state } in inputs {
-        cumulative_gas_used += result.gas_used() as u128;
-        let receipt = Receipt {
-            status: result.is_success(),
-            cumulative_gas_used,
-            logs: match result {
-                ExecutionResult::Success { logs, .. } => logs,
-                _ => Vec::new(),
-            },
-        };
-        outputs.push(PevmTxExecutionResult { receipt, state });
-    }
-    outputs
 }
 
 /// Execution result of a block
@@ -232,7 +214,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         })
         .collect::<Vec<_>>();
 
-    Ok(collect_receipts(results))
+    Ok(transform_output(results))
 }
 
 /// Execute REVM transactions sequentially.
@@ -255,7 +237,7 @@ pub fn execute_revm_sequential<S: Storage>(
             Err(err) => return Err(PevmError::ExecutionError(format!("{err:?}"))),
         }
     }
-    Ok(collect_receipts(results))
+    Ok(transform_output(results))
 }
 
 // Return `None` to signal falling back to sequential execution as we detected too many
@@ -470,4 +452,22 @@ fn post_process_beneficiary(
     let mut beneficiary_account = Account::from(beneficiary_account_info.clone());
     beneficiary_account.mark_touch();
     beneficiary_account
+}
+
+fn transform_output(
+    revm_results: impl IntoIterator<Item = ResultAndState>,
+) -> Vec<PevmTxExecutionResult> {
+    let mut cumulative_gas_used: u128 = 0;
+    revm_results
+        .into_iter()
+        .map(|ResultAndState { result, state }| {
+            cumulative_gas_used += result.gas_used() as u128;
+            let receipt = Receipt {
+                status: result.is_success(),
+                cumulative_gas_used,
+                logs: result.into_logs(),
+            };
+            PevmTxExecutionResult { receipt, state }
+        })
+        .collect::<Vec<_>>()
 }

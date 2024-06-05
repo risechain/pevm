@@ -1,15 +1,13 @@
 use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::B256;
 use alloy_provider::network::eip2718::Encodable2718;
-use alloy_rpc_types::{Block, Header};
-use pevm::{InMemoryStorage, PevmResult, PevmTxExecutionResult, Storage};
+use alloy_rpc_types::{Block, BlockTransactions, Header, Transaction};
+use pevm::{PevmResult, PevmTxExecutionResult, Storage};
 use revm::{
     db::PlainAccount,
     primitives::{alloy_primitives::U160, AccountInfo, Address, BlockEnv, SpecId, TxEnv, U256},
 };
 use std::{collections::BTreeMap, num::NonZeroUsize, thread};
-
-use super::ChainState;
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -52,8 +50,9 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
     );
 }
 
+// Refer to section 4.3.2. Holistic Validity in the Ethereum Yellow Paper.
+// See @ethereum/go-ethereum/cmd/era/main.go:289.
 fn calculate_receipt_root(receipt_envelopes: Vec<ReceiptEnvelope>) -> B256 {
-    // create a BTreeMap (order must be ascending)
     let entries = receipt_envelopes
         .into_iter()
         .enumerate()
@@ -65,7 +64,8 @@ fn calculate_receipt_root(receipt_envelopes: Vec<ReceiptEnvelope>) -> B256 {
         })
         .collect::<BTreeMap<_, _>>();
 
-    // calculate the MPT root
+    // We use BTreeMap because the keys must be sorted in ascending order.
+    // Otherwise, hash_builder.add_leaf() will panic.
     let mut hash_builder = alloy_trie::HashBuilder::default();
     for (k, v) in entries {
         hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
@@ -73,29 +73,25 @@ fn calculate_receipt_root(receipt_envelopes: Vec<ReceiptEnvelope>) -> B256 {
     hash_builder.root()
 }
 
-fn get_receipt_envelopes(
-    block: &Block,
+fn build_receipt_envelopes(
+    txs: &BlockTransactions<Transaction>,
     tx_results: &[PevmTxExecutionResult],
 ) -> Vec<ReceiptEnvelope> {
-    // get the receipts
-    let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone());
-
-    // get the tx_type list
-    let tx_type_iter = block
-        .transactions
+    let tx_type_iter = txs
         .txns()
         .unwrap()
         .map(|tx| TxType::try_from(tx.transaction_type.unwrap_or_default()).unwrap());
 
-    // zip them to get the receipt envelopes
-    let receipt_envelope_iter =
-        Iterator::zip(receipt_iter, tx_type_iter).map(|(receipt, tx_type)| match tx_type {
-            TxType::Legacy => ReceiptEnvelope::Legacy(receipt.with_bloom()),
-            TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt.with_bloom()),
-            TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt.with_bloom()),
-            TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt.with_bloom()),
-        });
-    receipt_envelope_iter.collect::<Vec<_>>()
+    let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone().with_bloom());
+
+    Iterator::zip(tx_type_iter, receipt_iter)
+        .map(|(tx_type, receipt)| match tx_type {
+            TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
+            TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
+            TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
+            TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
+        })
+        .collect()
 }
 
 // Execute an Alloy block sequentially & with PEVM and assert that
@@ -104,8 +100,7 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     storage: S,
     block: Block,
     parent_header: Option<Header>,
-    must_succeed: bool,
-    must_check_receipts_root: bool,
+    must_match_receipts_root: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let sequential_result = pevm::execute(
@@ -116,30 +111,23 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
         true,
     );
     let parallel_result = pevm::execute(
-        storage.clone(),
+        storage,
         block.clone(),
-        parent_header.clone(),
+        parent_header,
         concurrency_level,
         false,
     );
-    assert_execution_result(&sequential_result, &parallel_result, must_succeed);
+    assert_execution_result(&sequential_result, &parallel_result, true);
+    let tx_results = sequential_result.unwrap();
 
-    if must_check_receipts_root {
-        if block.header.number.unwrap() < 4370000 { // before Byzantium
-             // Before EIP 658 (https://eips.ethereum.org/EIPS/eip-658),
-             // the receipt root is calculated from post transaction state root.
-             // Unfortunately, this info is not available in type Receipt.
-
-            // Note that in this era: the receipt root equals to:
-            // TRIE { (k, v) for all k=0..N-1, v=(post transaction state root, cumulative gas used, bloom filter, logs) }
-
-            // For those who are curious, call `eth_getTransactionReceipt`
-            // and find the field `root`, that is the missing piece which
-            // is needed to calculate the `receiptsRoot`.
-        } else {
-            let receipt_envelopes = get_receipt_envelopes(&block, &sequential_result.unwrap());
-            let calculated_receipts_root = calculate_receipt_root(receipt_envelopes);
-            assert_eq!(block.header.receipts_root, calculated_receipts_root);
-        }
+    // We can only calculate the receipts root from Byzantium.
+    // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
+    // receipt root is calculated with the post transaction state root,
+    // which we doesn't have in these tests.
+    if must_match_receipts_root && block.header.number.unwrap() >= 4370000 {
+        assert_eq!(
+            block.header.receipts_root,
+            calculate_receipt_root(build_receipt_envelopes(&block.transactions, &tx_results))
+        );
     }
 }
