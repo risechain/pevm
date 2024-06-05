@@ -75,7 +75,7 @@ fn calculate_receipt_root(receipt_envelopes: Vec<ReceiptEnvelope>) -> B256 {
 
 fn get_receipt_envelopes(
     block: &Block,
-    tx_results: &Vec<PevmTxExecutionResult>,
+    tx_results: &[PevmTxExecutionResult],
 ) -> Vec<ReceiptEnvelope> {
     // get the receipts
     let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone());
@@ -125,8 +125,21 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     assert_execution_result(&sequential_result, &parallel_result, must_succeed);
 
     if must_check_receipts_root {
-        let receipt_envelopes = get_receipt_envelopes(&block, &sequential_result.unwrap());
-        let calculated_receipts_root = calculate_receipt_root(receipt_envelopes);
-        assert_eq!(block.header.receipts_root, calculated_receipts_root);
+        if block.header.number.unwrap() < 4370000 { // before Byzantium
+             // Before EIP 658 (https://eips.ethereum.org/EIPS/eip-658),
+             // the receipt root is calculated from post transaction state root.
+             // Unfortunately, this info is not available in type Receipt.
+
+            // Note that in this era: the receipt root equals to:
+            // TRIE { (k, v) for all k=0..N-1, v=(post transaction state root, cumulative gas used, bloom filter, logs) }
+
+            // For those who are curious, call `eth_getTransactionReceipt`
+            // and find the field `root`, that is the missing piece which
+            // is needed to calculate the `receiptsRoot`.
+        } else {
+            let receipt_envelopes = get_receipt_envelopes(&block, &sequential_result.unwrap());
+            let calculated_receipts_root = calculate_receipt_root(receipt_envelopes);
+            assert_eq!(block.header.receipts_root, calculated_receipts_root);
+        }
     }
 }
