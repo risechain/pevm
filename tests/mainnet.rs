@@ -48,7 +48,7 @@ fn mainnet_blocks_from_rpc() {
             .unwrap();
         let rpc_storage = RpcStorage::new(provider, BlockId::number(block_number - 1));
         let db = CacheDB::new(&rpc_storage);
-        common::test_execute_alloy(db.clone(), block.clone(), None, true);
+        common::test_execute_alloy(db.clone(), block.clone(), None, true, true);
 
         // Snapshot blocks (for benchmark)
         // TODO: Port to a dedicated CLI instead?
@@ -83,7 +83,7 @@ fn mainnet_blocks_from_disk() {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(storage.clone(), block.clone(), None, true)
+            common::test_execute_alloy(storage.clone(), block.clone(), None, true, true)
         }
     });
 }

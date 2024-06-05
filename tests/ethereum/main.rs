@@ -143,7 +143,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                 (Some("TR_NonceHasMaxValue"), Ok(exec_results)) => {
                     assert!(exec_results.len() == 1);
                     assert!(exec_results[0].receipt.status);
-                    println!("{:?}", exec_results[0].state);
+                    assert!(exec_results[0].state.values().all(|account| account.info.is_empty_code_hash()));
                 }
                 // Skipping special cases where REVM returns `Ok` instead on unsupported features.
                 (Some("TR_TypeNotSupported"), Ok(_)) => {}

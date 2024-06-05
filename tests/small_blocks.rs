@@ -19,6 +19,7 @@ fn empty_alloy_block() {
         },
         None,
         true,
+        false,
     );
 }
 
@@ -51,6 +52,7 @@ fn one_tx_alloy_block() {
         },
         None,
         true,
+        false,
     );
 }
 

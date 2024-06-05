@@ -1,10 +1,15 @@
+use alloy_consensus::{ReceiptEnvelope, TxType};
+use alloy_primitives::B256;
+use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, Header};
-use pevm::{PevmResult, Storage};
+use pevm::{InMemoryStorage, PevmResult, PevmTxExecutionResult, Storage};
 use revm::{
     db::PlainAccount,
     primitives::{alloy_primitives::U160, AccountInfo, Address, BlockEnv, SpecId, TxEnv, U256},
 };
-use std::{num::NonZeroUsize, thread};
+use std::{collections::BTreeMap, num::NonZeroUsize, thread};
+
+use super::ChainState;
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -20,8 +25,8 @@ pub fn mock_account(idx: usize) -> (Address, PlainAccount) {
 
 // TODO: Pass in hashes to checksum, especially for real blocks.
 pub fn assert_execution_result(
-    sequential_result: PevmResult,
-    parallel_result: PevmResult,
+    sequential_result: &PevmResult,
+    parallel_result: &PevmResult,
     must_succeed: bool,
 ) {
     // We must assert sucess for real blocks, etc.
@@ -41,10 +46,56 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result(
-        pevm::execute_revm_sequential(storage.clone(), spec_id, block_env.clone(), txs.clone()),
-        pevm::execute_revm(storage, spec_id, block_env, txs, concurrency_level),
+        &pevm::execute_revm_sequential(storage.clone(), spec_id, block_env.clone(), txs.clone()),
+        &pevm::execute_revm(storage, spec_id, block_env, txs, concurrency_level),
         false, // TODO: Parameterize this
     );
+}
+
+fn calculate_receipt_root(receipt_envelopes: Vec<ReceiptEnvelope>) -> B256 {
+    // create a BTreeMap (order must be ascending)
+    let entries = receipt_envelopes
+        .into_iter()
+        .enumerate()
+        .map(|(index, receipt)| {
+            let key_buffer = alloy_rlp::encode_fixed_size(&index);
+            let mut value_buffer = Vec::new();
+            receipt.encode_2718(&mut value_buffer);
+            (key_buffer, value_buffer)
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    // calculate the MPT root
+    let mut hash_builder = alloy_trie::HashBuilder::default();
+    for (k, v) in entries {
+        hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
+    }
+    hash_builder.root()
+}
+
+fn get_receipt_envelopes(
+    block: &Block,
+    tx_results: &Vec<PevmTxExecutionResult>,
+) -> Vec<ReceiptEnvelope> {
+    // get the receipts
+    let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone());
+
+    // get the tx_type list
+    let tx_type_iter = block
+        .transactions
+        .txns()
+        .unwrap()
+        .map(|tx| TxType::try_from(tx.transaction_type.unwrap_or_default()).unwrap());
+
+    // zip them to get the receipt envelopes
+    let receipt_envelope_iter =
+        Iterator::zip(receipt_iter, tx_type_iter).map(|(receipt, tx_type)| match tx_type {
+            TxType::Legacy => ReceiptEnvelope::Legacy(receipt.with_bloom()),
+            TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt.with_bloom()),
+            TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt.with_bloom()),
+            TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt.with_bloom()),
+        });
+    receipt_envelope_iter.collect::<Vec<_>>()
 }
 
 // Execute an Alloy block sequentially & with PEVM and assert that
@@ -54,17 +105,28 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     block: Block,
     parent_header: Option<Header>,
     must_succeed: bool,
+    must_check_receipts_root: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    assert_execution_result(
-        pevm::execute(
-            storage.clone(),
-            block.clone(),
-            parent_header.clone(),
-            concurrency_level,
-            true,
-        ),
-        pevm::execute(storage, block, parent_header, concurrency_level, false),
-        must_succeed,
+    let sequential_result = pevm::execute(
+        storage.clone(),
+        block.clone(),
+        parent_header.clone(),
+        concurrency_level,
+        true,
     );
+    let parallel_result = pevm::execute(
+        storage.clone(),
+        block.clone(),
+        parent_header.clone(),
+        concurrency_level,
+        false,
+    );
+    assert_execution_result(&sequential_result, &parallel_result, must_succeed);
+
+    if must_check_receipts_root {
+        let receipt_envelopes = get_receipt_envelopes(&block, &sequential_result.unwrap());
+        let calculated_receipts_root = calculate_receipt_root(receipt_envelopes);
+        assert_eq!(block.header.receipts_root, calculated_receipts_root);
+    }
 }
