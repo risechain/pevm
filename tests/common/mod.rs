@@ -63,7 +63,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, ChainState, Block
 
         // Parse state
         let mut accounts: HashMap<Address, PlainAccount> = serde_json::from_reader(BufReader::new(
-            File::open(format!("blocks/{block_number}/state_for_execution.json")).unwrap(),
+            File::open(format!("blocks/{block_number}/pre_state.json")).unwrap(),
         ))
         .unwrap();
 
