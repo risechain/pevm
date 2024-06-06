@@ -17,6 +17,15 @@ pub struct InMemoryAccount {
     pub storage: AHashMap<U256, U256>,
 }
 
+impl From<PlainAccount> for InMemoryAccount {
+    fn from(account: PlainAccount) -> Self {
+        InMemoryAccount {
+            basic: account.info.into(),
+            storage: account.storage.into_iter().collect(),
+        }
+    }
+}
+
 /// Fetch state data via RPC to execute.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage {
@@ -27,6 +36,17 @@ pub struct InMemoryStorage {
 }
 
 impl InMemoryStorage {
+    /// Create a new InMemoryStorage
+    pub fn new(
+        accounts: impl IntoIterator<Item = (Address, InMemoryAccount)>,
+        block_hashes: impl IntoIterator<Item = (U256, B256)>,
+    ) -> Self {
+        InMemoryStorage {
+            accounts: accounts.into_iter().collect(),
+            block_hashes: block_hashes.into_iter().collect(),
+        }
+    }
+
     /// Insert an account
     pub fn insert_account(&mut self, address: Address, account: InMemoryAccount) {
         self.accounts.insert(address, account);

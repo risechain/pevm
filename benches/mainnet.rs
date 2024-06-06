@@ -24,8 +24,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         // with many dependencies.
         .min(NonZeroUsize::new(8).unwrap());
 
-    common::for_each_block_from_disk(|block, state| {
-        let storage = common::build_in_mem(state);
+    common::for_each_block_from_disk(|block, state, block_hashes| {
+        let storage = common::build_in_mem_with_block_hashes(state, block_hashes);
         let mut group = c.benchmark_group(format!(
             "Block {}({} txs, {} gas)",
             block.header.number.unwrap(),

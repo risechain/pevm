@@ -54,19 +54,25 @@ fn mainnet_blocks_from_rpc() {
             let file_block = File::create(format!("{dir}/block.json")).unwrap();
             serde_json::to_writer(file_block, &block).unwrap();
             let file_state = File::create(format!("{dir}/state_for_execution.json")).unwrap();
-            serde_json::to_writer(file_state, &rpc_storage.get_cache()).unwrap();
+            serde_json::to_writer(file_state, &rpc_storage.get_cache_accounts()).unwrap();
+
+            let block_hashes = &rpc_storage.get_cache_block_hashes();
+            if !block_hashes.is_empty() {
+                let file = File::create(format!("{dir}/block_hashes.json")).unwrap();
+                serde_json::to_writer(file, &block_hashes).unwrap();
+            }
         }
     }
 }
 
 #[test]
 fn mainnet_blocks_from_disk() {
-    common::for_each_block_from_disk(|block, state| {
+    common::for_each_block_from_disk(|block, state, block_hashes| {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
             common::test_execute_alloy(
-                common::build_in_mem(state.clone()),
+                common::build_in_mem_with_block_hashes(state.clone(), block_hashes.clone()),
                 block.clone(),
                 None,
                 true,

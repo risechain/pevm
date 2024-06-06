@@ -33,7 +33,8 @@ pub struct RpcStorage {
     // back to our `Storage` trait.
     // Not using `AHashMap` for ease of serialization.
     // TODO: Cache & snapshot block hashes too!
-    cache: Mutex<HashMap<Address, PlainAccount>>,
+    cache_accounts: Mutex<HashMap<Address, PlainAccount>>,
+    cache_block_hashes: Mutex<HashMap<U256, B256>>,
     // TODO: Better async handling.
     runtime: Runtime,
 }
@@ -44,15 +45,21 @@ impl RpcStorage {
         RpcStorage {
             provider,
             block_id,
-            cache: Mutex::new(HashMap::new()),
+            cache_accounts: Mutex::new(HashMap::new()),
+            cache_block_hashes: Mutex::new(HashMap::new()),
             // TODO: Better error handling.
             runtime: Runtime::new().unwrap(),
         }
     }
 
-    /// Get a snapshot of the loaded state
-    pub fn get_cache(&self) -> HashMap<Address, PlainAccount> {
-        self.cache.lock().unwrap().clone()
+    /// Get a snapshot of accounts
+    pub fn get_cache_accounts(&self) -> HashMap<Address, PlainAccount> {
+        self.cache_accounts.lock().unwrap().clone()
+    }
+
+    /// Get a snapshot of block hashes
+    pub fn get_cache_block_hashes(&self) -> HashMap<U256, B256> {
+        self.cache_block_hashes.lock().unwrap().clone()
     }
 }
 
@@ -64,7 +71,7 @@ impl DatabaseRef for RpcStorage {
     type Error = TransportError;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        if let Some(account) = self.cache.lock().unwrap().get(&address) {
+        if let Some(account) = self.cache_accounts.lock().unwrap().get(&address) {
             return Ok(Some(account.info.clone()));
         }
         self.runtime.block_on(async {
@@ -87,7 +94,7 @@ impl DatabaseRef for RpcStorage {
             // always be a `Some` here?
             let code = Bytecode::new_raw(code?);
             let info = AccountInfo::new(balance?, nonce?, code.hash_slow(), code);
-            self.cache
+            self.cache_accounts
                 .lock()
                 .unwrap()
                 .insert(address, info.clone().into());
@@ -105,7 +112,7 @@ impl DatabaseRef for RpcStorage {
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        if let Some(account) = self.cache.lock().unwrap().get(&address) {
+        if let Some(account) = self.cache_accounts.lock().unwrap().get(&address) {
             if let Some(value) = account.storage.get(&index) {
                 return Ok(*value);
             }
@@ -116,7 +123,7 @@ impl DatabaseRef for RpcStorage {
                 .block_id(self.block_id)
                 .into_future(),
         )?;
-        match self.cache.lock().unwrap().entry(address) {
+        match self.cache_accounts.lock().unwrap().entry(address) {
             std::collections::hash_map::Entry::Occupied(mut account) => {
                 account.get_mut().storage.insert(index, value);
             }
@@ -132,12 +139,24 @@ impl DatabaseRef for RpcStorage {
 
     // TODO: Proper error handling & testing.
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        self.runtime
+        if let Some(&block_hash) = self.cache_block_hashes.lock().unwrap().get(&number) {
+            return Ok(block_hash);
+        }
+
+        let block_hash = self
+            .runtime
             .block_on(
                 self.provider
                     .get_block_by_number(BlockNumberOrTag::Number(number.to::<u64>()), false)
                     .into_future(),
             )
-            .map(|block| block.unwrap().header.hash.unwrap())
+            .map(|block| block.unwrap().header.hash.unwrap())?;
+
+        self.cache_block_hashes
+            .lock()
+            .unwrap()
+            .insert(number, block_hash);
+
+        Ok(block_hash)
     }
 }

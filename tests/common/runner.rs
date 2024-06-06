@@ -1,3 +1,4 @@
+use alloy_primitives::B256;
 use alloy_rpc_types::{Block, Header};
 use pevm::{InMemoryStorage, PevmResult, Storage};
 use revm::{
@@ -5,8 +6,6 @@ use revm::{
     primitives::{alloy_primitives::U160, AccountInfo, Address, BlockEnv, SpecId, TxEnv, U256},
 };
 use std::{num::NonZeroUsize, thread};
-
-use super::ChainState;
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -20,11 +19,24 @@ pub fn mock_account(idx: usize) -> (Address, PlainAccount) {
     )
 }
 
-// Build an in memory storage for execution.
+// Build InMemoryStorage.
 pub fn build_in_mem(
     accounts: impl IntoIterator<Item = (Address, PlainAccount)>,
 ) -> InMemoryStorage {
-    accounts.into_iter().collect::<ChainState>().into()
+    build_in_mem_with_block_hashes(accounts, [])
+}
+
+// Build InMemoryStorage with block hashes.
+pub fn build_in_mem_with_block_hashes(
+    accounts: impl IntoIterator<Item = (Address, PlainAccount)>,
+    block_hashes: impl IntoIterator<Item = (U256, B256)>,
+) -> InMemoryStorage {
+    InMemoryStorage::new(
+        accounts
+            .into_iter()
+            .map(|(address, account)| (address, account.into())),
+        block_hashes,
+    )
 }
 
 // TODO: Pass in hashes to checksum, especially for real blocks.
