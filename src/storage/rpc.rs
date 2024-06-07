@@ -75,8 +75,7 @@ impl DatabaseRef for RpcStorage {
             return Ok(Some(account.info.clone()));
         }
         self.runtime.block_on(async {
-            // TODO: Request these concurrently
-            let (balance, nonce, code) = tokio::join!(
+            let (res_balance, res_nonce, res_code) = tokio::join!(
                 self.provider
                     .get_balance(address)
                     .block_id(self.block_id)
@@ -90,10 +89,16 @@ impl DatabaseRef for RpcStorage {
                     .block_id(self.block_id)
                     .into_future()
             );
-            // TODO: Should we properly cover the non-existing account case or it can
-            // always be a `Some` here?
-            let code = Bytecode::new_raw(code?);
-            let info = AccountInfo::new(balance?, nonce?, code.hash_slow(), code);
+            let balance = res_balance?;
+            let nonce = res_nonce?;
+            let code = res_code?;
+            // We need to distinguish non-existing accounts for gas calculation in
+            // early hard-forks (creating new accounts cost extra gas, etc.).
+            if balance.is_zero() && nonce == 0 && code.is_empty() {
+                return Ok(None);
+            }
+            let code = Bytecode::new_raw(code);
+            let info = AccountInfo::new(balance, nonce, code.hash_slow(), code);
             self.cache_accounts
                 .lock()
                 .unwrap()
