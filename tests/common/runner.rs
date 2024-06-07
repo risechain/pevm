@@ -1,5 +1,5 @@
 use alloy_consensus::{ReceiptEnvelope, TxType};
-use alloy_primitives::B256;
+use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Header, Transaction};
 use pevm::{PevmResult, PevmTxExecutionResult, Storage};
@@ -87,7 +87,7 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     storage: S,
     block: Block,
     parent_header: Option<Header>,
-    must_match_receipts_root: bool,
+    must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let sequential_result = pevm::execute(
@@ -105,16 +105,37 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
         false,
     );
     assert_execution_result(&sequential_result, &parallel_result);
-    let tx_results = sequential_result.unwrap();
 
-    // We can only calculate the receipts root from Byzantium.
-    // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
-    // receipt root is calculated with the post transaction state root,
-    // which we doesn't have in these tests.
-    if must_match_receipts_root && block.header.number.unwrap() >= 4370000 {
+    if must_match_block_header {
+        let tx_results = sequential_result.unwrap();
+
+        // We can only calculate the receipts root from Byzantium.
+        // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
+        // receipt root is calculated with the post transaction state root,
+        // which we doesn't have in these tests.
+        if block.header.number.unwrap() >= 4370000 {
+            assert_eq!(
+                block.header.receipts_root,
+                calculate_receipt_root(&block.transactions, &tx_results)
+            );
+        }
+
         assert_eq!(
-            block.header.receipts_root,
-            calculate_receipt_root(&block.transactions, &tx_results)
+            block.header.logs_bloom,
+            tx_results
+                .iter()
+                .map(|tx| tx.receipt.bloom_slow())
+                .fold(Bloom::default(), |acc, bloom| acc.bit_or(bloom))
+        );
+
+        assert_eq!(
+            block.header.gas_used,
+            tx_results
+                .iter()
+                .last()
+                .unwrap()
+                .receipt
+                .cumulative_gas_used
         );
     }
 }
