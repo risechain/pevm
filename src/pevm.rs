@@ -45,8 +45,7 @@ pub enum PevmError {
 }
 
 /// Execution result of a transaction
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PevmTxExecutionResult {
     /// Receipt of execution
     // TODO: Consider promoting to `ReceiptEnvelope` if there is high demand
@@ -201,20 +200,20 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // TODO: Refactor, improve speed & error handling.
     let beneficiary_values = mv_memory.consume_beneficiary();
 
-    let results = execution_results
-        .into_iter()
-        .zip(beneficiary_values)
-        .map(|(mutex, value)| {
-            let mut result_and_state = mutex.into_inner().unwrap().unwrap();
-            result_and_state.state.insert(
-                beneficiary_address,
-                post_process_beneficiary(&mut beneficiary_account_info, value),
-            );
-            result_and_state
-        })
-        .collect::<Vec<_>>();
+    let fully_evaluated_results =
+        execution_results
+            .into_iter()
+            .zip(beneficiary_values)
+            .map(|(mutex, value)| {
+                let mut result_and_state = mutex.into_inner().unwrap().unwrap();
+                result_and_state.state.insert(
+                    beneficiary_address,
+                    post_process_beneficiary(&mut beneficiary_account_info, value),
+                );
+                result_and_state
+            });
 
-    Ok(transform_output(results))
+    Ok(transform_output(fully_evaluated_results))
 }
 
 /// Execute REVM transactions sequentially.
@@ -469,5 +468,5 @@ fn transform_output(
             };
             PevmTxExecutionResult { receipt, state }
         })
-        .collect::<Vec<_>>()
+        .collect()
 }

@@ -21,16 +21,7 @@ pub fn mock_account(idx: usize) -> (Address, PlainAccount) {
     )
 }
 
-// TODO: Pass in hashes to checksum, especially for real blocks.
-pub fn assert_execution_result(
-    sequential_result: &PevmResult,
-    parallel_result: &PevmResult,
-    must_succeed: bool,
-) {
-    // We must assert sucess for real blocks, etc.
-    if must_succeed {
-        assert!(sequential_result.is_ok() && parallel_result.is_ok());
-    }
+pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: &PevmResult) {
     assert_eq!(sequential_result, parallel_result);
 }
 
@@ -46,37 +37,16 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
     assert_execution_result(
         &pevm::execute_revm_sequential(storage.clone(), spec_id, block_env.clone(), txs.clone()),
         &pevm::execute_revm(storage, spec_id, block_env, txs, concurrency_level),
-        false, // TODO: Parameterize this
     );
 }
 
 // Refer to section 4.3.2. Holistic Validity in the Ethereum Yellow Paper.
-// See @ethereum/go-ethereum/cmd/era/main.go:289.
-fn calculate_receipt_root(receipt_envelopes: Vec<ReceiptEnvelope>) -> B256 {
-    let entries = receipt_envelopes
-        .into_iter()
-        .enumerate()
-        .map(|(index, receipt)| {
-            let key_buffer = alloy_rlp::encode_fixed_size(&index);
-            let mut value_buffer = Vec::new();
-            receipt.encode_2718(&mut value_buffer);
-            (key_buffer, value_buffer)
-        })
-        .collect::<BTreeMap<_, _>>();
-
-    // We use BTreeMap because the keys must be sorted in ascending order.
-    // Otherwise, hash_builder.add_leaf() will panic.
-    let mut hash_builder = alloy_trie::HashBuilder::default();
-    for (k, v) in entries {
-        hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
-    }
-    hash_builder.root()
-}
-
-fn build_receipt_envelopes(
+// https://github.com/ethereum/go-ethereum/blob/master/cmd/era/main.go#L289
+fn calculate_receipt_root(
     txs: &BlockTransactions<Transaction>,
     tx_results: &[PevmTxExecutionResult],
-) -> Vec<ReceiptEnvelope> {
+) -> B256 {
+    // 1. Create an iterator of ReceiptEnvelope
     let tx_type_iter = txs
         .txns()
         .unwrap()
@@ -84,14 +54,31 @@ fn build_receipt_envelopes(
 
     let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone().with_bloom());
 
-    Iterator::zip(tx_type_iter, receipt_iter)
-        .map(|(tx_type, receipt)| match tx_type {
+    let receipt_envelope_iter =
+        Iterator::zip(tx_type_iter, receipt_iter).map(|(tx_type, receipt)| match tx_type {
             TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
             TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
             TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
             TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
+        });
+
+    // 2. Create a trie then calculate the root hash
+    // We use BTreeMap because the keys must be sorted in ascending order.
+    let trie_entries: BTreeMap<_, _> = receipt_envelope_iter
+        .enumerate()
+        .map(|(index, receipt)| {
+            let key_buffer = alloy_rlp::encode_fixed_size(&index);
+            let mut value_buffer = Vec::new();
+            receipt.encode_2718(&mut value_buffer);
+            (key_buffer, value_buffer)
         })
-        .collect()
+        .collect();
+
+    let mut hash_builder = alloy_trie::HashBuilder::default();
+    for (k, v) in trie_entries {
+        hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
+    }
+    hash_builder.root()
 }
 
 // Execute an Alloy block sequentially & with PEVM and assert that
@@ -117,7 +104,7 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
         concurrency_level,
         false,
     );
-    assert_execution_result(&sequential_result, &parallel_result, true);
+    assert_execution_result(&sequential_result, &parallel_result);
     let tx_results = sequential_result.unwrap();
 
     // We can only calculate the receipts root from Byzantium.
@@ -127,7 +114,7 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     if must_match_receipts_root && block.header.number.unwrap() >= 4370000 {
         assert_eq!(
             block.header.receipts_root,
-            calculate_receipt_root(build_receipt_envelopes(&block.transactions, &tx_results))
+            calculate_receipt_root(&block.transactions, &tx_results)
         );
     }
 }

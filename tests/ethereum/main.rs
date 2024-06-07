@@ -147,7 +147,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     // Extracting such account is unjustified complexity so let's live with this for now.
                     assert!(exec_results[0].state.values().all(|account| account.info.is_empty_code_hash()));
                 }
-                // Skipping special cases where REVM returns `Ok` instead on unsupported features.
+                // Skipping special cases where REVM returns `Ok` on unsupported features.
                 (Some("TR_TypeNotSupported"), Ok(_)) => {}
                 // Remaining tests that expect execution to fail -> match error
                 (Some(exception), Err(PevmError::ExecutionError(error))) => {

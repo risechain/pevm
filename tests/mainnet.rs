@@ -49,6 +49,7 @@ fn mainnet_blocks_from_rpc() {
         let rpc_storage = RpcStorage::new(provider, BlockId::number(block_number - 1));
         let db = CacheDB::new(&rpc_storage);
         common::test_execute_alloy(db.clone(), block.clone(), None, true);
+
         // Snapshot blocks (for benchmark)
         // TODO: Port to a dedicated CLI instead?
         // TODO: Binary formats to save disk?
