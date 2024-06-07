@@ -60,7 +60,7 @@ fn mainnet_blocks_from_rpc() {
             serde_json::to_writer(file_block, &block).unwrap();
 
             // TODO: Snapshot with consistent ordering for ease of diffing.
-            // Currently PlainAccount has two HashMap that doesn't
+            // Currently PlainAccount's storage ordering isn't consistent.
             let accounts: BTreeMap<Address, PlainAccount> =
                 rpc_storage.get_cache_accounts().into_iter().collect();
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
