@@ -2,6 +2,7 @@
 
 use ahash::AHashMap;
 use alloy_primitives::U160;
+use pevm::InMemoryStorage;
 use rand::random;
 use revm::{
     db::PlainAccount,
@@ -58,7 +59,7 @@ fn mixed_block() {
         }
     }
     common::test_execute_revm(
-        common::build_in_mem(final_state),
+        InMemoryStorage::new(final_state, []),
         SpecId::LATEST,
         BlockEnv::default(),
         // TODO: Shuffle transactions to scatter dependencies around the block.

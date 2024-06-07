@@ -1,7 +1,8 @@
 // A storage that fetches state data via RPC for execution.
 
-use std::{collections::HashMap, fmt::Debug, future::IntoFuture, sync::Mutex};
+use std::{fmt::Debug, future::IntoFuture, sync::Mutex};
 
+use ahash::AHashMap;
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::{BlockId, BlockNumberOrTag};
@@ -31,10 +32,9 @@ pub struct RpcStorage {
     // execution on the same block.
     // Using a `Mutex` so we don't (yet) propagate mutability requirements
     // back to our `Storage` trait.
-    // Not using `AHashMap` for ease of serialization.
-    // TODO: Cache & snapshot block hashes too!
-    cache_accounts: Mutex<HashMap<Address, PlainAccount>>,
-    cache_block_hashes: Mutex<HashMap<U256, B256>>,
+    // TODO: replace PlainAccount by Account for consistency
+    cache_accounts: Mutex<AHashMap<Address, PlainAccount>>,
+    cache_block_hashes: Mutex<AHashMap<U256, B256>>,
     // TODO: Better async handling.
     runtime: Runtime,
 }
@@ -45,20 +45,20 @@ impl RpcStorage {
         RpcStorage {
             provider,
             block_id,
-            cache_accounts: Mutex::new(HashMap::new()),
-            cache_block_hashes: Mutex::new(HashMap::new()),
+            cache_accounts: Mutex::new(AHashMap::new()),
+            cache_block_hashes: Mutex::new(AHashMap::new()),
             // TODO: Better error handling.
             runtime: Runtime::new().unwrap(),
         }
     }
 
     /// Get a snapshot of accounts
-    pub fn get_cache_accounts(&self) -> HashMap<Address, PlainAccount> {
+    pub fn get_cache_accounts(&self) -> AHashMap<Address, PlainAccount> {
         self.cache_accounts.lock().unwrap().clone()
     }
 
     /// Get a snapshot of block hashes
-    pub fn get_cache_block_hashes(&self) -> HashMap<U256, B256> {
+    pub fn get_cache_block_hashes(&self) -> AHashMap<U256, B256> {
         self.cache_block_hashes.lock().unwrap().clone()
     }
 }

@@ -9,7 +9,7 @@ use std::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::BlockId;
-use pevm::RpcStorage;
+use pevm::{InMemoryStorage, RpcStorage};
 use reqwest::Url;
 use revm::db::{CacheDB, PlainAccount};
 use tokio::runtime::Runtime;
@@ -19,6 +19,7 @@ pub mod common;
 #[test]
 fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("RPC_URL") {
+        // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
         _ => Url::parse("https://eth.llamarpc.com").unwrap(),
     };
@@ -58,11 +59,15 @@ fn mainnet_blocks_from_rpc() {
             let file_block = File::create(format!("{dir}/block.json")).unwrap();
             serde_json::to_writer(file_block, &block).unwrap();
 
+            // TODO: Unfortunately, PlainAccount use HashMap under the hood.
+            // Therefore, the keys are not sorted.
+            // Let's fix this later by replacing PlainAccount.
             let accounts: BTreeMap<Address, PlainAccount> =
                 rpc_storage.get_cache_accounts().into_iter().collect();
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
             serde_json::to_writer(file_state, &accounts).unwrap();
 
+            // We convert to `BTreeMap`s for consistent ordering & diffs between snapshots
             let block_hashes: BTreeMap<U256, B256> =
                 rpc_storage.get_cache_block_hashes().into_iter().collect();
             if !block_hashes.is_empty() {
@@ -75,12 +80,12 @@ fn mainnet_blocks_from_rpc() {
 
 #[test]
 fn mainnet_blocks_from_disk() {
-    common::for_each_block_from_disk(|block, state, block_hashes| {
+    common::for_each_block_from_disk(|block, pre_state, block_hashes| {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
             common::test_execute_alloy(
-                common::build_in_mem_with_block_hashes(state.clone(), block_hashes.clone()),
+                InMemoryStorage::new(pre_state.clone(), block_hashes.clone()),
                 block.clone(),
                 None,
                 true,

@@ -30,19 +30,20 @@ impl From<PlainAccount> for InMemoryAccount {
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage {
     accounts: AHashMap<Address, InMemoryAccount>,
-    // Currently unused. Add a popuplating
-    // function when needed.
     block_hashes: AHashMap<U256, B256>,
 }
 
 impl InMemoryStorage {
     /// Create a new InMemoryStorage
     pub fn new(
-        accounts: impl IntoIterator<Item = (Address, InMemoryAccount)>,
+        accounts: impl IntoIterator<Item = (Address, impl Into<InMemoryAccount>)>,
         block_hashes: impl IntoIterator<Item = (U256, B256)>,
     ) -> Self {
         InMemoryStorage {
-            accounts: accounts.into_iter().collect(),
+            accounts: accounts
+                .into_iter()
+                .map(|(addr, acc)| (addr, acc.into()))
+                .collect(),
             block_hashes: block_hashes.into_iter().collect(),
         }
     }
@@ -97,21 +98,5 @@ impl Storage for InMemoryStorage {
             .cloned()
             // Matching REVM's EmptyDB for now
             .unwrap_or_else(|| keccak256(number.to_string().as_bytes())))
-    }
-}
-
-impl From<AHashMap<Address, PlainAccount>> for InMemoryStorage {
-    fn from(accounts: AHashMap<Address, PlainAccount>) -> Self {
-        let mut storage = InMemoryStorage::default();
-        for (address, account) in accounts {
-            storage.insert_account(
-                address,
-                InMemoryAccount {
-                    basic: account.info.into(),
-                    storage: account.storage.into_iter().collect(),
-                },
-            );
-        }
-        storage
     }
 }

@@ -10,10 +10,7 @@ use alloy_rpc_types::{Block, Header};
 use revm::{db::PlainAccount, primitives::KECCAK_EMPTY};
 
 pub mod runner;
-pub use runner::{
-    assert_execution_result, build_in_mem, build_in_mem_with_block_hashes, mock_account,
-    test_execute_alloy, test_execute_revm,
-};
+pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, PlainAccount>;
@@ -69,15 +66,14 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, ChainState, Block
 
         // Parse block hashes
         let block_hashes: BlockHashes =
-            if let Ok(file) = File::open(format!("blocks/{block_number}/block_hashes.json")) {
-                serde_json::from_reader::<_, HashMap<U256, B256, ahash::RandomState>>(
-                    BufReader::new(file),
-                )
-                .unwrap()
-                .into()
-            } else {
-                AHashMap::new()
-            };
+            File::open(format!("blocks/{block_number}/block_hashes.json"))
+                .map(|file| {
+                    type T = HashMap<U256, B256, ahash::RandomState>;
+                    serde_json::from_reader::<_, T>(BufReader::new(file))
+                        .unwrap()
+                        .into()
+                })
+                .unwrap_or_default();
 
         // Hacky but we don't serialize the whole account info to save space
         // So we need to resconstruct intermediate values upon deserializing.
