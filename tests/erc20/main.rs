@@ -11,6 +11,7 @@ pub mod erc20;
 use ahash::AHashMap;
 use common::test_execute_revm;
 use erc20::generate_cluster;
+use pevm::InMemoryStorage;
 use revm::{
     db::PlainAccount,
     primitives::{Address, BlockEnv, SpecId, TxEnv},
@@ -22,7 +23,7 @@ fn erc20_independent() {
     let (mut state, txs) = generate_cluster(N, 1, 1);
     state.insert(Address::ZERO, PlainAccount::default()); // Beneficiary
     test_execute_revm(
-        common::build_in_mem(state),
+        InMemoryStorage::new(state, []),
         SpecId::LATEST,
         BlockEnv::default(),
         txs,
@@ -48,7 +49,7 @@ fn erc20_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
-        common::build_in_mem(final_state),
+        InMemoryStorage::new(final_state, []),
         SpecId::LATEST,
         BlockEnv::default(),
         final_txs,

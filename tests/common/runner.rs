@@ -1,12 +1,10 @@
 use alloy_rpc_types::{Block, Header};
-use pevm::{InMemoryStorage, PevmResult, Storage};
+use pevm::{PevmResult, Storage};
 use revm::{
     db::PlainAccount,
     primitives::{alloy_primitives::U160, AccountInfo, Address, BlockEnv, SpecId, TxEnv, U256},
 };
 use std::{num::NonZeroUsize, thread};
-
-use super::ChainState;
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -18,13 +16,6 @@ pub fn mock_account(idx: usize) -> (Address, PlainAccount) {
         // the corner case of balance not going beyond `U256::MAX`.
         PlainAccount::from(AccountInfo::from_balance(U256::MAX.div_ceil(U256::from(2)))),
     )
-}
-
-// Build an in memory storage for execution.
-pub fn build_in_mem(
-    accounts: impl IntoIterator<Item = (Address, PlainAccount)>,
-) -> InMemoryStorage {
-    accounts.into_iter().collect::<ChainState>().into()
 }
 
 // TODO: Pass in hashes to checksum, especially for real blocks.

@@ -1,23 +1,28 @@
 // TODO: Move this into `tests/ethereum`.
 // TODO: `tokio::test`?
 
-use std::fs::{self, File};
+use std::{
+    collections::BTreeMap,
+    fs::{self, File},
+};
 
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::BlockId;
 use pevm::RpcStorage;
 use reqwest::Url;
-use revm::db::CacheDB;
+use revm::db::{CacheDB, PlainAccount};
 use tokio::runtime::Runtime;
 
 pub mod common;
 
 #[test]
 fn mainnet_blocks_from_rpc() {
-    let rpc_url: Url = std::env::var("RPC_URL")
-        .unwrap_or("https://eth.llamarpc.com".to_string())
-        .parse()
-        .unwrap();
+    let rpc_url = match std::env::var("RPC_URL") {
+        // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
+        Ok(value) if !value.is_empty() => value.parse().unwrap(),
+        _ => Url::parse("https://eth.llamarpc.com").unwrap(),
+    };
 
     // First block under 50 transactions of each EVM-spec-changing fork
     for block_number in [
@@ -53,24 +58,32 @@ fn mainnet_blocks_from_rpc() {
             fs::create_dir_all(dir.clone()).unwrap();
             let file_block = File::create(format!("{dir}/block.json")).unwrap();
             serde_json::to_writer(file_block, &block).unwrap();
-            let file_state = File::create(format!("{dir}/state_for_execution.json")).unwrap();
-            serde_json::to_writer(file_state, &rpc_storage.get_cache()).unwrap();
+
+            // TODO: Snapshot with consistent ordering for ease of diffing.
+            // Currently PlainAccount's storage ordering isn't consistent.
+            let accounts: BTreeMap<Address, PlainAccount> =
+                rpc_storage.get_cache_accounts().into_iter().collect();
+            let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
+            serde_json::to_writer(file_state, &accounts).unwrap();
+
+            // We convert to `BTreeMap`s for consistent ordering & diffs between snapshots
+            let block_hashes: BTreeMap<U256, B256> =
+                rpc_storage.get_cache_block_hashes().into_iter().collect();
+            if !block_hashes.is_empty() {
+                let file = File::create(format!("{dir}/block_hashes.json")).unwrap();
+                serde_json::to_writer(file, &block_hashes).unwrap();
+            }
         }
     }
 }
 
 #[test]
 fn mainnet_blocks_from_disk() {
-    common::for_each_block_from_disk(|block, state| {
+    common::for_each_block_from_disk(|block, storage| {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(
-                common::build_in_mem(state.clone()),
-                block.clone(),
-                None,
-                true,
-            )
+            common::test_execute_alloy(storage.clone(), block.clone(), None, true)
         }
     });
 }

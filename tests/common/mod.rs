@@ -7,15 +7,15 @@ use std::{
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
+use pevm::InMemoryStorage;
 use revm::{db::PlainAccount, primitives::KECCAK_EMPTY};
 
 pub mod runner;
-pub use runner::{
-    assert_execution_result, build_in_mem, mock_account, test_execute_alloy, test_execute_revm,
-};
+pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, PlainAccount>;
+pub type BlockHashes = AHashMap<U256, B256>;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     // Minimal requirements for execution
@@ -48,7 +48,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, ChainState)) {
+pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
     for block_path in fs::read_dir("blocks").unwrap() {
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
@@ -61,9 +61,21 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, ChainState)) {
 
         // Parse state
         let mut accounts: HashMap<Address, PlainAccount> = serde_json::from_reader(BufReader::new(
-            File::open(format!("blocks/{block_number}/state_for_execution.json")).unwrap(),
+            File::open(format!("blocks/{block_number}/pre_state.json")).unwrap(),
         ))
         .unwrap();
+
+        // Parse block hashes
+        let block_hashes: BlockHashes =
+            File::open(format!("blocks/{block_number}/block_hashes.json"))
+                .map(|file| {
+                    type SerializedFormat = HashMap<U256, B256, ahash::RandomState>;
+                    serde_json::from_reader::<_, SerializedFormat>(BufReader::new(file))
+                        .unwrap()
+                        .into()
+                })
+                .unwrap_or_default();
+
         // Hacky but we don't serialize the whole account info to save space
         // So we need to resconstruct intermediate values upon deserializing.
         for (_, account) in accounts.iter_mut() {
@@ -77,6 +89,6 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, ChainState)) {
                 account.info.code_hash = KECCAK_EMPTY;
             }
         }
-        handler(block, accounts.into_iter().collect());
+        handler(block, InMemoryStorage::new(accounts, block_hashes));
     }
 }
