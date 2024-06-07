@@ -89,11 +89,12 @@ fn raw_transfers_independent_alloy() {
                     .map(|i| {
                         let address = Address::from(U160::from(i));
                         Transaction {
+                            transaction_type: Some(2),
                             from: address,
                             to: Some(address),
                             value: U256::from(1),
                             gas: common::RAW_TRANSFER_GAS_LIMIT.into(),
-                            gas_price: Some(1),
+                            max_fee_per_gas: Some(1),
                             ..Transaction::default()
                         }
                     })
@@ -101,7 +102,6 @@ fn raw_transfers_independent_alloy() {
             ),
             ..Block::default()
         },
-        None,
         true,
     );
 }

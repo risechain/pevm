@@ -17,7 +17,6 @@ fn empty_alloy_block() {
             transactions: BlockTransactions::Full(Vec::new()),
             ..Block::default()
         },
-        None,
         true,
     );
 }
@@ -40,16 +39,16 @@ fn one_tx_alloy_block() {
             // Legit header but with no transactions
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
             transactions: BlockTransactions::Full(vec![Transaction {
+                transaction_type: Some(2),
                 from: Address::ZERO,
                 to: Some(Address::ZERO),
                 value: U256::from(1),
-                gas_price: Some(1),
+                max_fee_per_gas: Some(1),
                 gas: u64::MAX.into(),
                 ..Transaction::default()
             }]),
             ..Block::default()
         },
-        None,
         true,
     );
 }

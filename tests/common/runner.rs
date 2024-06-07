@@ -1,4 +1,4 @@
-use alloy_rpc_types::{Block, Header};
+use alloy_rpc_types::Block;
 use pevm::{PevmResult, Storage};
 use revm::{
     db::PlainAccount,
@@ -52,19 +52,12 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
 pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     storage: S,
     block: Block,
-    parent_header: Option<Header>,
     must_succeed: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result(
-        pevm::execute(
-            storage.clone(),
-            block.clone(),
-            parent_header.clone(),
-            concurrency_level,
-            true,
-        ),
-        pevm::execute(storage, block, parent_header, concurrency_level, false),
+        pevm::execute(storage.clone(), block.clone(), concurrency_level, true),
+        pevm::execute(storage, block, concurrency_level, false),
         must_succeed,
     );
 }
