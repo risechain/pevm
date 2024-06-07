@@ -59,9 +59,8 @@ fn mainnet_blocks_from_rpc() {
             let file_block = File::create(format!("{dir}/block.json")).unwrap();
             serde_json::to_writer(file_block, &block).unwrap();
 
-            // TODO: Unfortunately, PlainAccount use HashMap under the hood.
-            // Therefore, the keys are not sorted.
-            // Let's fix this later by replacing PlainAccount.
+            // TODO: Snapshot with consistent ordering for ease of diffing.
+            // Currently PlainAccount has two HashMap that doesn't
             let accounts: BTreeMap<Address, PlainAccount> =
                 rpc_storage.get_cache_accounts().into_iter().collect();
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();

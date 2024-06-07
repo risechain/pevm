@@ -69,8 +69,8 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         let block_hashes: BlockHashes =
             File::open(format!("blocks/{block_number}/block_hashes.json"))
                 .map(|file| {
-                    type T = HashMap<U256, B256, ahash::RandomState>;
-                    serde_json::from_reader::<_, T>(BufReader::new(file))
+                    type SerializedFormat = HashMap<U256, B256, ahash::RandomState>;
+                    serde_json::from_reader::<_, SerializedFormat>(BufReader::new(file))
                         .unwrap()
                         .into()
                 })

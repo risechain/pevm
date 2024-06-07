@@ -27,12 +27,12 @@ pub struct RpcStorage {
     provider: RpcProvider,
     block_id: BlockId,
     // Convenient types for persisting then reconstructing block's state
-    // as in-memory storage for benchmarks, etc. Also work well when
+    // as in-memory storage for benchmarks & testing. Also work well when
     // the storage is re-used, like for comparing sequential & parallel
     // execution on the same block.
-    // Using a `Mutex` so we don't (yet) propagate mutability requirements
-    // back to our `Storage` trait.
-    // TODO: replace PlainAccount by Account for consistency
+    // Using a `Mutex` so we don't propagate mutability requirements back
+    // to our `Storage` trait and meet `Send`/`Sync` requirements for PEVM.
+    // TODO: Replace `PlainAccount` by our own `Account`.
     cache_accounts: Mutex<AHashMap<Address, PlainAccount>>,
     cache_block_hashes: Mutex<AHashMap<U256, B256>>,
     // TODO: Better async handling.
