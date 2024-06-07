@@ -9,7 +9,7 @@ use std::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::BlockId;
-use pevm::{InMemoryStorage, RpcStorage};
+use pevm::RpcStorage;
 use reqwest::Url;
 use revm::db::{CacheDB, PlainAccount};
 use tokio::runtime::Runtime;
@@ -80,16 +80,11 @@ fn mainnet_blocks_from_rpc() {
 
 #[test]
 fn mainnet_blocks_from_disk() {
-    common::for_each_block_from_disk(|block, pre_state, block_hashes| {
+    common::for_each_block_from_disk(|block, storage| {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(
-                InMemoryStorage::new(pre_state.clone(), block_hashes.clone()),
-                block.clone(),
-                None,
-                true,
-            )
+            common::test_execute_alloy(storage.clone(), block.clone(), None, true)
         }
     });
 }
