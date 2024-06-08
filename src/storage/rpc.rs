@@ -11,7 +11,8 @@ use alloy_transport_http::Http;
 use reqwest::Client;
 use revm::{
     db::PlainAccount,
-    primitives::{AccountInfo, Bytecode},
+    precompile::{PrecompileSpecId, Precompiles},
+    primitives::{AccountInfo, Bytecode, SpecId},
     DatabaseRef,
 };
 use tokio::runtime::Runtime;
@@ -26,6 +27,7 @@ type RpcProvider = RootProvider<Http<Client>>;
 pub struct RpcStorage {
     provider: RpcProvider,
     block_id: BlockId,
+    precompiles: &'static Precompiles,
     // Convenient types for persisting then reconstructing block's state
     // as in-memory storage for benchmarks & testing. Also work well when
     // the storage is re-used, like for comparing sequential & parallel
@@ -41,9 +43,10 @@ pub struct RpcStorage {
 
 impl RpcStorage {
     /// Create a new RPC Storage
-    pub fn new(provider: RpcProvider, block_id: BlockId) -> Self {
+    pub fn new(provider: RpcProvider, spec_id: SpecId, block_id: BlockId) -> Self {
         RpcStorage {
             provider,
+            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)),
             block_id,
             cache_accounts: Mutex::new(AHashMap::new()),
             cache_block_hashes: Mutex::new(AHashMap::new()),
@@ -92,9 +95,16 @@ impl DatabaseRef for RpcStorage {
             let balance = res_balance?;
             let nonce = res_nonce?;
             let code = res_code?;
-            // We need to distinguish non-existing accounts for gas calculation in
-            // early hard-forks (creating new accounts cost extra gas, etc.).
-            if balance.is_zero() && nonce == 0 && code.is_empty() {
+            // We need to distinguish new non-precompile accounts for gas calculation
+            // in early hard-forks (creating new accounts cost extra gas, etc.).
+            if !self
+                .precompiles
+                .addresses()
+                .any(|precompile_address| precompile_address == &address)
+                && balance.is_zero()
+                && nonce == 0
+                && code.is_empty()
+            {
                 return Ok(None);
             }
             let code = Bytecode::new_raw(code);
