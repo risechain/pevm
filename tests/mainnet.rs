@@ -8,7 +8,7 @@ use std::{
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types::BlockId;
+use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use pevm::RpcStorage;
 use reqwest::Url;
 use revm::db::{CacheDB, PlainAccount};
@@ -43,7 +43,9 @@ fn mainnet_blocks_from_rpc() {
         let runtime = Runtime::new().unwrap();
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
         let block = runtime
-            .block_on(provider.get_block(BlockId::number(block_number), true))
+            .block_on(
+                provider.get_block(BlockId::number(block_number), BlockTransactionsKind::Full),
+            )
             .unwrap()
             .unwrap();
         let rpc_storage = RpcStorage::new(provider, BlockId::number(block_number - 1));
