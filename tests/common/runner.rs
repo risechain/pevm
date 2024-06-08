@@ -49,7 +49,6 @@ fn calculate_receipt_root(
     // 1. Create an iterator of ReceiptEnvelope
     let tx_type_iter = txs
         .txns()
-        .unwrap()
         .map(|tx| TxType::try_from(tx.transaction_type.unwrap_or_default()).unwrap());
 
     let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone().with_bloom());
@@ -88,6 +87,7 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     block: Block,
     must_match_block_header: bool,
 ) {
+    println!("{:?}", block.header.number);
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let sequential_result = pevm::execute(storage.clone(), block.clone(), concurrency_level, true);
     let parallel_result = pevm::execute(storage, block.clone(), concurrency_level, false);

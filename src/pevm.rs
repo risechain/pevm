@@ -461,7 +461,7 @@ fn transform_output(
         .map(|ResultAndState { result, state }| {
             cumulative_gas_used += result.gas_used() as u128;
             let receipt = Receipt {
-                status: result.is_success(),
+                status: result.is_success().into(),
                 cumulative_gas_used,
                 logs: result.into_logs(),
             };
