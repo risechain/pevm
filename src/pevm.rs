@@ -63,14 +63,13 @@ pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 pub fn execute<S: Storage + Send + Sync>(
     storage: S,
     block: Block,
-    parent_header: Option<Header>,
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
 ) -> PevmResult {
     let Some(spec_id) = get_block_spec(&block.header) else {
         return Err(PevmError::UnknownBlockSpec);
     };
-    let Some(block_env) = get_block_env(&block.header, parent_header.as_ref()) else {
+    let Some(block_env) = get_block_env(&block.header, None) else {
         return Err(PevmError::MissingHeaderData);
     };
     let Some(tx_envs) = get_tx_envs(&block.transactions) else {
