@@ -48,7 +48,8 @@ fn mainnet_blocks_from_rpc() {
             )
             .unwrap()
             .unwrap();
-        let rpc_storage = RpcStorage::new(provider, BlockId::number(block_number - 1));
+        let spec_id = pevm::get_block_spec(&block.header).unwrap();
+        let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let db = CacheDB::new(&rpc_storage);
         common::test_execute_alloy(db.clone(), block.clone(), true);
 
