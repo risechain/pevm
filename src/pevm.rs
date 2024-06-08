@@ -7,7 +7,7 @@ use std::{
 
 use ahash::{AHashMap, AHashSet};
 use alloy_primitives::{Address, U256};
-use alloy_rpc_types::{Block, Header, Receipt};
+use alloy_rpc_types::{Block, Receipt};
 use revm::{
     db::CacheDB,
     primitives::{
@@ -69,7 +69,7 @@ pub fn execute<S: Storage + Send + Sync>(
     let Some(spec_id) = get_block_spec(&block.header) else {
         return Err(PevmError::UnknownBlockSpec);
     };
-    let Some(block_env) = get_block_env(&block.header, None) else {
+    let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
     let Some(tx_envs) = get_tx_envs(&block.transactions) else {
