@@ -268,7 +268,6 @@ impl<S: Storage> Vm<S> {
     // value are added to the write set, possibly replacing a pair with a prior value
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
-    #[allow(clippy::arc_with_non_send_sync)] // TODO: Fix at REVM?
     pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
         // Set up DB
         let mut db = VmDb::new(
