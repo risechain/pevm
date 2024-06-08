@@ -179,6 +179,7 @@ pub use pevm::{
 };
 mod mv_memory;
 mod primitives;
+pub use primitives::get_block_spec;
 mod scheduler;
 mod storage;
 pub use storage::{AccountBasic, InMemoryAccount, InMemoryStorage, RpcStorage, Storage};
