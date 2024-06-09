@@ -17,7 +17,7 @@ fn empty_alloy_block() {
             transactions: BlockTransactions::Full(Vec::new()),
             ..Block::default()
         },
-        true,
+        false,
     );
 }
 
@@ -49,7 +49,7 @@ fn one_tx_alloy_block() {
             }]),
             ..Block::default()
         },
-        true,
+        false,
     );
 }
 
