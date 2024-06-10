@@ -311,6 +311,13 @@ impl<S: Storage> Vm<S> {
                         if address == &self.block_env.coinbase {
                             account_info.balance += gas_payment.take().unwrap();
                         }
+
+                        // We must reset the original values for the incoming reads to detect changes.
+                        // TODO: Port this logic to PEVM's read & write sets instead of REVM.
+                        account_info.previous_or_original_balance = account_info.balance;
+                        account_info.previous_or_original_code_hash = account_info.code_hash;
+                        account_info.previous_or_original_nonce = account_info.nonce;
+
                         write_set.insert(
                             MemoryLocation::Basic(*address),
                             MemoryValue::Basic(Box::new(account_info)),
