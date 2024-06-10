@@ -37,7 +37,6 @@ $ cargo build
 - Lazily update gas payments to the beneficiary account as implicit reads & writes.
 - Preprocess dependencies among transactions with the same sender or recipient or explicitly interacting with the beneficiary account.
 - Aggressively find tasks to save scheduling cycles.
-- Early-exiting worker threads to avoid thread overheads and join faster.
 
 ### Alpha TODO
 

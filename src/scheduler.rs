@@ -55,7 +55,7 @@ use crate::{
 // - The ones inside `transactions_status` `Mutex`es
 // We also align the struct and each field up to `transactions_status`
 // to start at a new 64-or-128-bytes cache line.
-#[repr(align(64))]
+#[repr(align(128))]
 pub(crate) struct Scheduler {
     /// The next transaction to try and execute.
     execution_idx: CachePadded<AtomicUsize>,
@@ -199,11 +199,17 @@ impl Scheduler {
     }
 
     pub(crate) fn next_task(&self) -> Option<Task> {
-        if self.validation_idx.load(Relaxed) < self.execution_idx.load(Relaxed) {
-            self.next_version_to_validate().map(Task::Validation)
-        } else {
-            self.next_version_to_execute().map(Task::Execution)
+        while !self.done() {
+            if self.validation_idx.load(Relaxed) < self.execution_idx.load(Relaxed) {
+                if let Some(tx_version) = self.next_version_to_validate() {
+                    return Some(Task::Validation(tx_version));
+                }
+            }
+            if let Some(tx_version) = self.next_version_to_execute() {
+                return Some(Task::Execution(tx_version));
+            }
         }
+        None
     }
 
     // Add `tx_idx` as a dependent of `blocking_tx_idx` so `tx_idx` is

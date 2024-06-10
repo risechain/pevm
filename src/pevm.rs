@@ -127,21 +127,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     thread::scope(|scope| {
         for _ in 0..concurrency_level.min(max_concurrency_level).into() {
             scope.spawn(|| {
-                let mut task = None;
-                let mut consecutive_empty_tasks: u8 = 0;
-                while !scheduler.done() {
-                    // TODO: Have different functions or an enum for the caller to choose
-                    // the handling behaviour when a transaction's EVM execution fails.
-                    // Parallel block builders would like to exclude such transaction,
-                    // verifiers may want to exit early to save CPU cycles, while testers
-                    // may want to collect all execution results. We are exiting early as
-                    // the default behaviour for now.
-                    if execution_error.get().is_some() {
-                        break;
-                    }
-
-                    // Find and perform the next execution or validation task.
-                    //
+                // Find and perform the next execution or validation task.
+                let mut task = scheduler.next_task();
+                while task.is_some() {
                     // After an incarnation executes it needs to pass validation. The
                     // validation re-reads the read-set and compares the observed versions.
                     // A successful validation implies that the applied writes are still
@@ -158,8 +146,8 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                     //
                     // Since transactions must be committed in order, BlockSTM prioritizes
                     // tasks associated with lower-indexed transactions.
-                    task = match task {
-                        Some(Task::Execution(tx_version)) => try_execute(
+                    task = match task.unwrap() {
+                        Task::Execution(tx_version) => try_execute(
                             &mv_memory,
                             &vm,
                             &scheduler,
@@ -168,22 +156,24 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                             tx_version,
                         )
                         .map(Task::Validation),
-                        Some(Task::Validation(tx_version)) => {
+                        Task::Validation(tx_version) => {
                             try_validate(&mv_memory, &scheduler, &tx_version).map(Task::Execution)
                         }
-                        None => scheduler.next_task(),
                     };
 
-                    if task.is_none() {
-                        consecutive_empty_tasks += 1;
-                    } else {
-                        consecutive_empty_tasks = 0;
-                    }
-                    // Many consecutive empty tasks usually mean the number of remaining tasks
-                    // is smaller than the number of threads, or they are highly sequential
-                    // anyway. This early exit helps remove thread overheads and join faster.
-                    if consecutive_empty_tasks == 3 {
+                    // TODO: Have different functions or an enum for the caller to choose
+                    // the handling behaviour when a transaction's EVM execution fails.
+                    // Parallel block builders would like to exclude such transaction,
+                    // verifiers may want to exit early to save CPU cycles, while testers
+                    // may want to collect all execution results. We are exiting early as
+                    // the default behaviour for now. Also, be aware of a potential deadlock
+                    // in the scheduler's next task loop when an error occurs.
+                    if execution_error.get().is_some() {
                         break;
+                    }
+
+                    if task.is_none() {
+                        task = scheduler.next_task();
                     }
                 }
             });
@@ -341,12 +331,13 @@ fn preprocess_dependencies(
     }
 
     let min_concurrency_level = NonZeroUsize::new(2).unwrap();
-    // This division by 2 means a thread must complete ~4 tasks to justify
-    // its overheads.
-    // TODO: Fine tune for edge cases given the dependency data above.
-    let max_concurrency_level = NonZeroUsize::new(block_size / 2)
-        .unwrap_or(min_concurrency_level)
-        .max(min_concurrency_level);
+    let max_concurrency_level =
+        // Diving the number of ready transactions by 2 means a thread must
+        // complete ~4 tasks to justify its overheads.
+        // TODO: Further fine tune given the dependency data above.
+        NonZeroUsize::new((block_size - transactions_dependencies.len()) / 2)
+            .unwrap_or(min_concurrency_level)
+            .max(min_concurrency_level);
 
     Some((
         Scheduler::new(
