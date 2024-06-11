@@ -4,65 +4,20 @@ use std::fmt::Debug;
 
 use ahash::AHashMap;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use revm::db::PlainAccount;
 
-use crate::{AccountBasic, Storage};
-
-/// An account stored in memory.
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct InMemoryAccount {
-    /// The account's basic information.
-    pub basic: AccountBasic,
-    /// The account's storage.
-    pub storage: AHashMap<U256, U256>,
-}
-
-impl From<PlainAccount> for InMemoryAccount {
-    fn from(account: PlainAccount) -> Self {
-        InMemoryAccount {
-            basic: account.info.into(),
-            storage: account.storage.into_iter().collect(),
-        }
-    }
-}
-
-impl InMemoryAccount {
-    /// Checks if the account is empty.
-    /// An account is considered empty if its code is empty, balance is zero, and nonce is zero.
-    pub fn is_empty(&self) -> bool {
-        self.basic.code.is_empty() && self.basic.balance == U256::ZERO && self.basic.nonce == 0
-    }
-
-    /// Converts a `revm::primitives::Account` into an `Option<InMemoryAccount>`.
-    /// Returns `Some(InMemoryAccount)` if the account is not self-destructed, otherwise returns `None`.
-    pub fn from_revm_account(account: revm::primitives::Account) -> Option<Self> {
-        assert!(account.is_touched());
-        if account.is_selfdestructed() {
-            None
-        } else {
-            Some(InMemoryAccount {
-                basic: account.info.into(),
-                storage: account
-                    .storage
-                    .iter()
-                    .map(|(k, v)| (*k, v.present_value))
-                    .collect(),
-            })
-        }
-    }
-}
+use crate::{AccountBasic, EvmAccount, Storage};
 
 /// Fetch state data via RPC to execute.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage {
-    accounts: AHashMap<Address, InMemoryAccount>,
+    accounts: AHashMap<Address, EvmAccount>,
     block_hashes: AHashMap<U256, B256>,
 }
 
 impl InMemoryStorage {
     /// Create a new InMemoryStorage
     pub fn new(
-        accounts: impl IntoIterator<Item = (Address, impl Into<InMemoryAccount>)>,
+        accounts: impl IntoIterator<Item = (Address, impl Into<EvmAccount>)>,
         block_hashes: impl IntoIterator<Item = (U256, B256)>,
     ) -> Self {
         InMemoryStorage {
@@ -75,7 +30,7 @@ impl InMemoryStorage {
     }
 
     /// Insert an account
-    pub fn insert_account(&mut self, address: Address, account: InMemoryAccount) {
+    pub fn insert_account(&mut self, address: Address, account: EvmAccount) {
         self.accounts.insert(address, account);
     }
 }

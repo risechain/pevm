@@ -20,7 +20,7 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, Vm, VmExecutionResult},
-    ExecutionTask, InMemoryAccount, MemoryLocation, MemoryValue, Storage, Task,
+    EvmAccount, ExecutionTask, MemoryLocation, MemoryValue, Storage, Task,
     TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx,
     TxIncarnationStatus, TxVersion, ValidationTask,
 };
@@ -45,7 +45,7 @@ pub enum PevmError {
 /// Represents the state transitions of the EVM accounts during execution.
 /// If the value is `None`, it indicates that the account is marked as self-destructed.
 /// If the value is `Some(_)`, it indicates that the account has undergone changes.
-type EvmStateTransitions = AHashMap<Address, Option<InMemoryAccount>>;
+type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
 
 /// Execution result of a transaction
 #[derive(Debug, Clone, PartialEq)]
@@ -463,7 +463,7 @@ fn transform_output(
             let state: EvmStateTransitions = state
                 .into_iter()
                 .filter(|(_, v)| v.is_touched())
-                .map(|(k, v)| (k, InMemoryAccount::from_revm_account(v)))
+                .map(|(k, v)| (k, EvmAccount::from_revm_account(v)))
                 .collect();
             PevmTxExecutionResult { receipt, state }
         })

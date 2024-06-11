@@ -1,15 +1,60 @@
 use std::fmt::Debug;
 
+use ahash::AHashMap;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use revm::{
+    db::PlainAccount,
     primitives::{AccountInfo, Bytecode},
     DatabaseRef,
 };
 
+/// An account stored in memory.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct EvmAccount {
+    /// The account's basic information.
+    pub basic: AccountBasic,
+    /// The account's storage.
+    pub storage: AHashMap<U256, U256>,
+}
+
+impl From<PlainAccount> for EvmAccount {
+    fn from(account: PlainAccount) -> Self {
+        EvmAccount {
+            basic: account.info.into(),
+            storage: account.storage.into_iter().collect(),
+        }
+    }
+}
+
+impl EvmAccount {
+    /// Checks if the account is empty.
+    /// An account is considered empty if its code is empty, balance is zero, and nonce is zero.
+    pub fn is_empty(&self) -> bool {
+        self.basic.code.is_empty() && self.basic.balance == U256::ZERO && self.basic.nonce == 0
+    }
+
+    /// Converts a `revm::primitives::Account` into an `Option<InMemoryAccount>`.
+    /// Returns `Some(InMemoryAccount)` if the account is not self-destructed, otherwise returns `None`.
+    pub fn from_revm_account(account: revm::primitives::Account) -> Option<Self> {
+        assert!(account.is_touched());
+        if account.is_selfdestructed() {
+            None
+        } else {
+            Some(EvmAccount {
+                basic: account.info.into(),
+                storage: account
+                    .storage
+                    .iter()
+                    .map(|(k, v)| (*k, v.present_value))
+                    .collect(),
+            })
+        }
+    }
+}
+
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
 // TODO: More proper testing.
-// TODO: Should we customize PartialEq?
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountBasic {
     /// The balance of the account.
@@ -141,6 +186,6 @@ impl<S: Storage> DatabaseRef for StorageWrapper<S> {
 }
 
 mod in_memory;
-pub use in_memory::{InMemoryAccount, InMemoryStorage};
+pub use in_memory::InMemoryStorage;
 mod rpc;
 pub use rpc::RpcStorage;
