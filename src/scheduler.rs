@@ -10,8 +10,8 @@ use std::{
     },
 };
 
-use ahash::AHashMap;
 use crossbeam::utils::CachePadded;
+use rustc_hash::FxHashMap;
 
 use crate::{
     ExecutionTask, Task, TransactionsDependencies, TransactionsDependents, TransactionsStatus,
@@ -84,7 +84,7 @@ pub(crate) struct Scheduler {
     /// before they clear and think that the dependent is not yet
     /// ready, making it forever unexecuted.
     // TODO: Build a fuller dependency graph.
-    transactions_dependencies: AHashMap<TxIdx, Mutex<Vec<TxIdx>>>,
+    transactions_dependencies: FxHashMap<TxIdx, Mutex<Vec<TxIdx>>>,
     /// Marker for completion
     done_marker: AtomicBool,
 }

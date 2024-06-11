@@ -4,14 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Put this behind a feature flag if there are use cases & users
-# that need more security guarantees even for internally hashing
-# EVM memory locations (we do not persist these hashes).
-ahash = "0.8.11"
 alloy-primitives = { version = "0.7.5", features = ["asm-keccak"] }
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "a4bb5f0be3eec5c8679bdab93c1482df38ba8509" }
 crossbeam = "0.8.4"
 dashmap = "5.5.3"
+
+ahash = "0.8"
+rustc-hash = "1"
 
 # Let's do our best to port needed REVM changes upstream
 revm = { git = "https://github.com/risechain/revm", rev = "16ae9d6bdce471bd008c20be9831eb9d1694d0bf", features = [
