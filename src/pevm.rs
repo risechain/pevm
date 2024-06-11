@@ -241,9 +241,8 @@ fn preprocess_dependencies(
     let mut transactions_status: TransactionsStatus = (0..block_size)
         .map(|_| TxIncarnationStatus::ReadyToExecute(0))
         .collect();
-    let mut transactions_dependents: TransactionsDependents =
-        (0..block_size).map(|_| Vec::new()).collect();
-    let mut transactions_dependencies = TransactionsDependencies::new();
+    let mut transactions_dependents: TransactionsDependents = vec![vec![]; block_size];
+    let mut transactions_dependencies = TransactionsDependencies::default();
 
     // Marking transactions across same sender & recipient as dependents as they
     // cross-depend at the `AccountInfo` level (reading & writing to nonce & balance).
@@ -255,7 +254,7 @@ fn preprocess_dependencies(
     // second flagging (2) for re-execution and execute (3) as dependency. (3) would
     // panic with a nonce error reading from (2) before it rewrites the new nonce
     // reading from (1).
-    let mut tx_idxes_by_address: AHashMap<Address, Vec<TxIdx>> = AHashMap::new();
+    let mut tx_idxes_by_address = AHashMap::<Address, Vec<TxIdx>>::default();
     // We evaluate from the first transaction with data, since raw transfers' dependencies
     // are already properly ordered here.
     let mut starting_validation_idx = block_size;

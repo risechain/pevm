@@ -48,8 +48,8 @@ impl RpcStorage {
             provider,
             precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)),
             block_id,
-            cache_accounts: Mutex::new(AHashMap::new()),
-            cache_block_hashes: Mutex::new(AHashMap::new()),
+            cache_accounts: Mutex::default(),
+            cache_block_hashes: Mutex::default(),
             // TODO: Better error handling.
             runtime: Runtime::new().unwrap(),
         }

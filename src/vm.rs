@@ -296,10 +296,9 @@ impl<S: Storage> Vm<S> {
                 // A hash map is critical as there can be multiple state transitions
                 // of the same location in a transaction (think internal txs)!
                 // We only care about the latest state.
-                let mut write_set: AHashMap<MemoryLocation, MemoryValue> =
-                    // There are at least three locations most of the time: the sender,
-                    // the recipient, and the beneficiary accounts.
-                    AHashMap::with_capacity(3);
+                // There are at least three locations most of the time: the sender,
+                // the recipient, and the beneficiary accounts.
+                let mut write_set = AHashMap::<MemoryLocation, MemoryValue>::with_capacity(3);
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_info_changed() {
                         // TODO: More granularity here to ensure we only notify new
