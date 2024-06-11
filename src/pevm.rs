@@ -121,7 +121,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
 
     let mut execution_error = OnceLock::new();
-    let execution_results = (0..block_size).map(|_| Mutex::new(None)).collect();
+    let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
 
     // TODO: Better thread handling
     thread::scope(|scope| {
@@ -371,39 +371,34 @@ fn try_execute<S: Storage>(
     vm: &Vm<S>,
     scheduler: &Scheduler,
     execution_error: &OnceLock<ExecutionError>,
-    execution_results: &Vec<Mutex<Option<ResultAndState>>>,
+    execution_results: &[Mutex<Option<ResultAndState>>],
     tx_version: TxVersion,
 ) -> Option<ValidationTask> {
-    match vm.execute(tx_version.tx_idx) {
-        VmExecutionResult::ReadError { blocking_tx_idx } => {
-            if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx) {
-                // Retry the execution immediately if the blocking transaction was
-                // re-executed by the time we can add it as a dependency.
-                return try_execute(
-                    mv_memory,
-                    vm,
-                    scheduler,
-                    execution_error,
-                    execution_results,
-                    tx_version,
-                );
+    loop {
+        return match vm.execute(tx_version.tx_idx) {
+            VmExecutionResult::ReadError { blocking_tx_idx } => {
+                if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx) {
+                    // Retry the execution immediately if the blocking transaction was
+                    // re-executed by the time we can add it as a dependency.
+                    continue;
+                }
+                None
             }
-            None
-        }
-        VmExecutionResult::ExecutionError(err) => {
-            // TODO: Better error handling
-            execution_error.set(err).unwrap();
-            None
-        }
-        VmExecutionResult::Ok {
-            result_and_state,
-            read_set,
-            write_set,
-        } => {
-            *index_mutex!(execution_results, tx_version.tx_idx) = Some(result_and_state);
-            let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
-            scheduler.finish_execution(tx_version, wrote_new_location)
-        }
+            VmExecutionResult::ExecutionError(err) => {
+                // TODO: Better error handling
+                execution_error.set(err).unwrap();
+                None
+            }
+            VmExecutionResult::Ok {
+                result_and_state,
+                read_set,
+                write_set,
+            } => {
+                *index_mutex!(execution_results, tx_version.tx_idx) = Some(result_and_state);
+                let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
+                scheduler.finish_execution(tx_version, wrote_new_location)
+            }
+        };
     }
 }
 
