@@ -43,7 +43,7 @@ pub enum PevmError {
 }
 
 /// Represents the state transitions of the EVM accounts after execution.
-/// If the value is `None`, it indicates that the account is marked as self-destructed.
+/// If the value is `None`, it indicates that the account is marked for removal.
 /// If the value is `Some(new_state)`, it indicates that the account has become `new_state`.
 type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
 
@@ -204,7 +204,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 result_and_state
             });
 
-    Ok(post_process_results(fully_evaluated_results, spec_id))
+    Ok(post_process_results(spec_id, fully_evaluated_results))
 }
 
 /// Execute REVM transactions sequentially.
@@ -227,7 +227,7 @@ pub fn execute_revm_sequential<S: Storage>(
             Err(err) => return Err(PevmError::ExecutionError(format!("{err:?}"))),
         }
     }
-    Ok(post_process_results(results, spec_id))
+    Ok(post_process_results(spec_id, results))
 }
 
 // Return `None` to signal falling back to sequential execution as we detected too many
@@ -448,8 +448,8 @@ fn post_process_beneficiary(
 }
 
 fn post_process_results(
-    revm_results: impl IntoIterator<Item = ResultAndState>,
     spec_id: SpecId,
+    revm_results: impl IntoIterator<Item = ResultAndState>,
 ) -> Vec<PevmTxExecutionResult> {
     let mut cumulative_gas_used: u128 = 0;
     revm_results
@@ -465,6 +465,8 @@ fn post_process_results(
                 .into_iter()
                 .filter(|(_, account)| account.is_touched())
                 .map(|(address, account)| {
+                    // EIP-161: State trie clearing
+                    // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
                     if account.is_selfdestructed()
                         || account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON)
                     {
