@@ -4,39 +4,20 @@ use std::fmt::Debug;
 
 use ahash::AHashMap;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use revm::db::PlainAccount;
 
-use crate::{AccountBasic, Storage};
-
-/// An account stored in memory.
-#[derive(Debug, Default, Clone)]
-pub struct InMemoryAccount {
-    /// The account's basic information.
-    pub basic: AccountBasic,
-    /// The account's storage.
-    pub storage: AHashMap<U256, U256>,
-}
-
-impl From<PlainAccount> for InMemoryAccount {
-    fn from(account: PlainAccount) -> Self {
-        InMemoryAccount {
-            basic: account.info.into(),
-            storage: account.storage.into_iter().collect(),
-        }
-    }
-}
+use crate::{AccountBasic, EvmAccount, Storage};
 
 /// Fetch state data via RPC to execute.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage {
-    accounts: AHashMap<Address, InMemoryAccount>,
+    accounts: AHashMap<Address, EvmAccount>,
     block_hashes: AHashMap<U256, B256>,
 }
 
 impl InMemoryStorage {
     /// Create a new InMemoryStorage
     pub fn new(
-        accounts: impl IntoIterator<Item = (Address, impl Into<InMemoryAccount>)>,
+        accounts: impl IntoIterator<Item = (Address, impl Into<EvmAccount>)>,
         block_hashes: impl IntoIterator<Item = (U256, B256)>,
     ) -> Self {
         InMemoryStorage {
@@ -49,7 +30,7 @@ impl InMemoryStorage {
     }
 
     /// Insert an account
-    pub fn insert_account(&mut self, address: Address, account: InMemoryAccount) {
+    pub fn insert_account(&mut self, address: Address, account: EvmAccount) {
         self.accounts.insert(address, account);
     }
 }
@@ -90,7 +71,6 @@ impl Storage for InMemoryStorage {
             .unwrap_or_default())
     }
 
-    // Currently unused.
     fn block_hash(&self, number: U256) -> Result<B256, Self::Error> {
         Ok(self
             .block_hashes

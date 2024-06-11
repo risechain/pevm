@@ -1,15 +1,58 @@
 use std::fmt::Debug;
 
+use ahash::AHashMap;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use revm::{
-    primitives::{AccountInfo, Bytecode},
+    db::PlainAccount,
+    primitives::{Account, AccountInfo, Bytecode},
     DatabaseRef,
 };
+
+/// An EVM account.
+// TODO: Flatten `AccountBasic` or more ideally, replace this with an Alloy type.
+// `AccountBasic` works for now as we're tightly tied to REVM types, hence
+// conversions between `AccountBasic` & `AccountInfo` are very convenient.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct EvmAccount {
+    /// The account's basic information.
+    pub basic: AccountBasic,
+    /// The account's storage.
+    pub storage: AHashMap<U256, U256>,
+}
+
+impl EvmAccount {
+    /// Checks if the account is empty.
+    pub fn is_empty(&self) -> bool {
+        self.basic.code.is_empty() && self.basic.balance == U256::ZERO && self.basic.nonce == 0
+    }
+}
+
+impl From<PlainAccount> for EvmAccount {
+    fn from(account: PlainAccount) -> Self {
+        EvmAccount {
+            basic: account.info.into(),
+            storage: account.storage.into_iter().collect(),
+        }
+    }
+}
+
+impl From<Account> for EvmAccount {
+    fn from(account: Account) -> Self {
+        Self {
+            basic: account.info.into(),
+            storage: account
+                .storage
+                .iter()
+                .map(|(k, v)| (*k, v.present_value))
+                .collect(),
+        }
+    }
+}
 
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
 // TODO: More proper testing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AccountBasic {
     /// The balance of the account.
     pub balance: U256,
@@ -140,6 +183,6 @@ impl<S: Storage> DatabaseRef for StorageWrapper<S> {
 }
 
 mod in_memory;
-pub use in_memory::{InMemoryAccount, InMemoryStorage};
+pub use in_memory::InMemoryStorage;
 mod rpc;
 pub use rpc::RpcStorage;

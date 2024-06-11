@@ -10,9 +10,7 @@ use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, Receipt};
 use revm::{
     db::CacheDB,
-    primitives::{
-        Account, AccountInfo, BlockEnv, EvmState, ResultAndState, SpecId, TransactTo, TxEnv,
-    },
+    primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv},
     DatabaseCommit,
 };
 
@@ -22,9 +20,9 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, Vm, VmExecutionResult},
-    ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependencies,
-    TransactionsDependents, TransactionsStatus, TxIdx, TxIncarnationStatus, TxVersion,
-    ValidationTask,
+    EvmAccount, ExecutionTask, MemoryLocation, MemoryValue, Storage, Task,
+    TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx,
+    TxIncarnationStatus, TxVersion, ValidationTask,
 };
 
 /// Errors when executing a block with PEVM.
@@ -44,6 +42,11 @@ pub enum PevmError {
     UnreachableError,
 }
 
+/// Represents the state transitions of the EVM accounts after execution.
+/// If the value is `None`, it indicates that the account is marked for removal.
+/// If the value is `Some(new_state)`, it indicates that the account has become `new_state`.
+type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
+
 /// Execution result of a transaction
 #[derive(Debug, Clone, PartialEq)]
 pub struct PevmTxExecutionResult {
@@ -51,8 +54,7 @@ pub struct PevmTxExecutionResult {
     // TODO: Consider promoting to `ReceiptEnvelope` if there is high demand
     pub receipt: Receipt,
     /// State that got updated
-    // TODO: Use our own type to not leak REVM types to library users.
-    pub state: EvmState,
+    pub state: EvmStateTransitions,
 }
 
 /// Execution result of a block
@@ -202,7 +204,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 result_and_state
             });
 
-    Ok(transform_output(fully_evaluated_results))
+    Ok(post_process_results(spec_id, fully_evaluated_results))
 }
 
 /// Execute REVM transactions sequentially.
@@ -225,7 +227,7 @@ pub fn execute_revm_sequential<S: Storage>(
             Err(err) => return Err(PevmError::ExecutionError(format!("{err:?}"))),
         }
     }
-    Ok(transform_output(results))
+    Ok(post_process_results(spec_id, results))
 }
 
 // Return `None` to signal falling back to sequential execution as we detected too many
@@ -445,7 +447,8 @@ fn post_process_beneficiary(
     beneficiary_account
 }
 
-fn transform_output(
+fn post_process_results(
+    spec_id: SpecId,
     revm_results: impl IntoIterator<Item = ResultAndState>,
 ) -> Vec<PevmTxExecutionResult> {
     let mut cumulative_gas_used: u128 = 0;
@@ -458,6 +461,21 @@ fn transform_output(
                 cumulative_gas_used,
                 logs: result.into_logs(),
             };
+            let state: EvmStateTransitions = state
+                .into_iter()
+                .filter(|(_, account)| account.is_touched())
+                .map(|(address, account)| {
+                    // EIP-161: State trie clearing
+                    // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
+                    if account.is_selfdestructed()
+                        || account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON)
+                    {
+                        (address, None)
+                    } else {
+                        (address, Some(EvmAccount::from(account)))
+                    }
+                })
+                .collect();
             PevmTxExecutionResult { receipt, state }
         })
         .collect()
