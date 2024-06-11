@@ -9,7 +9,7 @@ use revm::db::PlainAccount;
 use crate::{AccountBasic, Storage};
 
 /// An account stored in memory.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct InMemoryAccount {
     /// The account's basic information.
     pub basic: AccountBasic,
@@ -22,6 +22,32 @@ impl From<PlainAccount> for InMemoryAccount {
         InMemoryAccount {
             basic: account.info.into(),
             storage: account.storage.into_iter().collect(),
+        }
+    }
+}
+
+impl InMemoryAccount {
+    /// Checks if the account is empty.
+    /// An account is considered empty if its code is empty, balance is zero, and nonce is zero.
+    pub fn is_empty(&self) -> bool {
+        self.basic.code.is_empty() && self.basic.balance == U256::ZERO && self.basic.nonce == 0
+    }
+
+    /// Converts a `revm::primitives::Account` into an `Option<InMemoryAccount>`.
+    /// Returns `Some(InMemoryAccount)` if the account is not self-destructed, otherwise returns `None`.
+    pub fn from_revm_account(account: revm::primitives::Account) -> Option<Self> {
+        assert!(account.is_touched());
+        if account.is_selfdestructed() {
+            None
+        } else {
+            Some(InMemoryAccount {
+                basic: account.info.into(),
+                storage: account
+                    .storage
+                    .iter()
+                    .map(|(k, v)| (*k, v.present_value))
+                    .collect(),
+            })
         }
     }
 }
@@ -90,7 +116,6 @@ impl Storage for InMemoryStorage {
             .unwrap_or_default())
     }
 
-    // Currently unused.
     fn block_hash(&self, number: U256) -> Result<B256, Self::Error> {
         Ok(self
             .block_hashes

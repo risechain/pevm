@@ -9,7 +9,8 @@ use revm::{
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
 // TODO: More proper testing.
-#[derive(Debug, Clone)]
+// TODO: Should we customize PartialEq?
+#[derive(Debug, Clone, PartialEq)]
 pub struct AccountBasic {
     /// The balance of the account.
     pub balance: U256,

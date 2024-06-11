@@ -10,9 +10,7 @@ use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, Receipt};
 use revm::{
     db::CacheDB,
-    primitives::{
-        Account, AccountInfo, BlockEnv, EvmState, ResultAndState, SpecId, TransactTo, TxEnv,
-    },
+    primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv},
     DatabaseCommit,
 };
 
@@ -22,9 +20,9 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, Vm, VmExecutionResult},
-    ExecutionTask, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependencies,
-    TransactionsDependents, TransactionsStatus, TxIdx, TxIncarnationStatus, TxVersion,
-    ValidationTask,
+    ExecutionTask, InMemoryAccount, MemoryLocation, MemoryValue, Storage, Task,
+    TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx,
+    TxIncarnationStatus, TxVersion, ValidationTask,
 };
 
 /// Errors when executing a block with PEVM.
@@ -44,6 +42,11 @@ pub enum PevmError {
     UnreachableError,
 }
 
+/// Represents the state transitions of the EVM accounts during execution.
+/// If the value is `None`, it indicates that the account is marked as self-destructed.
+/// If the value is `Some(_)`, it indicates that the account has undergone changes.
+type EvmStateTransitions = AHashMap<Address, Option<InMemoryAccount>>;
+
 /// Execution result of a transaction
 #[derive(Debug, Clone, PartialEq)]
 pub struct PevmTxExecutionResult {
@@ -51,8 +54,7 @@ pub struct PevmTxExecutionResult {
     // TODO: Consider promoting to `ReceiptEnvelope` if there is high demand
     pub receipt: Receipt,
     /// State that got updated
-    // TODO: Use our own type to not leak REVM types to library users.
-    pub state: EvmState,
+    pub state: EvmStateTransitions,
 }
 
 /// Execution result of a block
@@ -458,6 +460,11 @@ fn transform_output(
                 cumulative_gas_used,
                 logs: result.into_logs(),
             };
+            let state: EvmStateTransitions = state
+                .into_iter()
+                .filter(|(_, v)| v.is_touched())
+                .map(|(k, v)| (k, InMemoryAccount::from_revm_account(v)))
+                .collect();
             PevmTxExecutionResult { receipt, state }
         })
         .collect()
