@@ -5,7 +5,7 @@ use std::{
     thread,
 };
 
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashMap;
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, Receipt};
 use revm::{
@@ -242,8 +242,8 @@ fn preprocess_dependencies(
         .map(|_| TxIncarnationStatus::ReadyToExecute(0))
         .collect();
     let mut transactions_dependents: TransactionsDependents =
-        (0..block_size).map(|_| AHashSet::new()).collect();
-    let mut transactions_dependencies: TransactionsDependencies = AHashMap::new();
+        (0..block_size).map(|_| Vec::new()).collect();
+    let mut transactions_dependencies = TransactionsDependencies::new();
 
     // Marking transactions across same sender & recipient as dependents as they
     // cross-depend at the `AccountInfo` level (reading & writing to nonce & balance).
@@ -273,51 +273,59 @@ fn preprocess_dependencies(
             }
         }
 
-        // The first transaction never has dependencies.
-        if tx_idx > 0 {
-            // Register a lower transaction as this one's dependency.
-            let mut register_dependency = |dependency_idx: usize| {
-                // SAFETY: The dependency index is guaranteed to be smaller than the block
-                // size in this scope.
-                unsafe {
-                    *transactions_status.get_unchecked_mut(tx_idx) =
-                        TxIncarnationStatus::Aborting(0);
-                    transactions_dependents
-                        .get_unchecked_mut(dependency_idx)
-                        .insert(tx_idx);
-                }
-                transactions_dependencies
-                    .entry(tx_idx)
-                    .or_default()
-                    .insert(dependency_idx);
-            };
+        // Find the last transaction index that interacted with an address.
+        let last_index_of = |address: &Address| {
+            tx_idxes_by_address
+                .get(address)
+                .and_then(|tx_idx| tx_idx.last())
+                .cloned()
+        };
 
-            if &tx.caller == beneficiary_address
-                || recipient_with_changed_balance.is_some_and(|to| &to == beneficiary_address)
-            {
-                register_dependency(tx_idx - 1);
-            } else {
-                if let Some(prev_idx) = tx_idxes_by_address
-                    .get(&tx.caller)
-                    .and_then(|tx_idxs| tx_idxs.last())
-                {
-                    register_dependency(*prev_idx);
+        // Register a lower transaction as this one's dependency.
+        let mut register_dependency = |dependency_idxs: Vec<usize>| {
+            if dependency_idxs.is_empty() {
+                return;
+            }
+            // SAFETY: The dependency index is guaranteed to be smaller than the block
+            // size in this scope.
+            unsafe {
+                *transactions_status.get_unchecked_mut(tx_idx) = TxIncarnationStatus::Aborting(0);
+                for dependency_idx in dependency_idxs.iter() {
+                    transactions_dependents
+                        .get_unchecked_mut(*dependency_idx)
+                        .push(tx_idx);
                 }
-                if let Some(to) = recipient_with_changed_balance {
-                    if let Some(prev_idx) = tx_idxes_by_address
-                        .get(&to)
-                        .and_then(|tx_idxs| tx_idxs.last())
-                    {
-                        register_dependency(*prev_idx);
+                transactions_dependencies.insert(tx_idx, dependency_idxs);
+            }
+        };
+
+        // Beneficiary account: depends on all transactions from the last beneficiary tx.
+        if &tx.caller == beneficiary_address
+            || recipient_with_changed_balance.is_some_and(|to| &to == beneficiary_address)
+        {
+            let start_idx = last_index_of(beneficiary_address).unwrap_or(0);
+            register_dependency((start_idx..tx_idx).collect());
+        }
+        // Otherwise, build dependencies across same senders & recipients
+        else {
+            let mut dependency_idxs = Vec::new();
+            if let Some(prev_idx) = last_index_of(&tx.caller) {
+                dependency_idxs.push(prev_idx);
+            }
+            if let Some(to) = recipient_with_changed_balance {
+                if let Some(prev_idx) = last_index_of(&to) {
+                    if !dependency_idxs.contains(&prev_idx) {
+                        dependency_idxs.push(prev_idx);
                     }
                 }
             }
+            register_dependency(dependency_idxs);
+        }
 
-            // TODO: Continue to fine tune this ratio.
-            // Intuitively we should quit way before 90%.
-            if transactions_dependencies.len() as f64 / block_size as f64 > 0.9 {
-                return None;
-            }
+        // TODO: Continue to fine tune this ratio.
+        // Intuitively we should quit way before 90%.
+        if transactions_dependencies.len() as f64 / block_size as f64 > 0.9 {
+            return None;
         }
 
         // Register this transaction to the sender & recipient index maps.

@@ -10,7 +10,7 @@ use std::{
     },
 };
 
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashMap;
 use crossbeam::utils::CachePadded;
 
 use crate::{
@@ -74,7 +74,7 @@ pub(crate) struct Scheduler {
     decrease_cnt: AtomicUsize,
     /// The list of dependent transactions to resumne when the
     /// key transaction is re-executed.
-    transactions_dependents: Vec<Mutex<AHashSet<TxIdx>>>,
+    transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
     /// A list of optional dependencies flagged during preprocessing.
     /// For instance, for a transaction to depend on two lower others,
     /// one send to the same recipient address, and one is from
@@ -84,7 +84,7 @@ pub(crate) struct Scheduler {
     /// before they clear and think that the dependent is not yet
     /// ready, making it forever unexecuted.
     // TODO: Build a fuller dependency graph.
-    transactions_dependencies: AHashMap<TxIdx, Mutex<AHashSet<TxIdx>>>,
+    transactions_dependencies: AHashMap<TxIdx, Mutex<Vec<TxIdx>>>,
     /// Marker for completion
     done_marker: AtomicBool,
 }
@@ -233,7 +233,7 @@ impl Scheduler {
             // TODO: Better error handling here
             let mut blocking_dependents =
                 index_mutex!(self.transactions_dependents, blocking_tx_idx);
-            blocking_dependents.insert(tx_idx);
+            blocking_dependents.push(tx_idx);
             drop(blocking_dependents);
 
             self.num_active_tasks.fetch_sub(1, Relaxed);

@@ -2,7 +2,7 @@
 
 // TODO: Better types & API please
 
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashMap;
 
 use revm::primitives::{AccountInfo, Address, U256};
 
@@ -80,8 +80,8 @@ type TransactionsStatus = Vec<TxIncarnationStatus>;
 // The undelrying `HashSet` is to simplify index deduplication logic
 // while adding new dependencies.
 // TODO: Intuitively both should share a smiliar data structure?
-type TransactionsDependents = Vec<AHashSet<TxIdx>>;
-type TransactionsDependencies = AHashMap<TxIdx, AHashSet<TxIdx>>;
+type TransactionsDependents = Vec<Vec<TxIdx>>;
+type TransactionsDependencies = AHashMap<TxIdx, Vec<TxIdx>>;
 
 // BlockSTM maintains an in-memory multi-version data structure that
 // stores for each memory location the latest value written per
