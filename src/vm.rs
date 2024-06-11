@@ -91,7 +91,7 @@ impl<S: Storage> VmDb<S> {
                         Ok(None) => Err(ReadError::NotFound),
                         Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
                     },
-                    MemoryLocation::Storage((address, index)) => self
+                    MemoryLocation::Storage(address, index) => self
                         .storage
                         .storage(address, index)
                         .map(MemoryValue::Storage)
@@ -209,7 +209,7 @@ impl<S: Storage> Database for VmDb<S> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        match self.read(MemoryLocation::Storage((address, index)), true) {
+        match self.read(MemoryLocation::Storage(address, index), true) {
             Err(err) => Err(err),
             Ok(MemoryValue::Storage(value)) => Ok(value),
             _ => Err(ReadError::InvalidMemoryLocationType),
@@ -325,7 +325,7 @@ impl<S: Storage> Vm<S> {
                     }
                     for (slot, value) in account.changed_storage_slots() {
                         write_set.insert(
-                            MemoryLocation::Storage((*address, *slot)),
+                            MemoryLocation::Storage(*address, *slot),
                             MemoryValue::Storage(value.present_value),
                         );
                     }
@@ -354,17 +354,17 @@ impl<S: Storage> Vm<S> {
 }
 
 // TODO: Move to better place?
-pub(crate) fn execute_tx<D: Database>(
-    mut db: D,
+pub(crate) fn execute_tx<DB: Database>(
+    db: DB,
     spec_id: SpecId,
     block_env: BlockEnv,
     tx: TxEnv,
     with_reward_beneficiary: bool,
-) -> Result<ResultAndState, EVMError<D::Error>> {
+) -> Result<ResultAndState, EVMError<DB::Error>> {
     // This is much uglier than the builder interface but can be up to 50% faster!!
     let context = Context {
         evm: EvmContext::new_with_env(
-            &mut db,
+            db,
             Env::boxed(
                 // TODO: Should we turn off byte code analysis?
                 CfgEnv::default(),

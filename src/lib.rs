@@ -17,7 +17,7 @@ use revm::primitives::{AccountInfo, Address, U256};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum MemoryLocation {
     Basic(Address),
-    Storage((Address, U256)),
+    Storage(Address, U256),
 }
 
 #[derive(Debug, Clone)]
