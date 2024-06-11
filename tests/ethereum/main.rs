@@ -14,8 +14,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, SpecId,
-    TransactTo, TxEnv, U256,
+    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, TransactTo,
+    TxEnv, U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -145,9 +145,12 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     assert!(exec_results[0].receipt.status.coerce_status());
                     // This is overly strict as we only need the newly created account's code to be empty.
                     // Extracting such account is unjustified complexity so let's live with this for now.
-                    assert!(exec_results[0].state.values().all(|account| account
-                        .as_ref()
-                        .map_or(false, |account| account.basic.code.is_empty())));
+                    assert!(exec_results[0].state.values().all(|account| {
+                        match account {
+                            Some(account) => account.basic.code.is_empty(),
+                            None => true,
+                        }
+                    }));
                 }
                 // Skipping special cases where REVM returns `Ok` on unsupported features.
                 (Some("TR_TypeNotSupported"), Ok(_)) => {}
@@ -195,13 +198,9 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     // PEVM/REVM to meet the Ethereum specs throughout the eras.
                     for (address, account) in state {
                         if let Some(account) = account {
-                            if account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON) {
-                                chain_state.remove(&address);
-                            } else {
-                                let chain_state_account = chain_state.entry(address).or_default();
-                                chain_state_account.info = account.basic.into();
-                                chain_state_account.storage.extend(account.storage.iter());
-                            }
+                            let chain_state_account = chain_state.entry(address).or_default();
+                            chain_state_account.info = account.basic.into();
+                            chain_state_account.storage.extend(account.storage.iter());
                         } else {
                             chain_state.remove(&address);
                         }

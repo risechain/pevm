@@ -4,11 +4,14 @@ use ahash::AHashMap;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use revm::{
     db::PlainAccount,
-    primitives::{AccountInfo, Bytecode},
+    primitives::{Account, AccountInfo, Bytecode},
     DatabaseRef,
 };
 
-/// An account stored in memory.
+/// An EVM account.
+// TODO: Flatten `AccountBasic` or more ideally, replace this with an Alloy type.
+// `AccountBasic` works for now as we're tightly tied to REVM types, hence
+// conversions between `AccountBasic` & `AccountInfo` are very convenient.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct EvmAccount {
     /// The account's basic information.
@@ -28,26 +31,20 @@ impl From<PlainAccount> for EvmAccount {
 
 impl EvmAccount {
     /// Checks if the account is empty.
-    /// An account is considered empty if its code is empty, balance is zero, and nonce is zero.
     pub fn is_empty(&self) -> bool {
         self.basic.code.is_empty() && self.basic.balance == U256::ZERO && self.basic.nonce == 0
     }
+}
 
-    /// Converts a `revm::primitives::Account` into an `Option<InMemoryAccount>`.
-    /// Returns `Some(InMemoryAccount)` if the account is not self-destructed, otherwise returns `None`.
-    pub fn from_revm_account(account: revm::primitives::Account) -> Option<Self> {
-        assert!(account.is_touched());
-        if account.is_selfdestructed() {
-            None
-        } else {
-            Some(EvmAccount {
-                basic: account.info.into(),
-                storage: account
-                    .storage
-                    .iter()
-                    .map(|(k, v)| (*k, v.present_value))
-                    .collect(),
-            })
+impl From<Account> for EvmAccount {
+    fn from(account: Account) -> Self {
+        Self {
+            basic: account.info.into(),
+            storage: account
+                .storage
+                .iter()
+                .map(|(k, v)| (*k, v.present_value))
+                .collect(),
         }
     }
 }

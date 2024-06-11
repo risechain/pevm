@@ -42,9 +42,9 @@ pub enum PevmError {
     UnreachableError,
 }
 
-/// Represents the state transitions of the EVM accounts during execution.
+/// Represents the state transitions of the EVM accounts after execution.
 /// If the value is `None`, it indicates that the account is marked as self-destructed.
-/// If the value is `Some(_)`, it indicates that the account has undergone changes.
+/// If the value is `Some(new_state)`, it indicates that the account has become `new_state`.
 type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
 
 /// Execution result of a transaction
@@ -204,7 +204,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 result_and_state
             });
 
-    Ok(transform_output(fully_evaluated_results))
+    Ok(post_process_results(fully_evaluated_results, spec_id))
 }
 
 /// Execute REVM transactions sequentially.
@@ -227,7 +227,7 @@ pub fn execute_revm_sequential<S: Storage>(
             Err(err) => return Err(PevmError::ExecutionError(format!("{err:?}"))),
         }
     }
-    Ok(transform_output(results))
+    Ok(post_process_results(results, spec_id))
 }
 
 // Return `None` to signal falling back to sequential execution as we detected too many
@@ -447,8 +447,9 @@ fn post_process_beneficiary(
     beneficiary_account
 }
 
-fn transform_output(
+fn post_process_results(
     revm_results: impl IntoIterator<Item = ResultAndState>,
+    spec_id: SpecId,
 ) -> Vec<PevmTxExecutionResult> {
     let mut cumulative_gas_used: u128 = 0;
     revm_results
@@ -462,8 +463,16 @@ fn transform_output(
             };
             let state: EvmStateTransitions = state
                 .into_iter()
-                .filter(|(_, v)| v.is_touched())
-                .map(|(k, v)| (k, EvmAccount::from_revm_account(v)))
+                .filter(|(_, account)| account.is_touched())
+                .map(|(address, account)| {
+                    if account.is_selfdestructed()
+                        || account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON)
+                    {
+                        (address, None)
+                    } else {
+                        (address, Some(EvmAccount::from(account)))
+                    }
+                })
                 .collect();
             PevmTxExecutionResult { receipt, state }
         })
