@@ -174,9 +174,7 @@ macro_rules! index_mutex {
 }
 
 mod pevm;
-pub use pevm::{
-    execute, execute_revm, execute_revm_sequential, PevmError, PevmResult, PevmTxExecutionResult,
-};
+pub use pevm::{execute, execute_revm, execute_revm_sequential, PevmError, PevmResult};
 mod mv_memory;
 mod primitives;
 pub use primitives::get_block_spec;
@@ -184,4 +182,4 @@ mod scheduler;
 mod storage;
 pub use storage::{AccountBasic, EvmAccount, InMemoryStorage, RpcStorage, Storage};
 mod vm;
-pub use vm::ExecutionError;
+pub use vm::{ExecutionError, PevmTxExecutionResult};

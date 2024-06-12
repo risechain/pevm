@@ -7,10 +7,10 @@ use std::{
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, U256};
-use alloy_rpc_types::{Block, Receipt};
+use alloy_rpc_types::Block;
 use revm::{
     db::CacheDB,
-    primitives::{Account, AccountInfo, BlockEnv, ResultAndState, SpecId, TransactTo, TxEnv},
+    primitives::{AccountInfo, BlockEnv, SpecId, TransactTo, TxEnv},
     DatabaseCommit,
 };
 
@@ -19,7 +19,7 @@ use crate::{
     primitives::{get_block_env, get_block_spec, get_tx_envs},
     scheduler::Scheduler,
     storage::StorageWrapper,
-    vm::{execute_tx, ExecutionError, Vm, VmExecutionResult},
+    vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
     EvmAccount, ExecutionTask, MemoryLocation, MemoryValue, Storage, Task,
     TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx,
     TxIncarnationStatus, TxVersion, ValidationTask,
@@ -40,21 +40,6 @@ pub enum PevmError {
     /// Impractical errors that should be unreachable.
     /// The library has bugs if this is yielded.
     UnreachableError,
-}
-
-/// Represents the state transitions of the EVM accounts after execution.
-/// If the value is `None`, it indicates that the account is marked for removal.
-/// If the value is `Some(new_state)`, it indicates that the account has become `new_state`.
-type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
-
-/// Execution result of a transaction
-#[derive(Debug, Clone, PartialEq)]
-pub struct PevmTxExecutionResult {
-    /// Receipt of execution
-    // TODO: Consider promoting to `ReceiptEnvelope` if there is high demand
-    pub receipt: Receipt,
-    /// State that got updated
-    pub state: EvmStateTransitions,
 }
 
 /// Execution result of a block
@@ -110,7 +95,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return execute_revm_sequential(storage, spec_id, block_env, txs);
     };
 
-    let mut beneficiary_account_info = match storage.basic(beneficiary_address) {
+    let mut beneficiary_account = match storage.basic(beneficiary_address) {
         Ok(Some(account)) => account.into(),
         _ => AccountInfo::default(),
     };
@@ -190,21 +175,44 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // to avoid "implicit" dependency among consecutive transactions that read & write there.
     // TODO: Refactor, improve speed & error handling.
     let beneficiary_values = mv_memory.consume_beneficiary();
+    let mut fully_evaluated_results = Vec::with_capacity(block_size);
+    let mut cumulative_gas_used: u128 = 0;
+    for (mutex, beneficiary_value) in execution_results.into_iter().zip(beneficiary_values) {
+        let mut execution_result = mutex.into_inner().unwrap().unwrap();
 
-    let fully_evaluated_results =
-        execution_results
-            .into_iter()
-            .zip(beneficiary_values)
-            .map(|(mutex, value)| {
-                let mut result_and_state = mutex.into_inner().unwrap().unwrap();
-                result_and_state.state.insert(
-                    beneficiary_address,
-                    post_process_beneficiary(&mut beneficiary_account_info, value),
-                );
-                result_and_state
-            });
+        // Cumulative gas
+        cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
+        execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
 
-    Ok(post_process_results(spec_id, fully_evaluated_results))
+        // Beneficiary account
+        match beneficiary_value {
+            MemoryValue::Basic(info) => {
+                beneficiary_account = *info;
+            }
+            MemoryValue::LazyBeneficiaryBalance(addition) => {
+                beneficiary_account.balance += addition;
+            }
+            _ => unreachable!(),
+        }
+        execution_result.state.insert(
+            beneficiary_address,
+            // Ad-hoc condition to pass Ethereum state tests. Realistically the beneficiary
+            // account should not be empty.
+            if beneficiary_account.is_empty() {
+                None
+            } else {
+                Some(EvmAccount {
+                    basic: beneficiary_account.clone().into(),
+                    // EOA beneficiary accounts currently cannot have storage.
+                    storage: Default::default(),
+                })
+            },
+        );
+
+        fully_evaluated_results.push(execution_result);
+    }
+
+    Ok(fully_evaluated_results)
 }
 
 /// Execute REVM transactions sequentially.
@@ -216,18 +224,26 @@ pub fn execute_revm_sequential<S: Storage>(
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
 ) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
-    let mut results = Vec::with_capacity(txs.len());
     let mut db = CacheDB::new(StorageWrapper(storage));
+    let mut results = Vec::with_capacity(txs.len());
+    let mut cumulative_gas_used: u128 = 0;
     for tx in txs {
         match execute_tx(&mut db, spec_id, block_env.clone(), tx, true) {
             Ok(result_and_state) => {
                 db.commit(result_and_state.state.clone());
-                results.push(result_and_state);
+
+                let mut execution_result =
+                    PevmTxExecutionResult::from_revm(spec_id, result_and_state);
+
+                cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
+                execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
+
+                results.push(execution_result);
             }
             Err(err) => return Err(PevmError::ExecutionError(format!("{err:?}"))),
         }
     }
-    Ok(post_process_results(spec_id, results))
+    Ok(results)
 }
 
 // Return `None` to signal falling back to sequential execution as we detected too many
@@ -372,7 +388,7 @@ fn try_execute<S: Storage>(
     vm: &Vm<S>,
     scheduler: &Scheduler,
     execution_error: &OnceLock<ExecutionError>,
-    execution_results: &[Mutex<Option<ResultAndState>>],
+    execution_results: &[Mutex<Option<PevmTxExecutionResult>>],
     tx_version: TxVersion,
 ) -> Option<ValidationTask> {
     loop {
@@ -391,11 +407,11 @@ fn try_execute<S: Storage>(
                 None
             }
             VmExecutionResult::Ok {
-                result_and_state,
+                execution_result,
                 read_set,
                 write_set,
             } => {
-                *index_mutex!(execution_results, tx_version.tx_idx) = Some(result_and_state);
+                *index_mutex!(execution_results, tx_version.tx_idx) = Some(execution_result);
                 let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
                 scheduler.finish_execution(tx_version, wrote_new_location)
             }
@@ -421,62 +437,4 @@ fn try_validate(
         mv_memory.convert_writes_to_estimates(tx_version.tx_idx);
     }
     scheduler.finish_validation(tx_version, aborted)
-}
-
-// Fully evaluate a beneficiary account at the end of block execution,
-// including lazy updating atomic balances.
-// TODO: Cleaner interface & error handling
-fn post_process_beneficiary(
-    beneficiary_account_info: &mut AccountInfo,
-    value: MemoryValue,
-) -> Account {
-    match value {
-        MemoryValue::Basic(info) => {
-            *beneficiary_account_info = *info;
-        }
-        MemoryValue::LazyBeneficiaryBalance(addition) => {
-            beneficiary_account_info.balance += addition;
-        }
-        _ => unreachable!(),
-    }
-    // TODO: This potentially wipes beneficiary account's storage.
-    // Does that happen and if so is it acceptable? A quick test with
-    // REVM wipes it too!
-    let mut beneficiary_account = Account::from(beneficiary_account_info.clone());
-    beneficiary_account.mark_touch();
-    beneficiary_account
-}
-
-fn post_process_results(
-    spec_id: SpecId,
-    revm_results: impl IntoIterator<Item = ResultAndState>,
-) -> Vec<PevmTxExecutionResult> {
-    let mut cumulative_gas_used: u128 = 0;
-    revm_results
-        .into_iter()
-        .map(|ResultAndState { result, state }| {
-            cumulative_gas_used += result.gas_used() as u128;
-            let receipt = Receipt {
-                status: result.is_success().into(),
-                cumulative_gas_used,
-                logs: result.into_logs(),
-            };
-            let state: EvmStateTransitions = state
-                .into_iter()
-                .filter(|(_, account)| account.is_touched())
-                .map(|(address, account)| {
-                    // EIP-161: State trie clearing
-                    // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
-                    if account.is_selfdestructed()
-                        || account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON)
-                    {
-                        (address, None)
-                    } else {
-                        (address, Some(EvmAccount::from(account)))
-                    }
-                })
-                .collect();
-            PevmTxExecutionResult { receipt, state }
-        })
-        .collect()
 }
