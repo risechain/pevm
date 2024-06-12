@@ -20,13 +20,6 @@ pub struct EvmAccount {
     pub storage: AHashMap<U256, U256>,
 }
 
-impl EvmAccount {
-    /// Checks if the account is empty.
-    pub fn is_empty(&self) -> bool {
-        self.basic.code.is_empty() && self.basic.balance == U256::ZERO && self.basic.nonce == 0
-    }
-}
-
 impl From<PlainAccount> for EvmAccount {
     fn from(account: PlainAccount) -> Self {
         EvmAccount {

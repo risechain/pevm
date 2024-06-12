@@ -1,6 +1,7 @@
 use std::{cmp::min, sync::Arc};
 
 use ahash::AHashMap;
+use alloy_rpc_types::Receipt;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, ResultAndState,
@@ -12,13 +13,57 @@ use revm::{
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
-    MemoryEntry, MemoryLocation, MemoryValue, ReadError, ReadOrigin, ReadSet, Storage, TxIdx,
-    WriteSet,
+    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, ReadError, ReadOrigin, ReadSet, Storage,
+    TxIdx, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
 // Will there be DB errors outside of read?
 pub type ExecutionError = EVMError<ReadError>;
+
+/// Represents the state transitions of the EVM accounts after execution.
+/// If the value is `None`, it indicates that the account is marked for removal.
+/// If the value is `Some(new_state)`, it indicates that the account has become `new_state`.
+type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
+
+/// Execution result of a transaction
+#[derive(Debug, Clone, PartialEq)]
+pub struct PevmTxExecutionResult {
+    /// Receipt of execution
+    // TODO: Consider promoting to `ReceiptEnvelope` if there is high demand
+    pub receipt: Receipt,
+    /// State that got updated
+    pub state: EvmStateTransitions,
+}
+
+impl PevmTxExecutionResult {
+    /// Create a new execution from a raw REVM result.
+    /// Note that `cumulative_gas_used` is preset to the gas used of this transaction.
+    /// It should be post-processed with the remaining transactions in the block.
+    pub fn from_revm(spec_id: SpecId, ResultAndState { result, state }: ResultAndState) -> Self {
+        Self {
+            receipt: Receipt {
+                status: result.is_success().into(),
+                cumulative_gas_used: result.gas_used() as u128,
+                logs: result.into_logs(),
+            },
+            state: state
+                .into_iter()
+                .filter(|(_, account)| account.is_touched())
+                .map(|(address, account)| {
+                    if account.is_selfdestructed()
+                    // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
+                    || account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON)
+                    {
+                        (address, None)
+                    } else {
+                        (address, Some(EvmAccount::from(account)))
+                    }
+                })
+                .collect(),
+        }
+    }
+}
 
 pub(crate) enum VmExecutionResult {
     ReadError {
@@ -26,7 +71,7 @@ pub(crate) enum VmExecutionResult {
     },
     ExecutionError(ExecutionError),
     Ok {
-        result_and_state: ResultAndState,
+        execution_result: PevmTxExecutionResult,
         read_set: ReadSet,
         write_set: WriteSet,
     },
@@ -293,13 +338,14 @@ impl<S: Storage> Vm<S> {
                 let mut gas_payment =
                     Some(gas_price * U256::from(result_and_state.result.gas_used()));
 
-                // A hash map is critical as there can be multiple state transitions
-                // of the same location in a transaction (think internal txs)!
-                // We only care about the latest state.
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
                 let mut write_set = AHashMap::<MemoryLocation, MemoryValue>::with_capacity(3);
                 for (address, account) in result_and_state.state.iter() {
+                    // TODO: Port this change check to our read set instead of REVM.
+                    // We then let `execute_tx` output `PevmTxExecutionResult` directly and handle
+                    // changes based on those processed transisions. Let make sure we handle
+                    // removed accounts correctly afterwards.
                     if account.is_info_changed() {
                         // TODO: More granularity here to ensure we only notify new
                         // memory writes, for instance, only an account's balance instead
@@ -339,7 +385,10 @@ impl<S: Storage> Vm<S> {
                 }
 
                 VmExecutionResult::Ok {
-                    result_and_state,
+                    execution_result: PevmTxExecutionResult::from_revm(
+                        self.spec_id,
+                        result_and_state,
+                    ),
                     read_set: db.read_set,
                     write_set,
                 }
@@ -353,6 +402,10 @@ impl<S: Storage> Vm<S> {
 }
 
 // TODO: Move to better place?
+// TODO: Convert the output `ResultAndState` to `PevmTxExecutionResult` for a
+// much cleaner interface. We currently need `ResultAndState` for the parallel
+// executor to check for changed accounts via REVM. Can pull this off once that
+// check is moved to our own read set.
 pub(crate) fn execute_tx<DB: Database>(
     db: DB,
     spec_id: SpecId,
