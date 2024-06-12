@@ -264,7 +264,8 @@ fn preprocess_dependencies(
 
     // Marking transactions across same sender & recipient as dependents as they
     // cross-depend at the `AccountInfo` level (reading & writing to nonce & balance).
-    // This is critical to avoid this nasty race condition:
+    // This is critical to avoid runtime dependencies that lead to many slow retries,
+    // plus this nasty race condition:
     // 1. A spends money
     // 2. B sends money to A
     // 3. A spends money
@@ -272,10 +273,12 @@ fn preprocess_dependencies(
     // second flagging (2) for re-execution and execute (3) as dependency. (3) would
     // panic with a nonce error reading from (2) before it rewrites the new nonce
     // reading from (1).
-    let mut tx_idxes_by_address = AHashMap::<Address, Vec<TxIdx>>::default();
+    let mut last_tx_idx_by_address = AHashMap::<Address, TxIdx>::default();
+
     // We evaluate from the first transaction with data, since raw transfers' dependencies
     // are already properly ordered here.
     let mut starting_validation_idx = block_size;
+
     for (tx_idx, tx) in txs.iter().enumerate() {
         if starting_validation_idx == block_size && tx_idx > 0 && !tx.data.is_empty() {
             starting_validation_idx = tx_idx;
@@ -289,14 +292,6 @@ fn preprocess_dependencies(
                 recipient_with_changed_balance = Some(to);
             }
         }
-
-        // Find the last transaction index that interacted with an address.
-        let last_index_of = |address: &Address| {
-            tx_idxes_by_address
-                .get(address)
-                .and_then(|tx_idx| tx_idx.last())
-                .cloned()
-        };
 
         // Register a lower transaction as this one's dependency.
         let mut register_dependency = |dependency_idxs: Vec<usize>| {
@@ -320,19 +315,22 @@ fn preprocess_dependencies(
         if &tx.caller == beneficiary_address
             || recipient_with_changed_balance.is_some_and(|to| &to == beneficiary_address)
         {
-            let start_idx = last_index_of(beneficiary_address).unwrap_or(0);
+            let start_idx = last_tx_idx_by_address
+                .get(beneficiary_address)
+                .cloned()
+                .unwrap_or(0);
             register_dependency((start_idx..tx_idx).collect());
         }
         // Otherwise, build dependencies across same senders & recipients
         else {
             let mut dependency_idxs = Vec::new();
-            if let Some(prev_idx) = last_index_of(&tx.caller) {
-                dependency_idxs.push(prev_idx);
+            if let Some(prev_idx) = last_tx_idx_by_address.get(&tx.caller) {
+                dependency_idxs.push(*prev_idx);
             }
             if let Some(to) = recipient_with_changed_balance {
-                if let Some(prev_idx) = last_index_of(&to) {
-                    if !dependency_idxs.contains(&prev_idx) {
-                        dependency_idxs.push(prev_idx);
+                if let Some(prev_idx) = last_tx_idx_by_address.get(&to) {
+                    if !dependency_idxs.contains(prev_idx) {
+                        dependency_idxs.push(*prev_idx);
                     }
                 }
             }
@@ -346,12 +344,9 @@ fn preprocess_dependencies(
         }
 
         // Register this transaction to the sender & recipient index maps.
-        tx_idxes_by_address
-            .entry(tx.caller)
-            .or_default()
-            .push(tx_idx);
+        last_tx_idx_by_address.insert(tx.caller, tx_idx);
         if let Some(to) = recipient_with_changed_balance {
-            tx_idxes_by_address.entry(to).or_default().push(tx_idx);
+            last_tx_idx_by_address.insert(to, tx_idx);
         }
     }
 
