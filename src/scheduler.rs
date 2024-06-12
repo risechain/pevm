@@ -139,12 +139,18 @@ impl Scheduler {
     fn check_done(&self) {
         let observed_cnt = self.decrease_cnt.load(Relaxed);
         let execution_idx = self.execution_idx.load(Relaxed);
+        if execution_idx < self.block_size {
+            return;
+        }
         let validation_idx = self.validation_idx.load(Relaxed);
+        if validation_idx < self.block_size {
+            return;
+        }
         let num_active_tasks = self.num_active_tasks.load(Relaxed);
-        if min(execution_idx, validation_idx) >= self.block_size
-            && num_active_tasks == 0
-            && observed_cnt == self.decrease_cnt.load(Relaxed)
-        {
+        if num_active_tasks > 0 {
+            return;
+        }
+        if observed_cnt == self.decrease_cnt.load(Relaxed) {
             self.done_marker.store(true, Relaxed);
         }
     }
