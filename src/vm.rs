@@ -12,8 +12,8 @@ use revm::{
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
-    MemoryEntry, MemoryLocation, MemoryValue, ReadError, ReadOrigin, ReadSet, Storage, TxIdx,
-    WriteSet,
+    MemoryEntry, MemoryLocation, MemoryValue, Network, ReadError, ReadOrigin, ReadSet, Storage,
+    TxIdx, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -228,6 +228,7 @@ impl<S: Storage> Database for VmDb<S> {
 // `Vm` can be shared among threads.
 pub(crate) struct Vm<S: Storage> {
     spec_id: SpecId,
+    network: Network,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
     storage: Arc<S>,
@@ -237,6 +238,7 @@ pub(crate) struct Vm<S: Storage> {
 impl<S: Storage> Vm<S> {
     pub(crate) fn new(
         spec_id: SpecId,
+        network: Network,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         storage: S,
@@ -244,6 +246,7 @@ impl<S: Storage> Vm<S> {
     ) -> Self {
         Self {
             spec_id,
+            network,
             block_env,
             txs,
             storage: Arc::new(storage),
@@ -288,7 +291,14 @@ impl<S: Storage> Vm<S> {
         if self.spec_id.is_enabled_in(LONDON) {
             gas_price = gas_price.saturating_sub(self.block_env.basefee);
         }
-        match execute_tx(&mut db, self.spec_id, self.block_env.clone(), tx, false) {
+        match execute_tx(
+            &mut db,
+            self.network,
+            self.spec_id,
+            self.block_env.clone(),
+            tx,
+            false,
+        ) {
             Ok(result_and_state) => {
                 let mut gas_payment =
                     Some(gas_price * U256::from(result_and_state.result.gas_used()));
@@ -355,6 +365,7 @@ impl<S: Storage> Vm<S> {
 // TODO: Move to better place?
 pub(crate) fn execute_tx<DB: Database>(
     db: DB,
+    network: Network,
     spec_id: SpecId,
     block_env: BlockEnv,
     tx: TxEnv,
@@ -366,14 +377,18 @@ pub(crate) fn execute_tx<DB: Database>(
             db,
             Env::boxed(
                 // TODO: Should we turn off byte code analysis?
-                CfgEnv::default(),
+                CfgEnv::default().with_chain_id(tx.chain_id.expect("Missing chain_id")),
                 block_env.clone(),
                 tx,
             ),
         ),
         external: (),
     };
-    // TODO: Support OP handlers
-    let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
+    let handler = match network {
+        Network::Ethereum => Handler::mainnet_with_spec(spec_id, with_reward_beneficiary),
+        #[cfg(feature = "optimism")]
+        Network::Optimism => Handler::optimism_with_spec(spec_id, with_reward_beneficiary),
+    };
+
     Evm::new(context, handler).transact()
 }

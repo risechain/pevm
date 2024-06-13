@@ -84,9 +84,16 @@ pub fn execute<S: Storage + Send + Sync>(
     // For instance, to still execute sequentially when used gas is high
     // but preprocessing yields little to no parallelism.
     if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
-        execute_revm_sequential(storage, spec_id, block_env, tx_envs)
+        execute_revm_sequential(storage, network, spec_id, block_env, tx_envs)
     } else {
-        execute_revm(storage, spec_id, block_env, tx_envs, concurrency_level)
+        execute_revm(
+            storage,
+            network,
+            spec_id,
+            block_env,
+            tx_envs,
+            concurrency_level,
+        )
     }
 }
 
@@ -96,6 +103,7 @@ pub fn execute<S: Storage + Send + Sync>(
 // REVM anywhere.
 pub fn execute_revm<S: Storage + Send + Sync>(
     storage: S,
+    network: Network,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
@@ -109,7 +117,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     let Some((scheduler, max_concurrency_level)) =
         preprocess_dependencies(&beneficiary_address, &txs)
     else {
-        return execute_revm_sequential(storage, spec_id, block_env, txs);
+        return execute_revm_sequential(storage, network, spec_id, block_env, txs);
     };
 
     let mut beneficiary_account_info = match storage.basic(beneficiary_address) {
@@ -122,7 +130,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         block_size,
         MemoryLocation::Basic(beneficiary_address),
     ));
-    let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
+    let vm = Vm::new(spec_id, network, block_env, txs, storage, mv_memory.clone());
 
     let mut execution_error = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
@@ -214,6 +222,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
 pub fn execute_revm_sequential<S: Storage>(
     storage: S,
+    network: Network,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
@@ -221,7 +230,7 @@ pub fn execute_revm_sequential<S: Storage>(
     let mut results = Vec::with_capacity(txs.len());
     let mut db = CacheDB::new(StorageWrapper(storage));
     for tx in txs {
-        match execute_tx(&mut db, spec_id, block_env.clone(), tx, true) {
+        match execute_tx(&mut db, network, spec_id, block_env.clone(), tx, true) {
             Ok(result_and_state) => {
                 db.commit(result_and_state.state.clone());
                 results.push(result_and_state);

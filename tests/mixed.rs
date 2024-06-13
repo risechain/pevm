@@ -60,6 +60,7 @@ fn mixed_block() {
     }
     common::test_execute_revm(
         InMemoryStorage::new(final_state, []),
+        pevm::Network::Ethereum,
         SpecId::LATEST,
         BlockEnv::default(),
         // TODO: Shuffle transactions to scatter dependencies around the block.

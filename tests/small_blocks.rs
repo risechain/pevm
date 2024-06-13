@@ -26,6 +26,7 @@ fn empty_alloy_block() {
 fn empty_revm_block() {
     common::test_execute_revm(
         InMemoryStorage::default(),
+        pevm::Network::Ethereum,
         SpecId::LATEST,
         BlockEnv::default(),
         Vec::new(),
@@ -59,6 +60,7 @@ fn one_tx_alloy_block() {
 fn one_tx_revm_block() {
     common::test_execute_revm(
         InMemoryStorage::new([common::mock_account(0)], []),
+        pevm::Network::Ethereum,
         SpecId::LATEST,
         BlockEnv::default(),
         vec![TxEnv {

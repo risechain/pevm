@@ -24,6 +24,7 @@ fn erc20_independent() {
     state.insert(Address::ZERO, PlainAccount::default()); // Beneficiary
     test_execute_revm(
         InMemoryStorage::new(state, []),
+        pevm::Network::Ethereum,
         SpecId::LATEST,
         BlockEnv::default(),
         txs,
@@ -50,6 +51,7 @@ fn erc20_clusters() {
     }
     common::test_execute_revm(
         InMemoryStorage::new(final_state, []),
+        pevm::Network::Ethereum,
         SpecId::LATEST,
         BlockEnv::default(),
         final_txs,

@@ -29,14 +29,21 @@ pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: 
 // the execution results match.
 pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
     storage: S,
+    network: Network,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result(
-        &pevm::execute_revm_sequential(storage.clone(), spec_id, block_env.clone(), txs.clone()),
-        &pevm::execute_revm(storage, spec_id, block_env, txs, concurrency_level),
+        &pevm::execute_revm_sequential(
+            storage.clone(),
+            network,
+            spec_id,
+            block_env.clone(),
+            txs.clone(),
+        ),
+        &pevm::execute_revm(storage, network, spec_id, block_env, txs, concurrency_level),
     );
 }
 

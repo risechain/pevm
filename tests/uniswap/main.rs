@@ -34,6 +34,7 @@ fn uniswap_clusters() {
     }
     common::test_execute_revm(
         InMemoryStorage::new(final_state, []),
+        pevm::Network::Ethereum,
         SpecId::LATEST,
         BlockEnv::default(),
         final_txs,
