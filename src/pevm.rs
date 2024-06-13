@@ -432,20 +432,24 @@ fn post_process_beneficiary(
     beneficiary_account_info: &mut AccountInfo,
     value: MemoryValue,
 ) -> Account {
-    match value {
+    let touched = match value {
         MemoryValue::Basic(info) => {
             *beneficiary_account_info = *info;
+            true
         }
         MemoryValue::LazyBeneficiaryBalance(addition) => {
             beneficiary_account_info.balance += addition;
+            !addition.is_zero()
         }
         _ => unreachable!(),
-    }
+    };
     // TODO: This potentially wipes beneficiary account's storage.
     // Does that happen and if so is it acceptable? A quick test with
     // REVM wipes it too!
     let mut beneficiary_account = Account::from(beneficiary_account_info.clone());
-    beneficiary_account.mark_touch();
+    if touched {
+        beneficiary_account.mark_touch();
+    }
     beneficiary_account
 }
 
