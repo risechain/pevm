@@ -15,7 +15,7 @@ fn test_beneficiary(get_address: fn(usize) -> Address) {
     common::test_execute_revm(
         // Mock the beneficiary account (`Address:ZERO`) and the next `BLOCK_SIZE` user accounts.
         InMemoryStorage::new((0..=BLOCK_SIZE).map(common::mock_account), []),
-        pevm::Network::Ethereum,
+        pevm::ChainSpec::Ethereum { chain_id: 1 },
         SpecId::LATEST,
         BlockEnv::default(),
         // Mock `BLOCK_SIZE` transactions sending some tokens to itself.

@@ -33,7 +33,7 @@ static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let spec_id = SpecId::LATEST;
-    let network = pevm::Network::Ethereum;
+    let network = pevm::ChainSpec::Ethereum{chain_id: 1};
     let block_env = BlockEnv::default();
     let storage = InMemoryStorage::new(state, []);
     let mut group = c.benchmark_group(name);

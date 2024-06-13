@@ -12,7 +12,7 @@ use revm::{
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
-    MemoryEntry, MemoryLocation, MemoryValue, Network, ReadError, ReadOrigin, ReadSet, Storage,
+    ChainSpec, MemoryEntry, MemoryLocation, MemoryValue, ReadError, ReadOrigin, ReadSet, Storage,
     TxIdx, WriteSet,
 };
 
@@ -228,7 +228,7 @@ impl<S: Storage> Database for VmDb<S> {
 // `Vm` can be shared among threads.
 pub(crate) struct Vm<S: Storage> {
     spec_id: SpecId,
-    network: Network,
+    chain_spec: ChainSpec,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
     storage: Arc<S>,
@@ -238,7 +238,7 @@ pub(crate) struct Vm<S: Storage> {
 impl<S: Storage> Vm<S> {
     pub(crate) fn new(
         spec_id: SpecId,
-        network: Network,
+        chain_spec: ChainSpec,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         storage: S,
@@ -246,7 +246,7 @@ impl<S: Storage> Vm<S> {
     ) -> Self {
         Self {
             spec_id,
-            network,
+            chain_spec,
             block_env,
             txs,
             storage: Arc::new(storage),
@@ -293,7 +293,7 @@ impl<S: Storage> Vm<S> {
         }
         match execute_tx(
             &mut db,
-            self.network,
+            self.chain_spec,
             self.spec_id,
             self.block_env.clone(),
             tx,
@@ -365,7 +365,7 @@ impl<S: Storage> Vm<S> {
 // TODO: Move to better place?
 pub(crate) fn execute_tx<DB: Database>(
     db: DB,
-    network: Network,
+    chain_spec: ChainSpec,
     spec_id: SpecId,
     block_env: BlockEnv,
     tx: TxEnv,
@@ -384,10 +384,10 @@ pub(crate) fn execute_tx<DB: Database>(
         ),
         external: (),
     };
-    let handler = match network {
-        Network::Ethereum => Handler::mainnet_with_spec(spec_id, with_reward_beneficiary),
+    let handler = match chain_spec {
+        ChainSpec::Ethereum { .. } => Handler::mainnet_with_spec(spec_id, with_reward_beneficiary),
         #[cfg(feature = "optimism")]
-        Network::Optimism => Handler::optimism_with_spec(spec_id, with_reward_beneficiary),
+        ChainSpec::Optimism { .. } => Handler::optimism_with_spec(spec_id, with_reward_beneficiary),
     };
 
     Evm::new(context, handler).transact()

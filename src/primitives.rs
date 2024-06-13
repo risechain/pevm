@@ -1,19 +1,25 @@
 // TODO: Support custom chains like OP & RISE
 
-use alloy_primitives::{Bytes, B256, U128};
+use alloy_primitives::{Bytes, ChainId, B256, U128};
 use alloy_rpc_types::{BlockTransactions, Header};
 use revm::primitives::{
     BlobExcessGasAndPrice, BlockEnv, OptimismFields, SpecId, TransactTo, TxEnv, U256,
 };
 
 /// Represents the network type.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Network {
+#[derive(Debug, Clone, Copy)]
+pub enum ChainSpec {
     /// Ethereum network.
-    Ethereum,
+    Ethereum {
+        /// Represents the ID of the chain. (Ethereum Mainnet: 1)
+        chain_id: ChainId,
+    },
     /// Optimism network.
     #[cfg(feature = "optimism")]
-    Optimism,
+    Optimism {
+        /// Represents the ID of the chain. (Optimism Mainnet: 10)
+        chain_id: ChainId,
+    },
 }
 
 /// Get the REVM spec id of an Alloy block.
@@ -74,18 +80,18 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
 // TODO: Properly test this.
-pub(crate) fn get_tx_envs(network: Network, transactions: &BlockTransactions) -> Vec<TxEnv> {
+pub(crate) fn get_tx_envs(chain_spec: ChainSpec, transactions: &BlockTransactions) -> Vec<TxEnv> {
     let mut tx_envs = Vec::with_capacity(transactions.len());
     for tx in transactions.txns() {
         tx_envs.push(TxEnv {
             caller: tx.from,
             gas_limit: tx.gas as u64,
-            gas_price: match tx.transaction_index.unwrap() {
+            gas_price: match tx.transaction_type.unwrap() {
                 0 | 1 => U256::from(tx.gas_price.expect("Missing gasprice")),
                 2 | 3 => U256::from(tx.max_fee_per_gas.expect("Missing max_fee_per_gas")),
                 #[cfg(feature = "optimism")]
-                126 if network == Network::Optimism => U256::ZERO,
-                _ => panic!("Unknown tx type"),
+                126 if matches!(chain_spec, ChainSpec::Optimism { .. }) => U256::ZERO,
+                unknown_value => panic!("Unknown tx type: {}", unknown_value),
             },
             gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
             transact_to: match tx.to {
@@ -117,7 +123,7 @@ pub(crate) fn get_tx_envs(network: Network, transactions: &BlockTransactions) ->
 
             #[cfg(feature = "optimism")]
             optimism: {
-                if network == Network::Optimism {
+                if matches!(chain_spec, ChainSpec::Optimism { .. }) {
                     OptimismFields {
                         source_hash: tx
                             .other

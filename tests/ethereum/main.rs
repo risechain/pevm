@@ -135,7 +135,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                 test.expect_exception.as_deref(),
                 pevm::execute_revm(
                     InMemoryStorage::new(chain_state.clone(), []),
-                    pevm::Network::Ethereum,
+                    pevm::ChainSpec::Ethereum{chain_id: 1},
                     spec_id,
                     build_block_env(&unit.env),
                     vec![tx_env.unwrap()],
