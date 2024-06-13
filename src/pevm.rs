@@ -275,15 +275,7 @@ fn preprocess_dependencies(
     // reading from (1).
     let mut last_tx_idx_by_address = AHashMap::<Address, TxIdx>::default();
 
-    // We evaluate from the first transaction with data, since raw transfers' dependencies
-    // are already properly ordered here.
-    let mut starting_validation_idx = block_size;
-
     for (tx_idx, tx) in txs.iter().enumerate() {
-        if starting_validation_idx == block_size && tx_idx > 0 && !tx.data.is_empty() {
-            starting_validation_idx = tx_idx;
-        }
-
         // We check for a non-empty value that guarantees to update the balance of the
         // recipient, to avoid smart contract interactions that only some storage.
         let mut recipient_with_changed_balance = None;
@@ -365,7 +357,6 @@ fn preprocess_dependencies(
             transactions_status,
             transactions_dependents,
             transactions_dependencies,
-            starting_validation_idx,
         ),
         max_concurrency_level,
     ))
@@ -405,10 +396,11 @@ fn try_execute<S: Storage>(
                 execution_result,
                 read_set,
                 write_set,
+                next_validation_idx,
             } => {
                 *index_mutex!(execution_results, tx_version.tx_idx) = Some(execution_result);
                 let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
-                scheduler.finish_execution(tx_version, wrote_new_location)
+                scheduler.finish_execution(tx_version, wrote_new_location, next_validation_idx)
             }
         };
     }
