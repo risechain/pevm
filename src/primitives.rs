@@ -1,7 +1,20 @@
 // TODO: Support custom chains like OP & RISE
 
+use alloy_primitives::{Bytes, B256, U128};
 use alloy_rpc_types::{BlockTransactions, Header};
-use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, SpecId, TransactTo, TxEnv, U256};
+use revm::primitives::{
+    BlobExcessGasAndPrice, BlockEnv, OptimismFields, SpecId, TransactTo, TxEnv, U256,
+};
+
+/// Represents the network type.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Network {
+    /// Ethereum network.
+    Ethereum,
+    /// Optimism network.
+    #[cfg(feature = "optimism")]
+    Optimism,
+}
 
 /// Get the REVM spec id of an Alloy block.
 // Currently hardcoding Ethereum hardforks from these reference:
@@ -60,18 +73,20 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
 /// Get the REVM tx envs of an Alloy block.
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
-// TODO: Better error handling & properly test this.
-pub(crate) fn get_tx_envs(transactions: &BlockTransactions) -> Option<Vec<TxEnv>> {
+// TODO: Properly test this.
+pub(crate) fn get_tx_envs(network: Network, transactions: &BlockTransactions) -> Vec<TxEnv> {
     let mut tx_envs = Vec::with_capacity(transactions.len());
-    for tx in transactions.as_transactions()? {
+    for tx in transactions.txns() {
         tx_envs.push(TxEnv {
             caller: tx.from,
-            gas_limit: tx.gas.try_into().ok()?,
-            gas_price: U256::from(if tx.transaction_type? >= 2 {
-                tx.max_fee_per_gas?
-            } else {
-                tx.gas_price?
-            }),
+            gas_limit: tx.gas as u64,
+            gas_price: match tx.transaction_index.unwrap() {
+                0 | 1 => U256::from(tx.gas_price.expect("Missing gasprice")),
+                2 | 3 => U256::from(tx.max_fee_per_gas.expect("Missing max_fee_per_gas")),
+                #[cfg(feature = "optimism")]
+                126 if network == Network::Optimism => U256::ZERO,
+                _ => panic!("Unknown tx type"),
+            },
             gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
             transact_to: match tx.to {
                 Some(address) => TransactTo::Call(address),
@@ -92,14 +107,37 @@ pub(crate) fn get_tx_envs(transactions: &BlockTransactions) -> Option<Vec<TxEnv>
                         access
                             .storage_keys
                             .iter()
-                            .map(|k| U256::from_be_bytes(**k))
+                            .map(|&k| U256::from_be_bytes(*k))
                             .collect(),
                     )
                 })
                 .collect(),
             blob_hashes: tx.blob_versioned_hashes.clone().unwrap_or_default(),
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
+
+            #[cfg(feature = "optimism")]
+            optimism: {
+                if network == Network::Optimism {
+                    OptimismFields {
+                        source_hash: tx
+                            .other
+                            .get_deserialized::<B256>("sourceHash")
+                            .map(|result| result.unwrap()),
+                        mint: tx
+                            .other
+                            .get_deserialized::<U128>("mint")
+                            .map(|result| result.unwrap().to()),
+                        is_system_transaction: tx
+                            .other
+                            .get_deserialized("isSystemTx")
+                            .map(|result| result.unwrap()),
+                        enveloped_tx: Some(Bytes::default()),
+                    }
+                } else {
+                    OptimismFields::default()
+                }
+            },
         })
     }
-    Some(tx_envs)
+    tx_envs
 }

@@ -16,7 +16,7 @@ use revm::{
 
 use crate::{
     mv_memory::MvMemory,
-    primitives::{get_block_env, get_block_spec, get_tx_envs},
+    primitives::{get_block_env, get_block_spec, get_tx_envs, Network},
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, Vm, VmExecutionResult},
@@ -63,6 +63,7 @@ pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
 pub fn execute<S: Storage + Send + Sync>(
+    network: Network,
     storage: S,
     block: Block,
     concurrency_level: NonZeroUsize,
@@ -74,7 +75,8 @@ pub fn execute<S: Storage + Send + Sync>(
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
-    let Some(tx_envs) = get_tx_envs(&block.transactions) else {
+    let tx_envs = get_tx_envs(network, &block.transactions);
+    if tx_envs.is_empty() {
         return Err(PevmError::MissingTransactionData);
     };
 

@@ -11,6 +11,7 @@ pub mod common;
 #[test]
 fn empty_alloy_block() {
     common::test_execute_alloy(
+        pevm::Network::Ethereum,
         InMemoryStorage::default(),
         Block {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
@@ -34,6 +35,7 @@ fn empty_revm_block() {
 #[test]
 fn one_tx_alloy_block() {
     common::test_execute_alloy(
+        pevm::Network::Ethereum,
         InMemoryStorage::new([common::mock_account(0)], []),
         Block {
             // Legit header but with no transactions

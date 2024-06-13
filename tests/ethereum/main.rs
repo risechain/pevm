@@ -14,8 +14,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, TransactTo,
-    TxEnv, U256,
+    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, OptimismFields,
+    TransactTo, TxEnv, U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -96,6 +96,8 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv,
         gas_priority_fee: tx.max_priority_fee_per_gas,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+        #[cfg(feature = "optimism")]
+        optimism: OptimismFields::default(),
     })
 }
 

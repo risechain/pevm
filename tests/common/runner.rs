@@ -2,7 +2,7 @@ use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{PevmResult, PevmTxExecutionResult, Storage};
+use pevm::{Network, PevmResult, PevmTxExecutionResult, Storage};
 use revm::{
     db::PlainAccount,
     primitives::{alloy_primitives::U160, AccountInfo, Address, BlockEnv, SpecId, TxEnv, U256},
@@ -83,13 +83,20 @@ fn calculate_receipt_root(
 // Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
 pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
+    network: Network,
     storage: S,
     block: Block,
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let sequential_result = pevm::execute(storage.clone(), block.clone(), concurrency_level, true);
-    let parallel_result = pevm::execute(storage, block.clone(), concurrency_level, false);
+    let sequential_result = pevm::execute(
+        network,
+        storage.clone(),
+        block.clone(),
+        concurrency_level,
+        true,
+    );
+    let parallel_result = pevm::execute(network, storage, block.clone(), concurrency_level, false);
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {

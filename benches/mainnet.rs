@@ -33,6 +33,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Sequential", |b| {
             b.iter(|| {
                 pevm::execute(
+                    pevm::Network::Ethereum,
                     black_box(storage.clone()),
                     black_box(block.clone()),
                     black_box(concurrency_level),
@@ -43,6 +44,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Parallel", |b| {
             b.iter(|| {
                 pevm::execute(
+                    pevm::Network::Ethereum,
                     black_box(storage.clone()),
                     black_box(block.clone()),
                     black_box(concurrency_level),

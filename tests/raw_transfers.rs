@@ -80,6 +80,7 @@ fn raw_transfers_same_sender_multiple_txs() {
 fn raw_transfers_independent_alloy() {
     let block_size = 100_000; // number of transactions
     common::test_execute_alloy(
+        pevm::Network::Ethereum,
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
         Block {
