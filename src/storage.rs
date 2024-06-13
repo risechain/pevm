@@ -101,19 +101,19 @@ pub trait Storage {
     type Error: Debug;
 
     /// Get basic account information.
-    fn basic(&self, address: Address) -> Result<Option<AccountBasic>, Self::Error>;
+    fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error>;
 
     /// Get account code by its hash.
-    fn code_by_hash(&self, code_hash: B256) -> Result<Bytes, Self::Error>;
+    fn code_by_hash(&self, code_hash: &B256) -> Result<Bytes, Self::Error>;
 
     /// Get if the account already has storage (to support EIP-7610).
-    fn has_storage(&self, address: Address) -> Result<bool, Self::Error>;
+    fn has_storage(&self, address: &Address) -> Result<bool, Self::Error>;
 
     /// Get storage value of address at index.
-    fn storage(&self, address: Address, index: U256) -> Result<U256, Self::Error>;
+    fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error>;
 
     /// Get block hash by block number.
-    fn block_hash(&self, number: U256) -> Result<B256, Self::Error>;
+    fn block_hash(&self, number: &U256) -> Result<B256, Self::Error>;
 }
 
 // We can use any REVM database as storage provider. Convenient for
@@ -126,24 +126,24 @@ where
 {
     type Error = D::Error;
 
-    fn basic(&self, address: Address) -> Result<Option<AccountBasic>, Self::Error> {
-        D::basic_ref(self, address).map(|a| a.map(|a| a.into()))
+    fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
+        D::basic_ref(self, *address).map(|a| a.map(|a| a.into()))
     }
 
-    fn code_by_hash(&self, code_hash: B256) -> Result<Bytes, Self::Error> {
-        D::code_by_hash_ref(self, code_hash).map(|b| b.original_bytes())
+    fn code_by_hash(&self, code_hash: &B256) -> Result<Bytes, Self::Error> {
+        D::code_by_hash_ref(self, *code_hash).map(|b| b.original_bytes())
     }
 
-    fn has_storage(&self, address: Address) -> Result<bool, Self::Error> {
-        D::has_storage_ref(self, address)
+    fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
+        D::has_storage_ref(self, *address)
     }
 
-    fn storage(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        D::storage_ref(self, address, index)
+    fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
+        D::storage_ref(self, *address, *index)
     }
 
-    fn block_hash(&self, number: U256) -> Result<B256, Self::Error> {
-        D::block_hash_ref(self, number)
+    fn block_hash(&self, number: &U256) -> Result<B256, Self::Error> {
+        D::block_hash_ref(self, *number)
     }
 }
 
@@ -155,23 +155,23 @@ impl<S: Storage> DatabaseRef for StorageWrapper<S> {
     type Error = S::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        S::basic(&self.0, address).map(|account| account.map(AccountBasic::into))
+        S::basic(&self.0, &address).map(|account| account.map(AccountBasic::into))
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        S::code_by_hash(&self.0, code_hash).map(Bytecode::new_raw)
+        S::code_by_hash(&self.0, &code_hash).map(Bytecode::new_raw)
     }
 
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
-        S::has_storage(&self.0, address)
+        S::has_storage(&self.0, &address)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        S::storage(&self.0, address, index)
+        S::storage(&self.0, &address, &index)
     }
 
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        S::block_hash(&self.0, number)
+        S::block_hash(&self.0, &number)
     }
 }
 

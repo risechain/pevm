@@ -121,7 +121,7 @@ impl MvMemory {
         // TODO: Better error handling
         let last_read_set = index_mutex!(self.last_read_set, tx_idx);
         for (location, prior_origin) in last_read_set.common.iter() {
-            match self.read_closest(location, tx_idx) {
+            match self.read_closest(location, &tx_idx) {
                 ReadMemoryResult::ReadError { .. } => return false,
                 ReadMemoryResult::NotFound => {
                     if *prior_origin != ReadOrigin::Storage {
@@ -189,11 +189,11 @@ impl MvMemory {
     pub(crate) fn read_closest(
         &self,
         location: &MemoryLocation,
-        tx_idx: TxIdx,
+        tx_idx: &TxIdx,
     ) -> ReadMemoryResult {
         if let Some(written_transactions) = self.data.get(location) {
             for (idx, entry) in written_transactions.iter().rev() {
-                if *idx < tx_idx {
+                if idx < tx_idx {
                     match entry {
                         MemoryEntry::Estimate => {
                             return ReadMemoryResult::ReadError {

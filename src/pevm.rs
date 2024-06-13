@@ -95,7 +95,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return execute_revm_sequential(storage, spec_id, block_env, txs);
     };
 
-    let mut beneficiary_account = match storage.basic(beneficiary_address) {
+    let mut beneficiary_account = match storage.basic(&beneficiary_address) {
         Ok(Some(account)) => account.into(),
         _ => AccountInfo::default(),
     };
