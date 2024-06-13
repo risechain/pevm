@@ -1,5 +1,5 @@
 use std::{
-    cmp::{max, min},
+    cmp::min,
     sync::{
         // TODO: Fine-tune all atomic `Ordering`s.
         // We're starting with `Relaxed` for maximum performance
@@ -66,8 +66,9 @@ pub(crate) struct Scheduler {
     transactions_status: Vec<CachePadded<Mutex<TxIncarnationStatus>>>,
     /// The number of transactions in this block.
     block_size: usize,
-    /// The first transaction going parallel that needs validation.
-    starting_validation_idx: usize,
+    // We won't validate until we find the first transaction that
+    // reads or writes outside of its preprocessed dependencies.
+    min_validation_idx: AtomicUsize,
     /// Number of ongoing execution and validation tasks.
     num_active_tasks: AtomicUsize,
     /// Number of times a task index was decreased.
@@ -95,13 +96,10 @@ impl Scheduler {
         transactions_status: TransactionsStatus,
         transactions_dependents: TransactionsDependents,
         transactions_dependencies: TransactionsDependencies,
-        starting_validation_idx: usize,
     ) -> Self {
         Self {
             block_size,
-            starting_validation_idx,
             execution_idx: CachePadded::new(AtomicUsize::new(0)),
-            validation_idx: CachePadded::new(AtomicUsize::new(starting_validation_idx)),
             num_active_tasks: AtomicUsize::new(0),
             decrease_cnt: AtomicUsize::new(0),
             transactions_status: transactions_status
@@ -117,6 +115,10 @@ impl Scheduler {
                 .map(|(tx_idx, deps)| (tx_idx, Mutex::new(deps)))
                 .collect(),
             done_marker: AtomicBool::new(false),
+            // We won't validate until we find the first transaction that
+            // reads or writes outside of its preprocessed dependencies.
+            validation_idx: CachePadded::new(AtomicUsize::new(block_size)),
+            min_validation_idx: AtomicUsize::new(block_size),
         }
     }
 
@@ -270,6 +272,7 @@ impl Scheduler {
         &self,
         tx_version: TxVersion,
         wrote_new_location: bool,
+        next_validation_idx: Option<TxIdx>,
     ) -> Option<ValidationTask> {
         // TODO: Better error handling
         let mut transaction_status = index_mutex!(self.transactions_status, tx_version.tx_idx);
@@ -304,20 +307,31 @@ impl Scheduler {
             if let Some(min_idx) = min_dependent_idx {
                 self.decrease_execution_idx(min_idx);
             }
-            if self.validation_idx.load(Relaxed) > tx_version.tx_idx {
-                // This incarnation wrote to a new location, so we must
-                // re-evaluate it (via the immediately returned task returned
-                // immediately) and all higher transactions in case they read
-                // the new location.
-                if wrote_new_location {
-                    self.decrease_validation_idx(max(
-                        tx_version.tx_idx + 1,
-                        self.starting_validation_idx,
-                    ));
+
+            // Decide where to validate from next
+            let min_validation_idx = if let Some(tx_idx) = next_validation_idx {
+                min(self.min_validation_idx.fetch_min(tx_idx, Relaxed), tx_idx)
+            } else {
+                self.min_validation_idx.load(Relaxed)
+            };
+            // Have found a min validation index to even bother
+            if min_validation_idx < self.block_size {
+                // Must re-validate from min as this transaction is lower
+                if tx_version.tx_idx < min_validation_idx {
+                    if wrote_new_location {
+                        self.decrease_validation_idx(min_validation_idx);
+                    }
                 }
-                if tx_version.tx_idx >= self.starting_validation_idx {
+                // Validate from this transaction as it's in between min and the current
+                // validation index.
+                else if tx_version.tx_idx < self.validation_idx.load(Relaxed) {
+                    if wrote_new_location {
+                        self.decrease_validation_idx(tx_version.tx_idx + 1);
+                    }
                     return Some(tx_version);
                 }
+                // Don't need to validate anything if the current validation index is
+                // lower or equal -- it will catch up later.
             }
         } else {
             // TODO: Better error handling

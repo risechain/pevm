@@ -6,7 +6,7 @@ use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, ResultAndState,
         SpecId::{self, LONDON},
-        TxEnv, B256, U256,
+        TransactTo, TxEnv, B256, U256,
     },
     Context, Database, Evm, EvmContext, Handler,
 };
@@ -74,12 +74,24 @@ pub(crate) enum VmExecutionResult {
         execution_result: PevmTxExecutionResult,
         read_set: ReadSet,
         write_set: WriteSet,
+        // From which transaction index do we need to validate from after
+        // this execution. This is `None` when no validation is required.
+        // For instance, for transactions that only read and write to the
+        // from and to addresses, which preprocessing has already ordered
+        // dependencies correctly. Note that this is used to set the min
+        // validation index in the scheduler, meaing a `None` here will
+        // still be validated if there was a lower transaction that has
+        // broken the preprocessed dependency chain and returned `Some`.
+        // TODO: Better name & doc please.
+        next_validation_idx: Option<TxIdx>,
     },
 }
 
 // A database interface that intercepts reads while executing a specific
 // transaction with revm. It provides values from the multi-version data
 // structure & storage, and tracks the read set of the current execution.
+// TODO: Simplify this type, like grouping `from` and `to` into a
+// `preprocessed_addresses` or a `preprocessed_locations` vector.
 struct VmDb<S: Storage> {
     beneficiary_address: Address,
     beneficiary_location: MemoryLocation,
@@ -87,18 +99,26 @@ struct VmDb<S: Storage> {
     mv_memory: Arc<MvMemory>,
     storage: Arc<S>,
     read_set: ReadSet,
+    // Check if this transaction has read an account other than its sender
+    // and to addresses. We must validate from this transaction if it has.
+    read_externally: bool,
+    from: Address,
+    to: Option<Address>,
 }
 
 impl<S: Storage> VmDb<S> {
     fn new(
         beneficiary_address: Address,
+        beneficiary_location: MemoryLocation,
         tx_idx: TxIdx,
+        from: Address,
+        to: Option<Address>,
         mv_memory: Arc<MvMemory>,
         storage: Arc<S>,
     ) -> Self {
         Self {
             beneficiary_address,
-            beneficiary_location: MemoryLocation::Basic(beneficiary_address),
+            beneficiary_location,
             tx_idx,
             mv_memory,
             storage,
@@ -108,6 +128,9 @@ impl<S: Storage> VmDb<S> {
                 common: Vec::with_capacity(2),
                 beneficiary: Vec::new(),
             },
+            from,
+            to,
+            read_externally: false,
         }
     }
 
@@ -233,7 +256,12 @@ impl<S: Storage> Database for VmDb<S> {
             return Ok(Some(AccountInfo::default()));
         }
         match self.read(MemoryLocation::Basic(address), !is_preload) {
-            Ok(MemoryValue::Basic(value)) => Ok(Some(*value)),
+            Ok(MemoryValue::Basic(account)) => {
+                if !is_preload && address != self.from && Some(address) != self.to {
+                    self.read_externally = true;
+                }
+                Ok(Some(*account))
+            }
             Err(ReadError::NotFound) => Ok(None),
             Err(err) => Err(err),
             _ => Err(ReadError::InvalidMemoryLocationType),
@@ -254,6 +282,7 @@ impl<S: Storage> Database for VmDb<S> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        self.read_externally = true;
         match self.read(MemoryLocation::Storage(address, index), true) {
             Err(err) => Err(err),
             Ok(MemoryValue::Storage(value)) => Ok(value),
@@ -274,6 +303,7 @@ impl<S: Storage> Database for VmDb<S> {
 pub(crate) struct Vm<S: Storage> {
     spec_id: SpecId,
     block_env: BlockEnv,
+    beneficiary_location: MemoryLocation,
     txs: Vec<TxEnv>,
     storage: Arc<S>,
     mv_memory: Arc<MvMemory>,
@@ -289,6 +319,7 @@ impl<S: Storage> Vm<S> {
     ) -> Self {
         Self {
             spec_id,
+            beneficiary_location: MemoryLocation::Basic(block_env.coinbase),
             block_env,
             txs,
             storage: Arc::new(storage),
@@ -314,16 +345,25 @@ impl<S: Storage> Vm<S> {
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
     pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
+        // SATEFY: A correct scheduler would guarantee this index to be inbound.
+        let tx = unsafe { self.txs.get_unchecked(tx_idx) }.clone();
+        let from = tx.caller;
+        let (is_call_tx, to) = match tx.transact_to {
+            TransactTo::Call(address) => (false, Some(address)),
+            TransactTo::Create => (true, None),
+        };
+
         // Set up DB
         let mut db = VmDb::new(
             self.block_env.coinbase,
+            self.beneficiary_location.clone(),
             tx_idx,
+            from,
+            to,
             self.mv_memory.clone(),
             self.storage.clone(),
         );
 
-        // SATEFY: A correct scheduler would guarantee this index to be inbound.
-        let tx = unsafe { self.txs.get_unchecked(tx_idx) }.clone();
         // Gas price
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
             min(tx.gas_price, priority_fee + self.block_env.basefee)
@@ -376,12 +416,37 @@ impl<S: Storage> Vm<S> {
                     }
                 }
 
-                // A non-existent explicit write hasn't taken the cell.
+                // A non-existent explicit write hasn't taken the option.
                 if let Some(gas_payment) = gas_payment {
                     write_set.insert(
-                        MemoryLocation::Basic(self.block_env.coinbase),
+                        self.beneficiary_location.clone(),
                         MemoryValue::LazyBeneficiaryBalance(gas_payment),
                     );
+                }
+
+                let mut next_validation_idx = None;
+                // Validate from this transaction if it reads something outside of its
+                // sender and to infos.
+                if db.read_externally {
+                    next_validation_idx = Some(tx_idx);
+                }
+                // Validate from the next transaction if doesn't read externally but
+                // deploy a new contract.
+                else if is_call_tx {
+                    next_validation_idx = Some(tx_idx + 1);
+                }
+                // Validate from the next transaction if it writes to a location outside
+                // of the beneficiary account, its sender and to infos.
+                else {
+                    let from_location = MemoryLocation::Basic(from);
+                    let to_location = MemoryLocation::Basic(to.unwrap());
+                    if write_set.iter().any(|(location, _)| {
+                        location != &from_location
+                            && location != &to_location
+                            && location != &self.beneficiary_location
+                    }) {
+                        next_validation_idx = Some(tx_idx + 1);
+                    }
                 }
 
                 VmExecutionResult::Ok {
@@ -391,6 +456,7 @@ impl<S: Storage> Vm<S> {
                     ),
                     read_set: db.read_set,
                     write_set,
+                    next_validation_idx,
                 }
             }
             Err(EVMError::Database(ReadError::BlockingIndex(blocking_tx_idx))) => {
