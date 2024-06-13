@@ -377,7 +377,7 @@ pub(crate) fn execute_tx<DB: Database>(
             db,
             Env::boxed(
                 // TODO: Should we turn off byte code analysis?
-                CfgEnv::default().with_chain_id(tx.chain_id.expect("Missing chain_id")),
+                CfgEnv::default().with_chain_id(chain_spec.chain_id()),
                 block_env.clone(),
                 tx,
             ),
