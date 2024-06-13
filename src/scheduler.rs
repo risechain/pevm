@@ -59,7 +59,7 @@ use crate::{
 pub(crate) struct Scheduler {
     /// The next transaction to try and execute.
     execution_idx: CachePadded<AtomicUsize>,
-    /// The next tranasction to try and validate.
+    /// The next transaction to try and validate.
     validation_idx: CachePadded<AtomicUsize>,
     /// The most up-to-date incarnation number (initially 0) and
     /// the status of this incarnation.
@@ -73,7 +73,7 @@ pub(crate) struct Scheduler {
     num_active_tasks: AtomicUsize,
     /// Number of times a task index was decreased.
     decrease_cnt: AtomicUsize,
-    /// The list of dependent transactions to resumne when the
+    /// The list of dependent transactions to resume when the
     /// key transaction is re-executed.
     transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
     /// A list of optional dependencies flagged during preprocessing.
@@ -222,12 +222,12 @@ impl Scheduler {
 
     // Add `tx_idx` as a dependent of `blocking_tx_idx` so `tx_idx` is
     // re-executed when the next `blocking_tx_idx` incarnation is executed.
-    // Return `false` if we encouter a race condition when `blocking_tx_idx`
+    // Return `false` if we encounter a race condition when `blocking_tx_idx`
     // gets re-executed before the dependency can be added.
     // TODO: Better error handling, including asserting that both indices are in range.
     pub(crate) fn add_dependency(&self, tx_idx: TxIdx, blocking_tx_idx: TxIdx) -> bool {
         // This is an important lock to prevent a race condition where the blocking
-        // transaction completes re-execution before this dependecy can be added.
+        // transaction completes re-execution before this dependency can be added.
         let blocking_transaction_status = index_mutex!(self.transactions_status, blocking_tx_idx);
         if let TxIncarnationStatus::Executed(_) = *blocking_transaction_status {
             return false;

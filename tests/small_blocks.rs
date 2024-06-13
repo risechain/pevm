@@ -1,4 +1,4 @@
-// Test small blocks that we have specific handling for, like implicity fine-tuning
+// Test small blocks that we have specific handling for, like implicit fine-tuning
 // the concurrency level, falling back to sequential processing, etc.
 
 use alloy_primitives::{Address, U256};

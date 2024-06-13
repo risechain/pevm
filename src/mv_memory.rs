@@ -176,7 +176,7 @@ impl MvMemory {
     // for reading speculatively, that no transaction between the highest
     // transaction found and the input transaction writes to the same memory
     // location.
-    // If the entry corresponding to the highest transaction index is an ESTIMTE
+    // If the entry corresponding to the highest transaction index is an ESTIMATE
     // marker, we return an error to tell the caller to postpone the execution of
     // the input transaction until the next incarnation of this highest blocking
     // index transaction completes, since it is expected to write to the ESTIMATE
