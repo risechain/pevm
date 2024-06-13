@@ -20,6 +20,15 @@ enum MemoryLocation {
     Storage(Address, U256),
 }
 
+impl MemoryLocation {
+    fn address(&self) -> &Address {
+        match self {
+            MemoryLocation::Basic(address) => address,
+            MemoryLocation::Storage(address, _) => address,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum MemoryValue {
     Basic(Box<AccountInfo>),

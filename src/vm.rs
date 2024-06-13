@@ -92,32 +92,31 @@ pub(crate) enum VmExecutionResult {
 // structure & storage, and tracks the read set of the current execution.
 // TODO: Simplify this type, like grouping `from` and `to` into a
 // `preprocessed_addresses` or a `preprocessed_locations` vector.
-struct VmDb<S: Storage> {
-    beneficiary_address: Address,
-    beneficiary_location: MemoryLocation,
-    tx_idx: TxIdx,
-    mv_memory: Arc<MvMemory>,
-    storage: Arc<S>,
+struct VmDb<'a, S: Storage> {
+    // References from the main VM instance.
+    beneficiary_location: &'a MemoryLocation,
+    tx_idx: &'a TxIdx,
+    from: &'a Address,
+    to: &'a Option<Address>,
+    mv_memory: &'a Arc<MvMemory>,
+    storage: &'a S,
+    // List of memory locations that this transaction reads.
     read_set: ReadSet,
     // Check if this transaction has read an account other than its sender
     // and to addresses. We must validate from this transaction if it has.
     read_externally: bool,
-    from: Address,
-    to: Option<Address>,
 }
 
-impl<S: Storage> VmDb<S> {
+impl<'a, S: Storage> VmDb<'a, S> {
     fn new(
-        beneficiary_address: Address,
-        beneficiary_location: MemoryLocation,
-        tx_idx: TxIdx,
-        from: Address,
-        to: Option<Address>,
-        mv_memory: Arc<MvMemory>,
-        storage: Arc<S>,
+        beneficiary_location: &'a MemoryLocation,
+        tx_idx: &'a TxIdx,
+        from: &'a Address,
+        to: &'a Option<Address>,
+        mv_memory: &'a Arc<MvMemory>,
+        storage: &'a S,
     ) -> Self {
         Self {
-            beneficiary_address,
             beneficiary_location,
             tx_idx,
             mv_memory,
@@ -139,7 +138,7 @@ impl<S: Storage> VmDb<S> {
         location: MemoryLocation,
         update_read_set: bool,
     ) -> Result<MemoryValue, ReadError> {
-        if location == self.beneficiary_location {
+        if &location == self.beneficiary_location {
             return self.read_beneficiary();
         }
 
@@ -154,14 +153,14 @@ impl<S: Storage> VmDb<S> {
                         .push((location.clone(), ReadOrigin::Storage));
                 }
                 match location {
-                    MemoryLocation::Basic(address) => match self.storage.basic(address) {
+                    MemoryLocation::Basic(address) => match self.storage.basic(&address) {
                         Ok(Some(account)) => Ok(MemoryValue::Basic(Box::new(account.into()))),
                         Ok(None) => Err(ReadError::NotFound),
                         Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
                     },
                     MemoryLocation::Storage(address, index) => self
                         .storage
-                        .storage(address, index)
+                        .storage(&address, &index)
                         .map(MemoryValue::Storage)
                         .map_err(|err| ReadError::StorageError(format!("{err:?}"))),
                 }
@@ -178,7 +177,7 @@ impl<S: Storage> VmDb<S> {
     }
 
     fn read_beneficiary(&mut self) -> Result<MemoryValue, ReadError> {
-        if self.tx_idx == 0 {
+        if *self.tx_idx == 0 {
             return Ok(MemoryValue::Basic(Box::new(
                 self.read_beneficiary_from_storage()?,
             )));
@@ -229,7 +228,7 @@ impl<S: Storage> VmDb<S> {
     }
 
     fn read_beneficiary_from_storage(&self) -> Result<AccountInfo, ReadError> {
-        match self.storage.basic(self.beneficiary_address) {
+        match self.storage.basic(self.beneficiary_location.address()) {
             Ok(Some(account)) => Ok(account.into()),
             Ok(None) => Err(ReadError::NotFound),
             Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
@@ -237,7 +236,7 @@ impl<S: Storage> VmDb<S> {
     }
 }
 
-impl<S: Storage> Database for VmDb<S> {
+impl<'a, S: Storage> Database for VmDb<'a, S> {
     type Error = ReadError;
 
     // TODO: More granularity here to ensure we only record dependencies for,
@@ -252,12 +251,12 @@ impl<S: Storage> Database for VmDb<S> {
     ) -> Result<Option<AccountInfo>, Self::Error> {
         // We preload a mock beneficiary account, to only lazy evaluate it on
         // explicit reads and once BlockSTM is completed.
-        if address == self.beneficiary_address && is_preload {
+        if &address == self.beneficiary_location.address() && is_preload {
             return Ok(Some(AccountInfo::default()));
         }
         match self.read(MemoryLocation::Basic(address), !is_preload) {
             Ok(MemoryValue::Basic(account)) => {
-                if !is_preload && address != self.from && Some(address) != self.to {
+                if !is_preload && &address != self.from && &Some(address) != self.to {
                     self.read_externally = true;
                 }
                 Ok(Some(*account))
@@ -270,14 +269,14 @@ impl<S: Storage> Database for VmDb<S> {
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.storage
-            .code_by_hash(code_hash)
+            .code_by_hash(&code_hash)
             .map(Bytecode::new_raw)
             .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
         self.storage
-            .has_storage(address)
+            .has_storage(&address)
             .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
@@ -292,7 +291,7 @@ impl<S: Storage> Database for VmDb<S> {
 
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
         self.storage
-            .block_hash(number)
+            .block_hash(&number)
             .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 }
@@ -305,7 +304,7 @@ pub(crate) struct Vm<S: Storage> {
     block_env: BlockEnv,
     beneficiary_location: MemoryLocation,
     txs: Vec<TxEnv>,
-    storage: Arc<S>,
+    storage: S,
     mv_memory: Arc<MvMemory>,
 }
 
@@ -322,7 +321,7 @@ impl<S: Storage> Vm<S> {
             beneficiary_location: MemoryLocation::Basic(block_env.coinbase),
             block_env,
             txs,
-            storage: Arc::new(storage),
+            storage,
             mv_memory,
         }
     }
@@ -355,13 +354,12 @@ impl<S: Storage> Vm<S> {
 
         // Set up DB
         let mut db = VmDb::new(
-            self.block_env.coinbase,
-            self.beneficiary_location.clone(),
-            tx_idx,
-            from,
-            to,
-            self.mv_memory.clone(),
-            self.storage.clone(),
+            &self.beneficiary_location,
+            &tx_idx,
+            &from,
+            &to,
+            &self.mv_memory,
+            &self.storage,
         );
 
         // Gas price
@@ -438,12 +436,10 @@ impl<S: Storage> Vm<S> {
                 // Validate from the next transaction if it writes to a location outside
                 // of the beneficiary account, its sender and to infos.
                 else {
-                    let from_location = MemoryLocation::Basic(from);
-                    let to_location = MemoryLocation::Basic(to.unwrap());
+                    let to = to.unwrap();
                     if write_set.iter().any(|(location, _)| {
-                        location != &from_location
-                            && location != &to_location
-                            && location != &self.beneficiary_location
+                        let address = location.address();
+                        address != &from && address != &to && address != &self.block_env.coinbase
                     }) {
                         next_validation_idx = Some(tx_idx + 1);
                     }
