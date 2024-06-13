@@ -85,7 +85,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     concurrency_level: NonZeroUsize,
 ) -> PevmResult {
     if txs.is_empty() {
-        return PevmResult::Ok(Vec::new());
+        return Ok(Vec::new());
     }
 
     let beneficiary_address = block_env.coinbase;

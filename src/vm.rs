@@ -247,7 +247,7 @@ impl<S: Storage> Database for VmDb<S> {
     fn basic(
         &mut self,
         address: Address,
-        // TODO: Better way for REVM to notifiy explicit reads
+        // TODO: Better way for REVM to notify explicit reads
         is_preload: bool,
     ) -> Result<Option<AccountInfo>, Self::Error> {
         // We preload a mock beneficiary account, to only lazy evaluate it on
@@ -336,8 +336,8 @@ impl<S: Storage> Vm<S> {
     // An execution may observe a read dependency on a lower transaction. This happens
     // when the last incarnation of the dependency wrote to a memory location that
     // this transaction reads, but it aborted before the read. In this case, the
-    // depedency index is returend via `blocking_tx_idx`. An execution task for this
-    // this transaction is re-scheduled after the blocking dependency finishes its
+    // dependency index is returned via `blocking_tx_idx`. An execution task for this
+    // transaction is re-scheduled after the blocking dependency finishes its
     // next incarnation.
     //
     // When a transaction attempts to write a value to a location, the location and

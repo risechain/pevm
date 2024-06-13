@@ -77,16 +77,16 @@ type TransactionsStatus = Vec<TxIncarnationStatus>;
 // We use `Vec` for dependents to simplify runtime update code.
 // We use `HashMap` for dependencies as we're only adding
 // them during preprocessing and removing them during processing.
-// The undelrying `HashSet` is to simplify index deduplication logic
+// The underlying `HashSet` is to simplify index deduplication logic
 // while adding new dependencies.
-// TODO: Intuitively both should share a smiliar data structure?
+// TODO: Intuitively both should share a similar data structure?
 type TransactionsDependents = Vec<Vec<TxIdx>>;
 type TransactionsDependencies = AHashMap<TxIdx, Vec<TxIdx>>;
 
 // BlockSTM maintains an in-memory multi-version data structure that
 // stores for each memory location the latest value written per
 // transaction, along with the associated transaction version. When a
-// transaciton reads a memory location, it obtains from the
+// transaction reads a memory location, it obtains from the
 // multi-version data structure the value written to this location by
 // the highest transaction that appears before it in the block, along
 // with the associated version. For instance, tx5 would read the value
@@ -128,7 +128,7 @@ pub enum ReadError {
 // vectors are noticeably faster in the mainnet benchmark.
 struct ReadSet {
     common: Vec<(MemoryLocation, ReadOrigin)>,
-    // An explicity beneficiary read may read from multiple lazily
+    // An explicit beneficiary read may read from multiple lazily
     // updated values. A micro-optimization here is to have a
     // read origin with only an incarnation index instead of a
     // while transaction version, as the latter is consecutive

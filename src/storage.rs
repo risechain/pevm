@@ -95,7 +95,7 @@ impl From<AccountInfo> for AccountBasic {
 /// An interface to provide chain state to BlockSTM for transaction execution.
 /// Staying close to the underlying REVM's Database trait while not leaking
 /// its primitives to library users (favoring Alloy at the moment).
-/// TODO: Better API for third-pary integration.
+/// TODO: Better API for third-party integration.
 pub trait Storage {
     /// Errors when querying data from storage.
     type Error: Debug;
