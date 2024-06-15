@@ -20,9 +20,9 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    EvmAccount, ExecutionTask, MemoryLocation, MemoryValue, Storage, Task,
-    TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx,
-    TxIncarnationStatus, TxVersion, ValidationTask,
+    EvmAccount, ExecutionTask, IncarnationStatus, MemoryLocation, MemoryValue, Storage, Task,
+    TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx, TxStatus,
+    TxVersion, ValidationTask,
 };
 
 /// Errors when executing a block with PEVM.
@@ -257,7 +257,10 @@ fn preprocess_dependencies(
     let block_size = txs.len();
 
     let mut transactions_status: TransactionsStatus = (0..block_size)
-        .map(|_| TxIncarnationStatus::ReadyToExecute(0))
+        .map(|_| TxStatus {
+            incarnation: 0,
+            status: IncarnationStatus::ReadyToExecute,
+        })
         .collect();
     let mut transactions_dependents: TransactionsDependents = vec![vec![]; block_size];
     let mut transactions_dependencies = TransactionsDependencies::default();
@@ -293,7 +296,7 @@ fn preprocess_dependencies(
             // SAFETY: The dependency index is guaranteed to be smaller than the block
             // size in this scope.
             unsafe {
-                *transactions_status.get_unchecked_mut(tx_idx) = TxIncarnationStatus::Aborting(0);
+                transactions_status.get_unchecked_mut(tx_idx).status = IncarnationStatus::Aborting;
                 for dependency_idx in dependency_idxs.iter() {
                     transactions_dependents
                         .get_unchecked_mut(*dependency_idx)

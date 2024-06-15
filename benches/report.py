@@ -14,10 +14,16 @@ import os
 
 CRITERION_PATH = "target/criterion"
 
+
+def format_ms(ns):
+    return round(ns / 1000000, 3)
+
+
 def read_estimate(block, exec_type):
     with open(f"{CRITERION_PATH}/{block}/{exec_type}/new/estimates.json") as f:
         estimates = json.load(f)
         return (estimates["slope"] or estimates["mean"])["point_estimate"]
+
 
 total_sequential = 0
 total_parallel = 0
@@ -32,10 +38,16 @@ for path in os.listdir(CRITERION_PATH):
         estimate_parallel = read_estimate(path, "Parallel")
         total_parallel += estimate_parallel
 
-        speed_up = estimate_sequential / estimate_parallel
+        speed_up = round(estimate_sequential / estimate_parallel, 2)
         max_speed_up = max(max_speed_up, speed_up)
         min_speed_up = min(min_speed_up, speed_up)
 
+        print(f"{path}")
+        print(
+            f"{format_ms(estimate_sequential)} {format_ms(estimate_parallel)} {speed_up}\n"
+        )
+
+
 print(f"Average: x{round(total_sequential / total_parallel, 2)}")
-print(f"Max: x{round(max_speed_up, 2)}")
-print(f"Min: x{round(min_speed_up, 2)}")
+print(f"Max: x{max_speed_up}")
+print(f"Min: x{min_speed_up}")
