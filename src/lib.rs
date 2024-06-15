@@ -68,21 +68,29 @@ type TxIncarnation = usize;
 // - ReadyToExecute(i) --try_incarnate--> Executing(i)
 // Non-blocked execution:
 //   - Executing(i) --finish_execution--> Executed(i)
-//   - Executed(i) --try_validation_abort--> Aborting(i)
+//   - Executed(i) --finish_validation--> Validated(i)
+//   - Executed/Validated(i) --try_validation_abort--> Aborting(i)
 //   - Aborted(i) --finish_validation(w.aborted=true)--> ReadyToExecute(i+1)
 // Blocked execution:
 //   - Executing(i) --add_dependency--> Aborting(i)
 //   - Aborting(i) --resume--> ReadyToExecute(i+1)
 #[derive(PartialEq, Debug)]
-pub(crate) enum TxIncarnationStatus {
-    ReadyToExecute(TxIncarnation),
-    Executing(TxIncarnation),
-    Executed(TxIncarnation),
-    Aborting(TxIncarnation),
+enum IncarnationStatus {
+    ReadyToExecute,
+    Executing,
+    Executed,
+    Validated,
+    Aborting,
+}
+
+#[derive(PartialEq, Debug)]
+struct TxStatus {
+    incarnation: TxIncarnation,
+    status: IncarnationStatus,
 }
 
 // TODO: Clearer doc. See `Scheduler` in `scheduler.rs` for now.
-type TransactionsStatus = Vec<TxIncarnationStatus>;
+type TransactionsStatus = Vec<TxStatus>;
 // We use `Vec` for dependents to simplify runtime update code.
 // We use `HashMap` for dependencies as we're only adding
 // them during preprocessing and removing them during processing.
