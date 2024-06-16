@@ -270,7 +270,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.storage
             .code_by_hash(&code_hash)
-            .map(Bytecode::new_raw)
+            .map(|code| code.map(Bytecode::from).unwrap_or_default())
             .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
@@ -477,15 +477,7 @@ pub(crate) fn execute_tx<DB: Database>(
 ) -> Result<ResultAndState, EVMError<DB::Error>> {
     // This is much uglier than the builder interface but can be up to 50% faster!!
     let context = Context {
-        evm: EvmContext::new_with_env(
-            db,
-            Env::boxed(
-                // TODO: Should we turn off byte code analysis?
-                CfgEnv::default(),
-                block_env.clone(),
-                tx,
-            ),
-        ),
+        evm: EvmContext::new_with_env(db, Env::boxed(CfgEnv::default(), block_env.clone(), tx)),
         external: (),
     };
     // TODO: Support OP handlers

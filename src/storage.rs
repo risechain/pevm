@@ -1,10 +1,12 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bytes, B256, U256};
+use bitvec::vec::BitVec;
 use revm::{
     db::PlainAccount,
-    primitives::{Account, AccountInfo, Bytecode},
+    interpreter::analysis::to_analysed,
+    primitives::{Account, AccountInfo, Bytecode, JumpTable},
     DatabaseRef,
 };
 
@@ -45,32 +47,21 @@ impl From<Account> for EvmAccount {
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
 // TODO: More proper testing.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct AccountBasic {
     /// The balance of the account.
     pub balance: U256,
     /// The nonce of the account.
     pub nonce: u64,
     /// The code of the account.
-    pub code: Bytes,
+    pub code: Option<EvmCode>,
     /// The optional code hash to avoid rehashing during execution
     pub code_hash: Option<B256>,
 }
 
-impl Default for AccountBasic {
-    fn default() -> Self {
-        Self {
-            balance: U256::ZERO,
-            nonce: 0,
-            code: Bytes::new(),
-            code_hash: None,
-        }
-    }
-}
-
 impl From<AccountBasic> for AccountInfo {
     fn from(account: AccountBasic) -> Self {
-        let code = Bytecode::new_raw(account.code);
+        let code = account.code.map(Bytecode::from).unwrap_or_default();
         AccountInfo::new(
             account.balance,
             account.nonce,
@@ -83,11 +74,61 @@ impl From<AccountBasic> for AccountInfo {
 
 impl From<AccountInfo> for AccountBasic {
     fn from(account: AccountInfo) -> Self {
+        let code = account.code.and_then(|code| {
+            if code.is_empty() {
+                None
+            } else {
+                Some(code.into())
+            }
+        });
         AccountBasic {
             balance: account.balance,
             nonce: account.nonce,
-            code: account.code.unwrap_or_default().original_bytes(),
-            code_hash: Some(account.code_hash),
+            // Currently trust the account info instead of rehashing.
+            code_hash: code.as_ref().map(|_| account.code_hash),
+            code,
+        }
+    }
+}
+
+/// EVM Code, currently mapping to REVM's [ByteCode::LegacyAnalyzed].
+// TODO: Support raw legacy & EOF
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EvmCode {
+    /// Bytecode with 32 zero bytes padding
+    bytecode: Bytes,
+    /// Original bytes length
+    original_len: usize,
+    /// Jump table.
+    jump_table: Arc<BitVec<u8>>,
+}
+
+impl From<EvmCode> for Bytecode {
+    fn from(code: EvmCode) -> Self {
+        // TODO: Better error handling.
+        // A common trap would be converting a default [EvmCode] into
+        // a [Bytecode]. On failure we should fallback to legacy and
+        // analyse again.
+        unsafe {
+            Bytecode::new_analyzed(
+                code.bytecode,
+                code.original_len,
+                JumpTable(code.jump_table.clone()),
+            )
+        }
+    }
+}
+
+impl From<Bytecode> for EvmCode {
+    fn from(code: Bytecode) -> Self {
+        match code {
+            Bytecode::LegacyRaw(_) => to_analysed(code).into(),
+            Bytecode::LegacyAnalyzed(code) => EvmCode {
+                bytecode: code.bytecode().clone(),
+                original_len: code.original_len(),
+                jump_table: code.jump_table().0.clone(),
+            },
+            Bytecode::Eof(_) => unimplemented!("TODO: Support EOF"),
         }
     }
 }
@@ -104,7 +145,7 @@ pub trait Storage {
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error>;
 
     /// Get account code by its hash.
-    fn code_by_hash(&self, code_hash: &B256) -> Result<Bytes, Self::Error>;
+    fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error>;
 
     /// Get if the account already has storage (to support EIP-7610).
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error>;
@@ -130,8 +171,14 @@ where
         D::basic_ref(self, *address).map(|a| a.map(|a| a.into()))
     }
 
-    fn code_by_hash(&self, code_hash: &B256) -> Result<Bytes, Self::Error> {
-        D::code_by_hash_ref(self, *code_hash).map(|b| b.original_bytes())
+    fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
+        D::code_by_hash_ref(self, *code_hash).map(|bytecode| {
+            if bytecode.is_empty() {
+                None
+            } else {
+                Some(EvmCode::from(bytecode))
+            }
+        })
     }
 
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
@@ -159,7 +206,8 @@ impl<S: Storage> DatabaseRef for StorageWrapper<S> {
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        S::code_by_hash(&self.0, &code_hash).map(Bytecode::new_raw)
+        S::code_by_hash(&self.0, &code_hash)
+            .map(|code| code.map(Bytecode::from).unwrap_or_default())
     }
 
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {

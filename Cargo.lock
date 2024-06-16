@@ -2484,6 +2484,7 @@ dependencies = [
  "alloy-transport",
  "alloy-transport-http",
  "alloy-trie",
+ "bitvec",
  "criterion",
  "crossbeam",
  "dashmap",

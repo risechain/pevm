@@ -147,7 +147,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     // Extracting such account is unjustified complexity so let's live with this for now.
                     assert!(exec_results[0].state.values().all(|account| {
                         match account {
-                            Some(account) => account.basic.code.is_empty(),
+                            Some(account) => account.basic.code.is_none(),
                             None => true,
                         }
                     }));

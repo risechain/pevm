@@ -3,9 +3,11 @@
 use std::fmt::Debug;
 
 use ahash::AHashMap;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 
 use crate::{AccountBasic, EvmAccount, Storage};
+
+use super::EvmCode;
 
 /// Fetch state data via RPC to execute.
 #[derive(Debug, Default, Clone)]
@@ -46,7 +48,7 @@ impl Storage for InMemoryStorage {
             .map(|account| account.basic.clone()))
     }
 
-    fn code_by_hash(&self, code_hash: &B256) -> Result<Bytes, Self::Error> {
+    fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
         for account in self.accounts.values() {
             if account
                 .basic
@@ -56,7 +58,7 @@ impl Storage for InMemoryStorage {
                 return Ok(account.basic.code.clone());
             }
         }
-        Ok(Bytes::default())
+        Ok(None)
     }
 
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
