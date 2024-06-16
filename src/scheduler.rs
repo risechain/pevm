@@ -116,14 +116,7 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn done(&self) -> bool {
-        self.execution_idx.load(Relaxed) >= self.block_size
-            && self.validation_idx.load(Relaxed) >= self.block_size
-            && self.num_validated.load(Relaxed)
-                >= self.block_size - self.min_validation_idx.load(Relaxed)
-    }
-
-    fn try_incarnate(&self, mut tx_idx: TxIdx) -> Option<TxVersion> {
+    fn try_execute(&self, mut tx_idx: TxIdx) -> Option<TxVersion> {
         while tx_idx < self.block_size {
             let mut tx = index_mutex!(self.transactions_status, tx_idx);
             if tx.status == IncarnationStatus::ReadyToExecute {
@@ -139,33 +132,43 @@ impl Scheduler {
         None
     }
 
-    fn next_version_to_validate(&self) -> Option<TxVersion> {
-        let mut validation_idx = self.validation_idx.fetch_add(1, Relaxed);
-        while validation_idx < self.block_size {
-            let tx = index_mutex!(self.transactions_status, validation_idx);
+    fn try_validate(&self) -> Option<TxVersion> {
+        let tx_idx = self.validation_idx.fetch_add(1, Relaxed);
+        if tx_idx < self.block_size {
+            let tx = index_mutex!(self.transactions_status, tx_idx);
             if matches!(
                 tx.status,
                 IncarnationStatus::Executed | IncarnationStatus::Validated
             ) {
                 return Some(TxVersion {
-                    tx_idx: validation_idx,
+                    tx_idx,
                     tx_incarnation: tx.incarnation,
                 });
             }
-            drop(tx);
-            validation_idx = self.validation_idx.fetch_add(1, Relaxed);
         }
         None
     }
 
     pub(crate) fn next_task(&self) -> Option<Task> {
-        while !self.done() {
-            if self.validation_idx.load(Relaxed) < self.execution_idx.load(Relaxed) {
-                if let Some(tx_version) = self.next_version_to_validate() {
+        loop {
+            let execution_idx = self.execution_idx.load(Relaxed);
+            let validation_idx = self.validation_idx.load(Relaxed);
+            if execution_idx >= self.block_size && validation_idx >= self.block_size {
+                if self.num_validated.load(Relaxed)
+                    >= self.block_size - self.min_validation_idx.load(Relaxed)
+                {
+                    break;
+                }
+                continue;
+            }
+
+            if validation_idx < execution_idx {
+                if let Some(tx_version) = self.try_validate() {
                     return Some(Task::Validation(tx_version));
                 }
-            }
-            if let Some(tx_version) = self.try_incarnate(self.execution_idx.fetch_add(1, Relaxed)) {
+            } else if let Some(tx_version) =
+                self.try_execute(self.execution_idx.fetch_add(1, Relaxed))
+            {
                 return Some(Task::Execution(tx_version));
             }
         }
@@ -330,7 +333,7 @@ impl Scheduler {
             self.validation_idx
                 .fetch_min(tx_version.tx_idx + 1, Relaxed);
             if self.execution_idx.load(Relaxed) > tx_version.tx_idx {
-                return self.try_incarnate(tx_version.tx_idx);
+                return self.try_execute(tx_version.tx_idx);
             }
         } else {
             let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
