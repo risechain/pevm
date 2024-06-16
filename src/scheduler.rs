@@ -1,11 +1,7 @@
 use std::{
     cmp::min,
     sync::{
-        // TODO: Fine-tune all atomic `Ordering`s.
-        // We're starting with `Relaxed` for maximum performance
-        // without any issue so far. When in trouble, we can
-        // retry `SeqCst` for robustness.
-        atomic::{AtomicUsize, Ordering::Relaxed},
+        atomic::{AtomicUsize, Ordering},
         Mutex,
     },
 };
@@ -127,13 +123,13 @@ impl Scheduler {
                 });
             }
             drop(tx);
-            tx_idx = self.execution_idx.fetch_add(1, Relaxed);
+            tx_idx = self.execution_idx.fetch_add(1, Ordering::Release);
         }
         None
     }
 
     fn try_validate(&self) -> Option<TxVersion> {
-        let tx_idx = self.validation_idx.fetch_add(1, Relaxed);
+        let tx_idx = self.validation_idx.fetch_add(1, Ordering::Release);
         if tx_idx < self.block_size {
             let tx = index_mutex!(self.transactions_status, tx_idx);
             if matches!(
@@ -151,11 +147,11 @@ impl Scheduler {
 
     pub(crate) fn next_task(&self) -> Option<Task> {
         loop {
-            let execution_idx = self.execution_idx.load(Relaxed);
-            let validation_idx = self.validation_idx.load(Relaxed);
+            let execution_idx = self.execution_idx.load(Ordering::Acquire);
+            let validation_idx = self.validation_idx.load(Ordering::Acquire);
             if execution_idx >= self.block_size && validation_idx >= self.block_size {
-                if self.num_validated.load(Relaxed)
-                    >= self.block_size - self.min_validation_idx.load(Relaxed)
+                if self.num_validated.load(Ordering::Acquire)
+                    >= self.block_size - self.min_validation_idx.load(Ordering::Acquire)
                 {
                     break;
                 }
@@ -167,7 +163,7 @@ impl Scheduler {
                     return Some(Task::Validation(tx_version));
                 }
             } else if let Some(tx_version) =
-                self.try_execute(self.execution_idx.fetch_add(1, Relaxed))
+                self.try_execute(self.execution_idx.fetch_add(1, Ordering::Release))
             {
                 return Some(Task::Execution(tx_version));
             }
@@ -263,29 +259,33 @@ impl Scheduler {
             drop(dependents);
 
             if let Some(min_idx) = min_dependent_idx {
-                self.execution_idx.fetch_min(min_idx, Relaxed);
+                self.execution_idx.fetch_min(min_idx, Ordering::Release);
             }
 
             // Decide where to validate from next
             let min_validation_idx = if let Some(tx_idx) = next_validation_idx {
-                min(self.min_validation_idx.fetch_min(tx_idx, Relaxed), tx_idx)
+                min(
+                    self.min_validation_idx.fetch_min(tx_idx, Ordering::Release),
+                    tx_idx,
+                )
             } else {
-                self.min_validation_idx.load(Relaxed)
+                self.min_validation_idx.load(Ordering::Acquire)
             };
             // Have found a min validation index to even bother
             if min_validation_idx < self.block_size {
                 // Must re-validate from min as this transaction is lower
                 if tx_version.tx_idx < min_validation_idx {
                     if wrote_new_location {
-                        self.validation_idx.fetch_min(min_validation_idx, Relaxed);
+                        self.validation_idx
+                            .fetch_min(min_validation_idx, Ordering::Release);
                     }
                 }
                 // Validate from this transaction as it's in between min and the current
                 // validation index.
-                else if tx_version.tx_idx < self.validation_idx.load(Relaxed) {
+                else if tx_version.tx_idx < self.validation_idx.load(Ordering::Acquire) {
                     if wrote_new_location {
                         self.validation_idx
-                            .fetch_min(tx_version.tx_idx + 1, Relaxed);
+                            .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
                     }
                     return Some(tx_version);
                 }
@@ -307,7 +307,7 @@ impl Scheduler {
         // TODO: Better error handling
         let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
         if tx.status == IncarnationStatus::Validated {
-            self.num_validated.fetch_sub(1, Relaxed);
+            self.num_validated.fetch_sub(1, Ordering::Release);
         }
 
         let aborting = matches!(
@@ -331,15 +331,15 @@ impl Scheduler {
         if aborted {
             self.set_ready_status(tx_version.tx_idx);
             self.validation_idx
-                .fetch_min(tx_version.tx_idx + 1, Relaxed);
-            if self.execution_idx.load(Relaxed) > tx_version.tx_idx {
+                .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
+            if self.execution_idx.load(Ordering::Acquire) > tx_version.tx_idx {
                 return self.try_execute(tx_version.tx_idx);
             }
         } else {
             let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
             if tx.status == IncarnationStatus::Executed {
                 tx.status = IncarnationStatus::Validated;
-                self.num_validated.fetch_add(1, Relaxed);
+                self.num_validated.fetch_add(1, Ordering::Release);
             }
         }
         None
