@@ -423,25 +423,29 @@ impl<S: Storage> Vm<S> {
                 }
 
                 let mut next_validation_idx = None;
-                // Validate from this transaction if it reads something outside of its
-                // sender and to infos.
-                if db.read_externally {
-                    next_validation_idx = Some(tx_idx);
-                }
-                // Validate from the next transaction if doesn't read externally but
-                // deploy a new contract.
-                else if is_call_tx {
-                    next_validation_idx = Some(tx_idx + 1);
-                }
-                // Validate from the next transaction if it writes to a location outside
-                // of the beneficiary account, its sender and to infos.
-                else {
-                    let to = to.unwrap();
-                    if write_set.iter().any(|(location, _)| {
-                        let address = location.address();
-                        address != &from && address != &to && address != &self.block_env.coinbase
-                    }) {
+                if tx_idx > 0 {
+                    // Validate from this transaction if it reads something outside of its
+                    // sender and to infos.
+                    if db.read_externally {
+                        next_validation_idx = Some(tx_idx);
+                    }
+                    // Validate from the next transaction if doesn't read externally but
+                    // deploy a new contract.
+                    else if is_call_tx {
                         next_validation_idx = Some(tx_idx + 1);
+                    }
+                    // Validate from the next transaction if it writes to a location outside
+                    // of the beneficiary account, its sender and to infos.
+                    else {
+                        let to = to.unwrap();
+                        if write_set.iter().any(|(location, _)| {
+                            let address = location.address();
+                            address != &from
+                                && address != &to
+                                && address != &self.block_env.coinbase
+                        }) {
+                            next_validation_idx = Some(tx_idx + 1);
+                        }
                     }
                 }
 
