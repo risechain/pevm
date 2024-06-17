@@ -40,9 +40,7 @@ impl MvMemory {
             beneficiary_location,
             data: DashMap::with_hasher(ahash::RandomState::new()),
             last_written_locations: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
-            last_read_set: (0..block_size)
-                .map(|_| Mutex::new(ReadSet::new()))
-                .collect(),
+            last_read_set: (0..block_size).map(|_| Mutex::default()).collect(),
         }
     }
 
@@ -53,11 +51,11 @@ impl MvMemory {
     pub(crate) fn record(
         &self,
         tx_version: &TxVersion,
-        read_set: ReadSet,
+        mut read_set: ReadSet,
         write_set: WriteSet,
     ) -> bool {
-        *index_mutex!(self.last_read_set, tx_version.tx_idx) = read_set;
-
+        // Update the multi-version as fast as possible for higher transactions to
+        // read from.
         let new_locations: Vec<MemoryLocation> = write_set.keys().cloned().collect();
         for (location, value) in write_set.into_iter() {
             let entry = MemoryEntry::Data(tx_version.tx_incarnation, value);
@@ -75,12 +73,9 @@ impl MvMemory {
                 }
             }
         }
-
-        // TODO: Better error handling
+        // TODO: Faster "difference" function when there are many locations
         let mut last_written_locations =
             index_mutex!(self.last_written_locations, tx_version.tx_idx);
-
-        // TODO: Faster "difference" function when there are many locations
         for prev_location in last_written_locations.iter() {
             if !new_locations.contains(prev_location) {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
@@ -88,6 +83,11 @@ impl MvMemory {
                 }
             }
         }
+
+        // Update this transaction's read & write set for the next validation.
+        // Clear execution cache that doesn't serve validation.
+        read_set.accounts.clear();
+        *index_mutex!(self.last_read_set, tx_version.tx_idx) = read_set;
         for new_location in new_locations.iter() {
             if !last_written_locations.contains(new_location) {
                 // We update right before returning to avoid an early clone.
@@ -118,8 +118,9 @@ impl MvMemory {
     // (only validations that successfully abort affect the state and each
     // incarnation can be aborted at most once).
     pub(crate) fn validate_read_set(&self, tx_idx: TxIdx) -> bool {
-        // TODO: Better error handling
         let last_read_set = index_mutex!(self.last_read_set, tx_idx);
+
+        // Validate the common read set
         for (location, prior_origin) in last_read_set.common.iter() {
             match self.read_closest(location, &tx_idx, false) {
                 ReadMemoryResult::ReadError { .. } => return false,
@@ -129,33 +130,38 @@ impl MvMemory {
                     }
                 }
                 ReadMemoryResult::Ok { version, .. } => match prior_origin {
-                    ReadOrigin::Storage => return false,
                     ReadOrigin::MvMemory(v) => {
                         if *v != version {
                             return false;
                         }
                     }
+                    _ => return false,
                 },
             }
         }
-        // TODO: Fewer nests without sacrificing performance please.
+
+        // Validate the beneficiary read set
+        // TODO: Fewer nests would be nice
         if !last_read_set.beneficiary.is_empty() {
-            // TODO: Can we really skip checking for storage reads here?
             if let Some(written_beneficiary) = self.read_beneficiary() {
-                for prior_origin in last_read_set.beneficiary.iter() {
+                // We evaluate from the back as higher tranasctions are less robust
+                // and more likely to have changed.
+                // TODO: Assert if there is a Storage origin it must be the first?
+                for prior_origin in last_read_set.beneficiary.iter().rev() {
                     if let ReadOrigin::MvMemory(prior_version) = prior_origin {
-                        match written_beneficiary.get(&prior_version.tx_idx) {
-                            Some(MemoryEntry::Data(tx_incarnation, _)) => {
-                                if *tx_incarnation != prior_version.tx_incarnation {
-                                    return false;
-                                }
-                            }
-                            _ => return false,
+                        let Some(MemoryEntry::Data(tx_incarnation, _)) =
+                            written_beneficiary.get(&prior_version.tx_idx)
+                        else {
+                            return false;
+                        };
+                        if tx_incarnation != &prior_version.tx_incarnation {
+                            return false;
                         }
                     }
                 }
             }
         }
+
         true
     }
 

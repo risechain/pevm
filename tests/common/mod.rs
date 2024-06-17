@@ -76,15 +76,10 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
                 })
                 .unwrap_or_default();
 
-        // Hacky but we don't serialize the whole account info to save space
-        // So we need to resconstruct intermediate values upon deserializing.
         for (_, account) in accounts.iter_mut() {
-            account.info.previous_or_original_balance = account.info.balance;
-            account.info.previous_or_original_nonce = account.info.nonce;
             if let Some(code) = account.info.code.clone() {
                 let code_hash = code.hash_slow();
                 account.info.code_hash = code_hash;
-                account.info.previous_or_original_code_hash = code_hash;
             } else {
                 account.info.code_hash = KECCAK_EMPTY;
             }

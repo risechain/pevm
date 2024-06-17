@@ -143,6 +143,7 @@ pub enum ReadError {
 // The memory locations needed to execute an incarnation.
 // While a hash map is cleaner and reduce duplication chances,
 // vectors are noticeably faster in the mainnet benchmark.
+#[derive(Default)]
 struct ReadSet {
     common: Vec<(MemoryLocation, ReadOrigin)>,
     // An explicit beneficiary read may read from multiple lazily
@@ -151,14 +152,10 @@ struct ReadSet {
     // while transaction version, as the latter is consecutive
     // here (counting down from the reading transaction).
     beneficiary: Vec<ReadOrigin>,
-}
-impl ReadSet {
-    fn new() -> Self {
-        Self {
-            common: Vec::new(),
-            beneficiary: Vec::new(),
-        }
-    }
+    // Execution cache to determine if an account was changed.
+    // TODO: Better organize the type to seprate what is needed
+    // for execution only, and what is needed for validation.
+    accounts: AHashMap<Address, AccountInfo>,
 }
 
 // The updates made by this transaction incarnation, which is applied
