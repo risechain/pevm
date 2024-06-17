@@ -1,4 +1,4 @@
-use std::{cmp::min, sync::Arc};
+use std::cmp::min;
 
 use ahash::AHashMap;
 use alloy_rpc_types::Receipt;
@@ -98,8 +98,8 @@ struct VmDb<'a, S: Storage> {
     tx_idx: &'a TxIdx,
     from: &'a Address,
     to: &'a Option<Address>,
-    mv_memory: &'a Arc<MvMemory>,
     storage: &'a S,
+    mv_memory: &'a MvMemory,
     // List of memory locations that this transaction reads.
     read_set: ReadSet,
     // Check if this transaction has read an account other than its sender
@@ -113,14 +113,14 @@ impl<'a, S: Storage> VmDb<'a, S> {
         tx_idx: &'a TxIdx,
         from: &'a Address,
         to: &'a Option<Address>,
-        mv_memory: &'a Arc<MvMemory>,
         storage: &'a S,
+        mv_memory: &'a MvMemory,
     ) -> Self {
         Self {
             beneficiary_location,
             tx_idx,
-            mv_memory,
             storage,
+            mv_memory,
             read_set: ReadSet {
                 // There are at least two locations most of the time: the sender
                 // and the recipient accounts.
@@ -142,7 +142,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
             return self.read_beneficiary();
         }
 
-        match self.mv_memory.read_closest(&location, self.tx_idx) {
+        match self.mv_memory.read_closest(&location, self.tx_idx, true) {
             ReadMemoryResult::ReadError { blocking_tx_idx } => {
                 Err(ReadError::BlockingIndex(blocking_tx_idx))
             }
@@ -171,7 +171,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
                         .common
                         .push((location, ReadOrigin::MvMemory(version)));
                 }
-                Ok(value)
+                Ok(value.unwrap())
             }
         }
     }
@@ -299,22 +299,22 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 // The VM describes how to read values to execute transactions. Also, it
 // captures the read & write sets of each execution. Note that a single
 // `Vm` can be shared among threads.
-pub(crate) struct Vm<S: Storage> {
+pub(crate) struct Vm<'a, S: Storage> {
     spec_id: SpecId,
     block_env: BlockEnv,
     beneficiary_location: MemoryLocation,
     txs: Vec<TxEnv>,
     storage: S,
-    mv_memory: Arc<MvMemory>,
+    mv_memory: &'a MvMemory,
 }
 
-impl<S: Storage> Vm<S> {
+impl<'a, S: Storage> Vm<'a, S> {
     pub(crate) fn new(
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         storage: S,
-        mv_memory: Arc<MvMemory>,
+        mv_memory: &'a MvMemory,
     ) -> Self {
         Self {
             spec_id,
@@ -358,8 +358,8 @@ impl<S: Storage> Vm<S> {
             &tx_idx,
             &from,
             &to,
-            &self.mv_memory,
             &self.storage,
+            self.mv_memory,
         );
 
         // Gas price
