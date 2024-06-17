@@ -1,7 +1,7 @@
 use std::{
     fmt::Debug,
     num::NonZeroUsize,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
     thread,
 };
 
@@ -101,11 +101,8 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     };
 
     let block_size = txs.len();
-    let mv_memory = Arc::new(MvMemory::new(
-        block_size,
-        MemoryLocation::Basic(beneficiary_address),
-    ));
-    let vm = Vm::new(spec_id, block_env, txs, storage, mv_memory.clone());
+    let mv_memory = MvMemory::new(block_size, MemoryLocation::Basic(beneficiary_address));
+    let vm = Vm::new(spec_id, block_env, txs, storage, &mv_memory);
 
     let mut execution_error = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
@@ -373,7 +370,7 @@ fn preprocess_dependencies(
 //   tasks for all higher transactions.
 // - Otherwise, return a validation task for the transaction.
 fn try_execute<S: Storage>(
-    mv_memory: &Arc<MvMemory>,
+    mv_memory: &MvMemory,
     vm: &Vm<S>,
     scheduler: &Scheduler,
     execution_error: &OnceLock<ExecutionError>,
@@ -417,7 +414,7 @@ fn try_execute<S: Storage>(
 // - Return a re-execution task for this transaction with an incremented
 //   incarnation.
 fn try_validate(
-    mv_memory: &Arc<MvMemory>,
+    mv_memory: &MvMemory,
     scheduler: &Scheduler,
     tx_version: &TxVersion,
 ) -> Option<ExecutionTask> {

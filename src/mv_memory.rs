@@ -18,7 +18,7 @@ pub(crate) enum ReadMemoryResult {
     },
     Ok {
         version: TxVersion,
-        value: MemoryValue,
+        value: Option<MemoryValue>,
     },
 }
 
@@ -121,7 +121,7 @@ impl MvMemory {
         // TODO: Better error handling
         let last_read_set = index_mutex!(self.last_read_set, tx_idx);
         for (location, prior_origin) in last_read_set.common.iter() {
-            match self.read_closest(location, &tx_idx) {
+            match self.read_closest(location, &tx_idx, false) {
                 ReadMemoryResult::ReadError { .. } => return false,
                 ReadMemoryResult::NotFound => {
                     if *prior_origin != ReadOrigin::Storage {
@@ -190,6 +190,9 @@ impl MvMemory {
         &self,
         location: &MemoryLocation,
         tx_idx: &TxIdx,
+        // We only need the actual value for execution. Validation only needs the
+        // version and setting this to `false` saves a value clone.
+        with_value: bool,
     ) -> ReadMemoryResult {
         if let Some(written_transactions) = self.data.get(location) {
             for (idx, entry) in written_transactions.iter().rev() {
@@ -206,7 +209,11 @@ impl MvMemory {
                                     tx_idx: *idx,
                                     tx_incarnation: *tx_incarnation,
                                 },
-                                value: value.clone(),
+                                value: if with_value {
+                                    Some(value.clone())
+                                } else {
+                                    None
+                                },
                             }
                         }
                     }
