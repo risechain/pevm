@@ -121,12 +121,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
             tx_idx,
             storage,
             mv_memory,
-            read_set: ReadSet {
-                // There are at least two locations most of the time: the sender
-                // and the recipient accounts.
-                common: Vec::with_capacity(2),
-                beneficiary: Vec::new(),
-            },
+            read_set: ReadSet::default(),
             from,
             to,
             read_externally: false,
@@ -259,7 +254,14 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                 if !is_preload && &address != self.from && &Some(address) != self.to {
                     self.read_externally = true;
                 }
-                Ok(Some(*account))
+                let info = *account;
+                if !is_preload {
+                    self.read_set
+                        .accounts
+                        // Avoid cloning the code as we can compare its hash
+                        .insert(address, AccountInfo { code: None, ..info });
+                }
+                Ok(Some(info))
             }
             Err(ReadError::NotFound) => Ok(None),
             Err(err) => Err(err),
@@ -380,11 +382,9 @@ impl<'a, S: Storage> Vm<'a, S> {
                 // the recipient, and the beneficiary accounts.
                 let mut write_set = AHashMap::<MemoryLocation, MemoryValue>::with_capacity(3);
                 for (address, account) in result_and_state.state.iter() {
-                    // TODO: Port this change check to our read set instead of REVM.
-                    // We then let `execute_tx` output `PevmTxExecutionResult` directly and handle
-                    // changes based on those processed transisions. Let make sure we handle
-                    // removed accounts correctly afterwards.
-                    if account.is_info_changed() {
+                    if account.is_touched()
+                        && db.read_set.accounts.get(address) != Some(&account.info)
+                    {
                         // TODO: More granularity here to ensure we only notify new
                         // memory writes, for instance, only an account's balance instead
                         // of the whole account. That way we may also generalize beneficiary
@@ -395,17 +395,12 @@ impl<'a, S: Storage> Vm<'a, S> {
                             account_info.balance += gas_payment.take().unwrap();
                         }
 
-                        // We must reset the original values for the incoming reads to detect changes.
-                        // TODO: Port this logic to PEVM's read & write sets instead of REVM.
-                        account_info.previous_or_original_balance = account_info.balance;
-                        account_info.previous_or_original_code_hash = account_info.code_hash;
-                        account_info.previous_or_original_nonce = account_info.nonce;
-
                         write_set.insert(
                             MemoryLocation::Basic(*address),
                             MemoryValue::Basic(Box::new(account_info)),
                         );
                     }
+                    // TODO: We should move this to our read set like for account info?
                     for (slot, value) in account.changed_storage_slots() {
                         write_set.insert(
                             MemoryLocation::Storage(*address, *slot),
@@ -468,10 +463,6 @@ impl<'a, S: Storage> Vm<'a, S> {
 }
 
 // TODO: Move to better place?
-// TODO: Convert the output `ResultAndState` to `PevmTxExecutionResult` for a
-// much cleaner interface. We currently need `ResultAndState` for the parallel
-// executor to check for changed accounts via REVM. Can pull this off once that
-// check is moved to our own read set.
 pub(crate) fn execute_tx<DB: Database>(
     db: DB,
     spec_id: SpecId,
