@@ -12,9 +12,8 @@ use revm::{
 };
 
 use crate::{
-    mv_memory::{MvMemory, ReadMemoryResult},
-    EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, ReadError,
-    ReadOrigin, ReadSet, Storage, TxIdx, WriteSet,
+    mv_memory::MvMemory, EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue,
+    ReadError, ReadLocations, ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -72,7 +71,7 @@ pub(crate) enum VmExecutionResult {
     ExecutionError(ExecutionError),
     Ok {
         execution_result: PevmTxExecutionResult,
-        read_set: ReadSet,
+        read_locations: ReadLocations,
         write_set: WriteSet,
         // From which transaction index do we need to validate from after
         // this execution. This is `None` when no validation is required.
@@ -93,148 +92,126 @@ pub(crate) enum VmExecutionResult {
 // TODO: Simplify this type, like grouping `from` and `to` into a
 // `preprocessed_addresses` or a `preprocessed_locations` vector.
 struct VmDb<'a, S: Storage> {
-    // References from the main VM instance.
-    hasher: &'a ahash::RandomState,
-    beneficiary_location: &'a MemoryLocation,
+    vm: &'a Vm<'a, S>,
     tx_idx: &'a TxIdx,
     from: &'a Address,
     to: &'a Option<Address>,
-    storage: &'a S,
-    mv_memory: &'a MvMemory,
     // List of memory locations that this transaction reads.
     read_set: ReadSet,
-    // Check if this transaction has read an account other than its sender
-    // and to addresses. We must validate from this transaction if it has.
-    read_externally: bool,
+    // Check if this transaction has read anything other than its sender
+    // and to accounts. We must validate from this transaction if it has.
+    only_read_from_and_to: bool,
 }
 
 impl<'a, S: Storage> VmDb<'a, S> {
     fn new(
-        hasher: &'a ahash::RandomState,
-        beneficiary_location: &'a MemoryLocation,
+        vm: &'a Vm<'a, S>,
         tx_idx: &'a TxIdx,
         from: &'a Address,
         to: &'a Option<Address>,
-        storage: &'a S,
-        mv_memory: &'a MvMemory,
     ) -> Self {
         Self {
-            hasher,
-            beneficiary_location,
+            vm,
             tx_idx,
-            storage,
-            mv_memory,
-            read_set: ReadSet::default(),
             from,
             to,
-            read_externally: false,
+            only_read_from_and_to: true,
+            read_set: ReadSet::default(),
         }
     }
 
-    fn read(
-        &mut self,
-        location: MemoryLocation,
-        update_read_set: bool,
-    ) -> Result<MemoryValue, ReadError> {
-        if &location == self.beneficiary_location {
-            return self.read_beneficiary();
+    fn read(&mut self, location: MemoryLocation) -> Result<MemoryValue, ReadError> {
+        let location_hash = self.vm.hasher.hash_one(location.clone());
+
+        self.read_set.locations.insert(location_hash, vec![]);
+        let read_origins = self.read_set.locations.get_mut(&location_hash).unwrap();
+
+        if self.tx_idx == &0 {
+            read_origins.push(ReadOrigin::Storage);
+            return self.read_from_storage(&location, U256::ZERO);
         }
 
-        let location_hash = self.hasher.hash_one(location.clone());
-
-        match self
-            .mv_memory
-            .read_closest(&location_hash, self.tx_idx, true)
-        {
-            ReadMemoryResult::ReadError { blocking_tx_idx } => {
-                Err(ReadError::BlockingIndex(blocking_tx_idx))
-            }
-            ReadMemoryResult::NotFound => {
-                if update_read_set {
-                    self.read_set
-                        .common
-                        .push((location_hash, ReadOrigin::Storage));
-                }
-                match location {
-                    MemoryLocation::Basic(address) => match self.storage.basic(&address) {
-                        Ok(Some(account)) => Ok(MemoryValue::Basic(Box::new(account.into()))),
-                        Ok(None) => Err(ReadError::NotFound),
-                        Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
-                    },
-                    MemoryLocation::Storage(address, index) => self
-                        .storage
-                        .storage(&address, &index)
-                        .map(MemoryValue::Storage)
-                        .map_err(|err| ReadError::StorageError(format!("{err:?}"))),
-                }
-            }
-            ReadMemoryResult::Ok { version, value } => {
-                if update_read_set {
-                    self.read_set
-                        .common
-                        .push((location_hash, ReadOrigin::MvMemory(version)));
-                }
-                Ok(value.unwrap())
-            }
-        }
-    }
-
-    fn read_beneficiary(&mut self) -> Result<MemoryValue, ReadError> {
-        if *self.tx_idx == 0 {
-            return Ok(MemoryValue::Basic(Box::new(
-                self.read_beneficiary_from_storage()?,
-            )));
-        }
-
-        // We simply register this transaction as dependency of the previous in
-        // the racing cases that the previous transactions aren't yet ready.
-        // TODO: Only reschedule up to a certain number of times.
+        // We enforce consecutive indexes for locations that all transactions write to like
+        // the beneficiary balance. The goal is to not wastefully evaluate when we know
+        // we're missing data -- let's just depend on the missing data instead.
+        let need_consecutive_idxs = location_hash == self.vm.beneficiary_location_hash;
+        // While we can depend on the precise missing transaction index (known during lazy evaluation),
+        // through benchmark constantly retrying via the previous transaction index performs much better.
         let reschedule = Err(ReadError::BlockingIndex(self.tx_idx - 1));
 
-        let Some(written_beneficiary) = self.mv_memory.read_beneficiary() else {
-            return reschedule;
+        let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) else {
+            if need_consecutive_idxs {
+                return reschedule;
+            }
+            read_origins.push(ReadOrigin::Storage);
+            return self.read_from_storage(&location, U256::ZERO);
         };
 
-        let mut balance_addition = U256::ZERO;
-        let mut tx_idx = self.tx_idx - 1;
+        let mut total_addition = U256::ZERO;
+        let mut current_idx = self.tx_idx;
+        let mut iter = written_transactions.range(..current_idx);
         loop {
-            match written_beneficiary.get(&tx_idx) {
-                Some(MemoryEntry::Data(tx_incarnation, value)) => {
-                    self.read_set
-                        .beneficiary
-                        .push(ReadOrigin::MvMemory(crate::TxVersion {
-                            tx_idx,
-                            tx_incarnation: *tx_incarnation,
-                        }));
-                    match value {
-                        MemoryValue::Basic(account) => {
-                            let mut account = account.clone();
-                            account.balance += balance_addition;
-                            return Ok(MemoryValue::Basic(account));
-                        }
-                        MemoryValue::LazyBeneficiaryBalance(addition) => {
-                            // TODO: Be careful with overflows
-                            balance_addition += addition;
-                        }
-                        _ => unreachable!("Unexpected storage value for beneficiary account info"),
+            match iter.next_back() {
+                Some((blocking_idx, MemoryEntry::Estimate)) => {
+                    return if need_consecutive_idxs {
+                        reschedule
+                    } else {
+                        Err(ReadError::BlockingIndex(*blocking_idx))
                     }
                 }
-                _ => return reschedule,
+                Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                    if need_consecutive_idxs && closest_idx != &(current_idx - 1) {
+                        return reschedule;
+                    }
+                    read_origins.push(ReadOrigin::MvMemory(TxVersion {
+                        tx_idx: *closest_idx,
+                        tx_incarnation: *tx_incarnation,
+                    }));
+                    match value {
+                        MemoryValue::Basic(account) => {
+                            let mut info = account.clone();
+                            info.balance += total_addition;
+                            break Ok(MemoryValue::Basic(info));
+                        }
+                        MemoryValue::LazyBalanceAddition(addition) => {
+                            total_addition += addition;
+                            current_idx = closest_idx;
+                        }
+                        storage => break Ok(storage.clone()),
+                    }
+                }
+                _ => {
+                    if need_consecutive_idxs && current_idx > &0 {
+                        return reschedule;
+                    }
+                    read_origins.push(ReadOrigin::Storage);
+                    return self.read_from_storage(&location, total_addition);
+                }
             }
-            if tx_idx == 0 {
-                let mut account = self.read_beneficiary_from_storage()?;
-                account.balance += balance_addition;
-                return Ok(MemoryValue::Basic(Box::new(account)));
-            }
-            tx_idx -= 1;
         }
     }
 
-    fn read_beneficiary_from_storage(&self) -> Result<AccountInfo, ReadError> {
-        match self.storage.basic(self.beneficiary_location.address()) {
-            Ok(Some(account)) => Ok(account.into()),
-            Ok(None) => Err(ReadError::NotFound),
-            Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
+    fn read_from_storage(
+        &self,
+        location: &MemoryLocation,
+        balance_addition: U256, // For lazy evaluation of atomically updated balances
+    ) -> Result<MemoryValue, ReadError> {
+        match location {
+            MemoryLocation::Basic(address) => match self.vm.storage.basic(address) {
+                Ok(Some(account)) => {
+                    let mut info = AccountInfo::from(account);
+                    info.balance += balance_addition;
+                    Ok(MemoryValue::Basic(Box::new(info)))
+                }
+                Ok(None) => Err(ReadError::NotFound),
+                Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
+            },
+            MemoryLocation::Storage(address, index) => self
+                .vm
+                .storage
+                .storage(address, index)
+                .map(MemoryValue::Storage)
+                .map_err(|err| ReadError::StorageError(format!("{err:?}"))),
         }
     }
 }
@@ -252,23 +229,35 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         // TODO: Better way for REVM to notify explicit reads
         is_preload: bool,
     ) -> Result<Option<AccountInfo>, Self::Error> {
-        // We preload a mock beneficiary account, to only lazy evaluate it on
-        // explicit reads and once BlockSTM is completed.
-        if &address == self.beneficiary_location.address() && is_preload {
-            return Ok(Some(AccountInfo::default()));
+        // We only return full accounts on explicit usage.
+        if is_preload {
+            return Ok(None);
         }
-        match self.read(MemoryLocation::Basic(address), !is_preload) {
+        // We return a mock for a non-contract recipient to avoid unncessarily
+        // evaluating its balance here. Also skip transactions with the same from
+        // & to until we have lazy updates for the sender nonce & balance.
+        if &Some(address) == self.to && &address != self.from {
+            // TODO: Live check for a contract deployed then used in the same block!
+            let basic = self.vm.storage.basic(&address).unwrap();
+            if basic.is_none() || basic.is_some_and(|basic| basic.code.is_none()) {
+                return Ok(Some(AccountInfo {
+                    // We need this hack to not flag this an empty account for
+                    // destruction. Would definitely want a cleaner solution here.
+                    nonce: 1,
+                    ..AccountInfo::default()
+                }));
+            }
+        }
+        match self.read(MemoryLocation::Basic(address)) {
             Ok(MemoryValue::Basic(account)) => {
-                if !is_preload && &address != self.from && &Some(address) != self.to {
-                    self.read_externally = true;
+                if &address != self.from && &Some(address) != self.to {
+                    self.only_read_from_and_to = false;
                 }
                 let info = *account;
-                if !is_preload {
-                    self.read_set
-                        .accounts
-                        // Avoid cloning the code as we can compare its hash
-                        .insert(address, AccountInfo { code: None, ..info });
-                }
+                self.read_set
+                    .accounts
+                    // Avoid cloning the code as we can compare its hash
+                    .insert(address, AccountInfo { code: None, ..info });
                 Ok(Some(info))
             }
             Err(ReadError::NotFound) => Ok(None),
@@ -278,21 +267,23 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.storage
+        self.vm
+            .storage
             .code_by_hash(&code_hash)
             .map(|code| code.map(Bytecode::from).unwrap_or_default())
             .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
-        self.storage
+        self.vm
+            .storage
             .has_storage(&address)
             .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.read_externally = true;
-        match self.read(MemoryLocation::Storage(address, index), true) {
+        self.only_read_from_and_to = false;
+        match self.read(MemoryLocation::Storage(address, index)) {
             Err(err) => Err(err),
             Ok(MemoryValue::Storage(value)) => Ok(value),
             _ => Err(ReadError::InvalidMemoryLocationType),
@@ -300,7 +291,8 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
     }
 
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
-        self.storage
+        self.vm
+            .storage
             .block_hash(&number)
             .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
@@ -310,36 +302,32 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 // captures the read & write sets of each execution. Note that a single
 // `Vm` can be shared among threads.
 pub(crate) struct Vm<'a, S: Storage> {
-    hasher: ahash::RandomState,
+    hasher: &'a ahash::RandomState,
+    storage: &'a S,
+    mv_memory: &'a MvMemory,
     spec_id: SpecId,
     block_env: BlockEnv,
-    beneficiary_location: MemoryLocation,
     beneficiary_location_hash: MemoryLocationHash,
     txs: Vec<TxEnv>,
-    storage: S,
-    mv_memory: &'a MvMemory,
 }
 
 impl<'a, S: Storage> Vm<'a, S> {
     pub(crate) fn new(
-        hasher: ahash::RandomState,
+        hasher: &'a ahash::RandomState,
+        storage: &'a S,
+        mv_memory: &'a MvMemory,
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
-        storage: S,
-        mv_memory: &'a MvMemory,
     ) -> Self {
-        let beneficiary_location = MemoryLocation::Basic(block_env.coinbase);
-        let beneficiary_location_hash = hasher.hash_one(beneficiary_location.clone());
         Self {
             hasher,
-            spec_id,
-            beneficiary_location,
-            beneficiary_location_hash,
-            block_env,
-            txs,
             storage,
             mv_memory,
+            spec_id,
+            beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
+            block_env,
+            txs,
         }
     }
 
@@ -364,21 +352,14 @@ impl<'a, S: Storage> Vm<'a, S> {
         // SATEFY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_idx) }.clone();
         let from = tx.caller;
-        let (is_call_tx, to) = match tx.transact_to {
+        let (is_create_tx, to) = match tx.transact_to {
             TransactTo::Call(address) => (false, Some(address)),
             TransactTo::Create => (true, None),
         };
+        let value = tx.value;
 
         // Set up DB
-        let mut db = VmDb::new(
-            &self.hasher,
-            &self.beneficiary_location,
-            &tx_idx,
-            &from,
-            &to,
-            &self.storage,
-            self.mv_memory,
-        );
+        let mut db = VmDb::new(self, &tx_idx, &from, &to);
 
         // Gas price
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
@@ -423,10 +404,22 @@ impl<'a, S: Storage> Vm<'a, S> {
                             self.hasher.hash_one(MemoryLocation::Basic(*address))
                         };
 
-                        write_set.push((
-                            account_location_hash,
-                            MemoryValue::Basic(Box::new(account_info)),
-                        ));
+                        // Skip transactions with the same from & to until we have lazy updates
+                        // for the sender nonce & balance.
+                        if to == Some(*address)
+                            && address != &from
+                            && account.info.is_empty_code_hash()
+                        {
+                            write_set.push((
+                                account_location_hash,
+                                MemoryValue::LazyBalanceAddition(value),
+                            ));
+                        } else {
+                            write_set.push((
+                                account_location_hash,
+                                MemoryValue::Basic(Box::new(account_info)),
+                            ));
+                        }
                     }
 
                     // TODO: We should move this to our read set like for account info?
@@ -443,7 +436,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                 if let Some(gas_payment) = gas_payment {
                     write_set.push((
                         self.beneficiary_location_hash,
-                        MemoryValue::LazyBeneficiaryBalance(gas_payment),
+                        MemoryValue::LazyBalanceAddition(gas_payment),
                     ));
                 }
 
@@ -451,12 +444,12 @@ impl<'a, S: Storage> Vm<'a, S> {
                 if tx_idx > 0 {
                     // Validate from this transaction if it reads something outside of its
                     // sender and to infos.
-                    if db.read_externally {
+                    if !db.only_read_from_and_to {
                         next_validation_idx = Some(tx_idx);
                     }
                     // Validate from the next transaction if doesn't read externally but
                     // deploy a new contract.
-                    else if is_call_tx {
+                    else if is_create_tx {
                         next_validation_idx = Some(tx_idx + 1);
                     }
                     // Validate from the next transaction if it writes to a location outside
@@ -479,7 +472,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                         self.spec_id,
                         result_and_state,
                     ),
-                    read_set: db.read_set,
+                    read_locations: db.read_set.locations,
                     write_set,
                     next_validation_idx,
                 }

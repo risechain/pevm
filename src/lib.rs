@@ -41,14 +41,25 @@ enum MemoryLocation {
     Storage(Address, U256),
 }
 
-impl MemoryLocation {
-    fn address(&self) -> &Address {
-        match self {
-            MemoryLocation::Basic(address) => address,
-            MemoryLocation::Storage(address, _) => address,
-        }
+// No more hashing is required as we already identify memory locations by
+// their hash in the multi-version data structure, read & write sets. [dashmap]
+// having a dedicated interface for this use case (that skips hashing for `u64`
+// keys) would make our code cleaner and "faster". Nevertheless, the compiler
+// should be good enough to optimize these cases anyway.
+#[derive(Default)]
+struct IdentityHasher(MemoryLocationHash);
+impl Hasher for IdentityHasher {
+    fn write_u64(&mut self, hash: MemoryLocationHash) {
+        self.0 = hash;
+    }
+    fn finish(&self) -> MemoryLocationHash {
+        self.0
+    }
+    fn write(&mut self, _: &[u8]) {
+        unreachable!()
     }
 }
+type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 
 // We only need the full memory location to read from storage.
 // We then identify the locations with its hash in the multi-version
@@ -67,7 +78,7 @@ enum MemoryValue {
     // it receives in the transaction, to be added to the absolute
     // balance at the end of the previous transaction.
     // We can probably generalize this to `AtomicBalanceAddition`.
-    LazyBeneficiaryBalance(U256),
+    LazyBalanceAddition(U256),
     Storage(U256),
 }
 
@@ -152,6 +163,10 @@ enum ReadOrigin {
     Storage,
 }
 
+// For validation: a list of read origins (previous transaction versions)
+// for each read memory location.
+type ReadLocations = HashMap<MemoryLocationHash, Vec<ReadOrigin>, BuildIdentityHasher>;
+
 /// Errors when reading a memory location while executing BlockSTM.
 /// TODO: Better name & elaboration
 #[derive(Debug, Clone, PartialEq)]
@@ -172,13 +187,7 @@ pub enum ReadError {
 // vectors are noticeably faster in the mainnet benchmark.
 #[derive(Default)]
 struct ReadSet {
-    common: Vec<(MemoryLocationHash, ReadOrigin)>,
-    // An explicit beneficiary read may read from multiple lazily
-    // updated values. A micro-optimization here is to have a
-    // read origin with only an incarnation index instead of a
-    // while transaction version, as the latter is consecutive
-    // here (counting down from the reading transaction).
-    beneficiary: Vec<ReadOrigin>,
+    locations: ReadLocations,
     // Execution cache to determine if an account was changed.
     // TODO: Better organize the type to seprate what is needed
     // for execution only, and what is needed for validation.

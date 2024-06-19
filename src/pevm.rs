@@ -1,12 +1,13 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
     thread,
 };
 
-use alloy_primitives::{Address, U256};
+use ahash::AHashMap;
+use alloy_primitives::Address;
 use alloy_rpc_types::Block;
 use revm::{
     db::CacheDB,
@@ -88,6 +89,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return Ok(Vec::new());
     }
 
+    // Preprocess dependencies and fall back to sequential if there are too many
     let beneficiary_address = block_env.coinbase;
     let Some((scheduler, max_concurrency_level)) =
         preprocess_dependencies(&beneficiary_address, &txs)
@@ -95,18 +97,19 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return execute_revm_sequential(storage, spec_id, block_env, txs);
     };
 
-    let mut beneficiary_account = match storage.basic(&beneficiary_address) {
-        Ok(Some(account)) => account.into(),
-        _ => AccountInfo::default(),
-    };
-
+    // Initialize the remaining core components
     let block_size = txs.len();
     let hasher = ahash::RandomState::new();
-    let mv_memory = MvMemory::new(
-        block_size,
-        hasher.hash_one(MemoryLocation::Basic(beneficiary_address)),
-    );
-    let vm = Vm::new(hasher, spec_id, block_env, txs, storage, &mv_memory);
+    let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(beneficiary_address));
+    let mv_memory = MvMemory::new(block_size);
+    let to_addresses: Vec<Address> = txs
+        .iter()
+        .filter_map(|to| match to.transact_to {
+            TransactTo::Call(address) => Some(address),
+            TransactTo::Create => None,
+        })
+        .collect();
+    let vm = Vm::new(&hasher, &storage, &mv_memory, spec_id, block_env, txs);
 
     let mut execution_error = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
@@ -172,25 +175,34 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return Err(PevmError::ExecutionError(format!("{err:?}")));
     }
 
-    // We lazily evaluate the final beneficiary account's balance at the end of each transaction
-    // to avoid "implicit" dependency among consecutive transactions that read & write there.
-    // TODO: Refactor, improve speed & error handling.
-    let beneficiary_values = mv_memory.consume_beneficiary();
+    // We fully evaluate the final beneficiary account's and recpipients' balance that may
+    // have been atomically updated to avoid "cheap" dependencies.
+    let mut beneficiary_account = match storage.basic(&beneficiary_address) {
+        Ok(Some(account)) => account.into(),
+        _ => AccountInfo::default(),
+    };
+    let beneficiary_values: Vec<(TxIdx, MemoryValue)> = mv_memory
+        .consume_location(&beneficiary_location_hash)
+        .unwrap()
+        .into_iter()
+        .collect();
+    // TODO: Assert that there are exactly a beneficiary value for each transaction.
+
     let mut fully_evaluated_results = Vec::with_capacity(block_size);
     let mut cumulative_gas_used: u128 = 0;
-    for (mutex, beneficiary_value) in execution_results.into_iter().zip(beneficiary_values) {
+    for (mutex, (_, beneficiary_value)) in execution_results.into_iter().zip(beneficiary_values) {
         let mut execution_result = mutex.into_inner().unwrap().unwrap();
 
         // Cumulative gas
         cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
         execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
 
-        // Beneficiary account
+        // Fully evaluate beneficiary account
         match beneficiary_value {
             MemoryValue::Basic(info) => {
                 beneficiary_account = *info;
             }
-            MemoryValue::LazyBeneficiaryBalance(addition) => {
+            MemoryValue::LazyBalanceAddition(addition) => {
                 beneficiary_account.balance += addition;
             }
             _ => unreachable!(),
@@ -211,6 +223,45 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         );
 
         fully_evaluated_results.push(execution_result);
+    }
+
+    // Fully evaluate recipient balances
+    let mut evaluated_values = AHashMap::<Address, AccountInfo>::new();
+    for to in to_addresses {
+        if let Some(writes) = mv_memory
+            .consume_location(&hasher.hash_one(MemoryLocation::Basic(to)))
+            .map(|data| data.into_iter().collect::<BTreeMap<TxIdx, MemoryValue>>())
+        {
+            for (tx_idx, value) in writes {
+                let current_value =
+                    evaluated_values
+                        .entry(to)
+                        .or_insert_with(|| match storage.basic(&to) {
+                            Ok(Some(account)) => account.into(),
+                            _ => AccountInfo::default(),
+                        });
+
+                match value {
+                    MemoryValue::Basic(info) => {
+                        *current_value = *info;
+                    }
+                    MemoryValue::LazyBalanceAddition(addition) => {
+                        current_value.balance += addition;
+                    }
+                    _ => unreachable!(),
+                }
+
+                // SAFETY: The multi-version data structure should not leak an index
+                // over block size.
+                let tx_state =
+                    unsafe { &mut fully_evaluated_results.get_unchecked_mut(tx_idx).state };
+                if current_value.is_empty() {
+                    tx_state.insert(to, None);
+                } else if let Some(Some(account)) = tx_state.get_mut(&to) {
+                    account.basic = current_value.clone().into();
+                }
+            }
+        }
     }
 
     Ok(fully_evaluated_results)
@@ -250,7 +301,7 @@ pub fn execute_revm_sequential<S: Storage>(
 // Return `None` to signal falling back to sequential execution as we detected too many
 // dependencies. Otherwise return a tuned scheduler and the max concurrency level.
 // TODO: Clearer interface & make this as fast as possible.
-// For instance, to use an enum return type and `SmallVec` over `AHashSet`.
+// For instance, to use an enum return type.
 fn preprocess_dependencies(
     beneficiary_address: &Address,
     txs: &[TxEnv],
@@ -266,34 +317,12 @@ fn preprocess_dependencies(
     let mut transactions_dependents: TransactionsDependents = vec![vec![]; block_size];
     let mut transactions_dependencies = TransactionsDependencies::default();
 
-    // Marking transactions across same sender & recipient as dependents as they
-    // cross-depend at the `AccountInfo` level (reading & writing to nonce & balance).
-    // This is critical to avoid runtime dependencies that lead to many slow retries,
-    // plus this nasty race condition:
-    // 1. A spends money
-    // 2. B sends money to A
-    // 3. A spends money
-    // Without (3) depending on (2), (2) may race and write to A first, then (1) comes
-    // second flagging (2) for re-execution and execute (3) as dependency. (3) would
-    // panic with a nonce error reading from (2) before it rewrites the new nonce
-    // reading from (1).
-    let mut last_tx_idx_by_address = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
+    // Marking transactions from thee same sender as dependencies to avoid fatal nonce errors.
+    let mut last_tx_idx_by_sender = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
 
     for (tx_idx, tx) in txs.iter().enumerate() {
-        // We check for a non-empty value that guarantees to update the balance of the
-        // recipient, to avoid smart contract interactions that only some storage.
-        let mut recipient_with_changed_balance = None;
-        if let TransactTo::Call(to) = tx.transact_to {
-            if tx.value != U256::ZERO {
-                recipient_with_changed_balance = Some(to);
-            }
-        }
-
         // Register a lower transaction as this one's dependency.
         let mut register_dependency = |dependency_idxs: Vec<usize>| {
-            if dependency_idxs.is_empty() {
-                return;
-            }
             // SAFETY: The dependency index is guaranteed to be smaller than the block
             // size in this scope.
             unsafe {
@@ -307,43 +336,29 @@ fn preprocess_dependencies(
             }
         };
 
-        // Beneficiary account: depends on all transactions from the last beneficiary tx.
-        if &tx.caller == beneficiary_address
-            || recipient_with_changed_balance.is_some_and(|to| &to == beneficiary_address)
-        {
-            let start_idx = last_tx_idx_by_address
-                .get(beneficiary_address)
-                .cloned()
-                .unwrap_or(0);
-            register_dependency((start_idx..tx_idx).collect());
-        }
-        // Otherwise, build dependencies across same senders & recipients
-        else {
-            let mut dependency_idxs = Vec::new();
-            if let Some(prev_idx) = last_tx_idx_by_address.get(&tx.caller) {
-                dependency_idxs.push(*prev_idx);
+        if tx_idx > 0 {
+            // Beneficiary account: depends on all transactions from the last beneficiary tx.
+            if &tx.caller == beneficiary_address
+                || tx.transact_to == TransactTo::Call(*beneficiary_address)
+            {
+                let start_idx = last_tx_idx_by_sender
+                    .get(beneficiary_address)
+                    .cloned()
+                    .unwrap_or(0);
+                register_dependency((start_idx..tx_idx).collect());
             }
-            if let Some(to) = recipient_with_changed_balance {
-                if let Some(prev_idx) = last_tx_idx_by_address.get(&to) {
-                    if !dependency_idxs.contains(prev_idx) {
-                        dependency_idxs.push(*prev_idx);
-                    }
-                }
+            // Otherwise, build dependencies across the same sender
+            else if let Some(prev_idx) = last_tx_idx_by_sender.get(&tx.caller) {
+                register_dependency(vec![*prev_idx]);
             }
-            register_dependency(dependency_idxs);
         }
 
         // TODO: Continue to fine tune this ratio.
-        // Intuitively we should quit way before 90%.
-        if transactions_dependencies.len() as f64 / block_size as f64 > 0.9 {
+        if transactions_dependencies.len() as f64 / block_size as f64 > 0.85 {
             return None;
         }
 
-        // Register this transaction to the sender & recipient index maps.
-        last_tx_idx_by_address.insert(tx.caller, tx_idx);
-        if let Some(to) = recipient_with_changed_balance {
-            last_tx_idx_by_address.insert(to, tx_idx);
-        }
+        last_tx_idx_by_sender.insert(tx.caller, tx_idx);
     }
 
     let min_concurrency_level = NonZeroUsize::new(2).unwrap();
@@ -398,12 +413,12 @@ fn try_execute<S: Storage>(
             }
             VmExecutionResult::Ok {
                 execution_result,
-                read_set,
+                read_locations,
                 write_set,
                 next_validation_idx,
             } => {
                 *index_mutex!(execution_results, tx_version.tx_idx) = Some(execution_result);
-                let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
+                let wrote_new_location = mv_memory.record(&tx_version, read_locations, write_set);
                 scheduler.finish_execution(tx_version, wrote_new_location, next_validation_idx)
             }
         };
@@ -422,7 +437,7 @@ fn try_validate(
     scheduler: &Scheduler,
     tx_version: &TxVersion,
 ) -> Option<ExecutionTask> {
-    let read_set_valid = mv_memory.validate_read_set(tx_version.tx_idx);
+    let read_set_valid = mv_memory.validate_read_locations(tx_version.tx_idx);
     let aborted = !read_set_valid && scheduler.try_validation_abort(tx_version);
     if aborted {
         mv_memory.convert_writes_to_estimates(tx_version.tx_idx);
