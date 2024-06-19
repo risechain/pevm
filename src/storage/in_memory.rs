@@ -1,18 +1,17 @@
 // A storage that stores data in memory.
 
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 
 use ahash::AHashMap;
 use alloy_primitives::{keccak256, Address, B256, U256};
 
-use crate::{AccountBasic, EvmAccount, Storage};
-
 use super::EvmCode;
+use crate::{AccountBasic, BuildAddressHasher, EvmAccount, Storage};
 
 /// Fetch state data via RPC to execute.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage {
-    accounts: AHashMap<Address, EvmAccount>,
+    accounts: HashMap<Address, EvmAccount, BuildAddressHasher>,
     block_hashes: AHashMap<U256, B256>,
 }
 

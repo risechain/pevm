@@ -13,8 +13,8 @@ use revm::{
 
 use crate::{
     mv_memory::{MvMemory, ReadMemoryResult},
-    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, ReadError, ReadOrigin, ReadSet, Storage,
-    TxIdx, WriteSet,
+    EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, ReadError,
+    ReadOrigin, ReadSet, Storage, TxIdx, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -94,6 +94,7 @@ pub(crate) enum VmExecutionResult {
 // `preprocessed_addresses` or a `preprocessed_locations` vector.
 struct VmDb<'a, S: Storage> {
     // References from the main VM instance.
+    hasher: &'a ahash::RandomState,
     beneficiary_location: &'a MemoryLocation,
     tx_idx: &'a TxIdx,
     from: &'a Address,
@@ -109,6 +110,7 @@ struct VmDb<'a, S: Storage> {
 
 impl<'a, S: Storage> VmDb<'a, S> {
     fn new(
+        hasher: &'a ahash::RandomState,
         beneficiary_location: &'a MemoryLocation,
         tx_idx: &'a TxIdx,
         from: &'a Address,
@@ -117,6 +119,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
         mv_memory: &'a MvMemory,
     ) -> Self {
         Self {
+            hasher,
             beneficiary_location,
             tx_idx,
             storage,
@@ -137,7 +140,12 @@ impl<'a, S: Storage> VmDb<'a, S> {
             return self.read_beneficiary();
         }
 
-        match self.mv_memory.read_closest(&location, self.tx_idx, true) {
+        let location_hash = self.hasher.hash_one(location.clone());
+
+        match self
+            .mv_memory
+            .read_closest(&location_hash, self.tx_idx, true)
+        {
             ReadMemoryResult::ReadError { blocking_tx_idx } => {
                 Err(ReadError::BlockingIndex(blocking_tx_idx))
             }
@@ -145,7 +153,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
                 if update_read_set {
                     self.read_set
                         .common
-                        .push((location.clone(), ReadOrigin::Storage));
+                        .push((location_hash, ReadOrigin::Storage));
                 }
                 match location {
                     MemoryLocation::Basic(address) => match self.storage.basic(&address) {
@@ -164,7 +172,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
                 if update_read_set {
                     self.read_set
                         .common
-                        .push((location, ReadOrigin::MvMemory(version)));
+                        .push((location_hash, ReadOrigin::MvMemory(version)));
                 }
                 Ok(value.unwrap())
             }
@@ -302,9 +310,11 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 // captures the read & write sets of each execution. Note that a single
 // `Vm` can be shared among threads.
 pub(crate) struct Vm<'a, S: Storage> {
+    hasher: ahash::RandomState,
     spec_id: SpecId,
     block_env: BlockEnv,
     beneficiary_location: MemoryLocation,
+    beneficiary_location_hash: MemoryLocationHash,
     txs: Vec<TxEnv>,
     storage: S,
     mv_memory: &'a MvMemory,
@@ -312,15 +322,20 @@ pub(crate) struct Vm<'a, S: Storage> {
 
 impl<'a, S: Storage> Vm<'a, S> {
     pub(crate) fn new(
+        hasher: ahash::RandomState,
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         storage: S,
         mv_memory: &'a MvMemory,
     ) -> Self {
+        let beneficiary_location = MemoryLocation::Basic(block_env.coinbase);
+        let beneficiary_location_hash = hasher.hash_one(beneficiary_location.clone());
         Self {
+            hasher,
             spec_id,
-            beneficiary_location: MemoryLocation::Basic(block_env.coinbase),
+            beneficiary_location,
+            beneficiary_location_hash,
             block_env,
             txs,
             storage,
@@ -356,6 +371,7 @@ impl<'a, S: Storage> Vm<'a, S> {
 
         // Set up DB
         let mut db = VmDb::new(
+            &self.hasher,
             &self.beneficiary_location,
             &tx_idx,
             &from,
@@ -380,13 +396,13 @@ impl<'a, S: Storage> Vm<'a, S> {
 
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
-                let mut write_set = AHashMap::<MemoryLocation, MemoryValue>::with_capacity(3);
+                let mut write_set = WriteSet::with_capacity(3);
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
-                        write_set.insert(
-                            MemoryLocation::Basic(*address),
+                        write_set.push((
+                            self.hasher.hash_one(MemoryLocation::Basic(*address)),
                             MemoryValue::Basic(Box::default()),
-                        );
+                        ));
                         continue;
                     }
 
@@ -399,31 +415,36 @@ impl<'a, S: Storage> Vm<'a, S> {
                         // balance's lazy update behaviour into `MemoryValue` for more use cases.
                         // TODO: Confirm that we're not missing anything, like bytecode.
                         let mut account_info = account.info.clone();
-                        if address == &self.block_env.coinbase {
-                            account_info.balance += gas_payment.take().unwrap();
-                        }
 
-                        write_set.insert(
-                            MemoryLocation::Basic(*address),
+                        let account_location_hash = if address == &self.block_env.coinbase {
+                            account_info.balance += gas_payment.take().unwrap();
+                            self.beneficiary_location_hash
+                        } else {
+                            self.hasher.hash_one(MemoryLocation::Basic(*address))
+                        };
+
+                        write_set.push((
+                            account_location_hash,
                             MemoryValue::Basic(Box::new(account_info)),
-                        );
+                        ));
                     }
 
                     // TODO: We should move this to our read set like for account info?
                     for (slot, value) in account.changed_storage_slots() {
-                        write_set.insert(
-                            MemoryLocation::Storage(*address, *slot),
+                        write_set.push((
+                            self.hasher
+                                .hash_one(MemoryLocation::Storage(*address, *slot)),
                             MemoryValue::Storage(value.present_value),
-                        );
+                        ));
                     }
                 }
 
                 // A non-existent explicit write hasn't taken the option.
                 if let Some(gas_payment) = gas_payment {
-                    write_set.insert(
-                        self.beneficiary_location.clone(),
+                    write_set.push((
+                        self.beneficiary_location_hash,
                         MemoryValue::LazyBeneficiaryBalance(gas_payment),
-                    );
+                    ));
                 }
 
                 let mut next_validation_idx = None;
@@ -441,12 +462,12 @@ impl<'a, S: Storage> Vm<'a, S> {
                     // Validate from the next transaction if it writes to a location outside
                     // of the beneficiary account, its sender and to infos.
                     else {
-                        let to = to.unwrap();
-                        if write_set.iter().any(|(location, _)| {
-                            let address = location.address();
-                            address != &from
-                                && address != &to
-                                && address != &self.block_env.coinbase
+                        let from_hash = self.hasher.hash_one(from);
+                        let to_hash = self.hasher.hash_one(to.unwrap());
+                        if write_set.iter().any(|(location_hash, _)| {
+                            location_hash != &from_hash
+                                && location_hash != &to_hash
+                                && location_hash != &self.beneficiary_location_hash
                         }) {
                             next_validation_idx = Some(tx_idx + 1);
                         }
