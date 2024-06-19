@@ -1,11 +1,11 @@
 use std::{
+    collections::HashMap,
     fmt::Debug,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
     thread,
 };
 
-use ahash::AHashMap;
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::Block;
 use revm::{
@@ -20,9 +20,9 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    EvmAccount, ExecutionTask, IncarnationStatus, MemoryLocation, MemoryValue, Storage, Task,
-    TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx, TxStatus,
-    TxVersion, ValidationTask,
+    BuildAddressHasher, EvmAccount, ExecutionTask, IncarnationStatus, MemoryLocation, MemoryValue,
+    Storage, Task, TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx,
+    TxStatus, TxVersion, ValidationTask,
 };
 
 /// Errors when executing a block with PEVM.
@@ -101,8 +101,12 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     };
 
     let block_size = txs.len();
-    let mv_memory = MvMemory::new(block_size, MemoryLocation::Basic(beneficiary_address));
-    let vm = Vm::new(spec_id, block_env, txs, storage, &mv_memory);
+    let hasher = ahash::RandomState::new();
+    let mv_memory = MvMemory::new(
+        block_size,
+        hasher.hash_one(MemoryLocation::Basic(beneficiary_address)),
+    );
+    let vm = Vm::new(hasher, spec_id, block_env, txs, storage, &mv_memory);
 
     let mut execution_error = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
@@ -273,7 +277,7 @@ fn preprocess_dependencies(
     // second flagging (2) for re-execution and execute (3) as dependency. (3) would
     // panic with a nonce error reading from (2) before it rewrites the new nonce
     // reading from (1).
-    let mut last_tx_idx_by_address = AHashMap::<Address, TxIdx>::default();
+    let mut last_tx_idx_by_address = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
 
     for (tx_idx, tx) in txs.iter().enumerate() {
         // We check for a non-empty value that guarantees to update the balance of the

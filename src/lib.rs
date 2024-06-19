@@ -2,9 +2,30 @@
 
 // TODO: Better types & API please
 
+use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
+
 use ahash::AHashMap;
 
 use revm::primitives::{AccountInfo, Address, U256};
+
+// We take the last 8 bytes of an address as its hash. This
+// seems fine as the addresses themselves are hash suffixes,
+// and precomiles' suffix should be unique, too.
+// TODO: Make sure this is acceptable for production
+#[derive(Default)]
+struct AddressHasher(u64);
+impl Hasher for AddressHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut suffix = [0u8; 8];
+        suffix.copy_from_slice(&bytes[bytes.len() - 8..]);
+        self.0 = u64::from_be_bytes(suffix);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+type BuildAddressHasher = BuildHasherDefault<AddressHasher>;
 
 // TODO: More granularity here, for instance, to separate an account's
 // balance, nonce, etc. instead of marking conflict at the whole account.
@@ -28,6 +49,12 @@ impl MemoryLocation {
         }
     }
 }
+
+// We only need the full memory location to read from storage.
+// We then identify the locations with its hash in the multi-version
+// data, write and read sets, which is much faster than rehashing
+// on every single lookup & validation.
+type MemoryLocationHash = u64;
 
 #[derive(Debug, Clone)]
 enum MemoryValue {
@@ -145,7 +172,7 @@ pub enum ReadError {
 // vectors are noticeably faster in the mainnet benchmark.
 #[derive(Default)]
 struct ReadSet {
-    common: Vec<(MemoryLocation, ReadOrigin)>,
+    common: Vec<(MemoryLocationHash, ReadOrigin)>,
     // An explicit beneficiary read may read from multiple lazily
     // updated values. A micro-optimization here is to have a
     // read origin with only an incarnation index instead of a
@@ -155,12 +182,12 @@ struct ReadSet {
     // Execution cache to determine if an account was changed.
     // TODO: Better organize the type to seprate what is needed
     // for execution only, and what is needed for validation.
-    accounts: AHashMap<Address, AccountInfo>,
+    accounts: HashMap<Address, AccountInfo, BuildAddressHasher>,
 }
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.
-type WriteSet = AHashMap<MemoryLocation, MemoryValue>;
+type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
 
 // TODO: Properly type this
 type ExecutionTask = TxVersion;

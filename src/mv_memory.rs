@@ -1,14 +1,36 @@
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    hash::{BuildHasherDefault, Hasher},
+    sync::Mutex,
+};
 
-// ~x2 performance gain over a naive `RwLock<HashMap>`!
 use dashmap::{
     mapref::{entry::Entry, one::Ref},
     DashMap,
 };
 
 use crate::{
-    MemoryEntry, MemoryLocation, MemoryValue, ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
+    MemoryEntry, MemoryLocationHash, MemoryValue, ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
 };
+
+// No more hashing is required as we already identify memory locations by
+// their hash in the multi-version data structure, read & write sets. [dashmap]
+// having a dedicated interface for this use case (that skips hashing for `u64`
+// keys) would make our code cleaner and "faster". Nevertheless, the compiler
+// should be good enough to optimize these cases anyway.
+#[derive(Default)]
+struct IdentityHasher(MemoryLocationHash);
+impl Hasher for IdentityHasher {
+    fn write_u64(&mut self, hash: MemoryLocationHash) {
+        self.0 = hash;
+    }
+    fn finish(&self) -> MemoryLocationHash {
+        self.0
+    }
+    fn write(&mut self, _: &[u8]) {
+        unreachable!()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum ReadMemoryResult {
@@ -28,17 +50,21 @@ pub(crate) enum ReadMemoryResult {
 // version of a corresponding transaction.
 // TODO: Better concurrency control if possible.
 pub(crate) struct MvMemory {
-    beneficiary_location: MemoryLocation,
-    data: DashMap<MemoryLocation, BTreeMap<TxIdx, MemoryEntry>, ahash::RandomState>,
-    last_written_locations: Vec<Mutex<Vec<MemoryLocation>>>,
+    beneficiary_location: MemoryLocationHash,
+    data: DashMap<
+        MemoryLocationHash,
+        BTreeMap<TxIdx, MemoryEntry>,
+        BuildHasherDefault<IdentityHasher>,
+    >,
+    last_written_locations: Vec<Mutex<Vec<MemoryLocationHash>>>,
     last_read_set: Vec<Mutex<ReadSet>>,
 }
 
 impl MvMemory {
-    pub(crate) fn new(block_size: usize, beneficiary_location: MemoryLocation) -> Self {
+    pub(crate) fn new(block_size: usize, beneficiary_location: MemoryLocationHash) -> Self {
         Self {
             beneficiary_location,
-            data: DashMap::with_hasher(ahash::RandomState::new()),
+            data: DashMap::default(),
             last_written_locations: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
             last_read_set: (0..block_size).map(|_| Mutex::default()).collect(),
         }
@@ -56,7 +82,7 @@ impl MvMemory {
     ) -> bool {
         // Update the multi-version as fast as possible for higher transactions to
         // read from.
-        let new_locations: Vec<MemoryLocation> = write_set.keys().cloned().collect();
+        let new_locations: Vec<MemoryLocationHash> = write_set.iter().map(|(l, _)| *l).collect();
         for (location, value) in write_set.into_iter() {
             let entry = MemoryEntry::Data(tx_version.tx_incarnation, value);
             // We must not use `get_mut` here, else there's a race condition where
@@ -194,7 +220,7 @@ impl MvMemory {
     // TODO: Refactor & make this much faster
     pub(crate) fn read_closest(
         &self,
-        location: &MemoryLocation,
+        location: &MemoryLocationHash,
         tx_idx: &TxIdx,
         // We only need the actual value for execution. Validation only needs the
         // version and setting this to `false` saves a value clone.
@@ -232,7 +258,7 @@ impl MvMemory {
     // For evaluating & validating explicit beneficiary reads.
     pub(crate) fn read_beneficiary(
         &self,
-    ) -> Option<Ref<MemoryLocation, BTreeMap<usize, MemoryEntry>, ahash::RandomState>> {
+    ) -> Option<Ref<MemoryLocationHash, BTreeMap<usize, MemoryEntry>>> {
         self.data.get(&self.beneficiary_location)
     }
 
