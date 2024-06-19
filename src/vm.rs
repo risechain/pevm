@@ -382,6 +382,14 @@ impl<'a, S: Storage> Vm<'a, S> {
                 // the recipient, and the beneficiary accounts.
                 let mut write_set = AHashMap::<MemoryLocation, MemoryValue>::with_capacity(3);
                 for (address, account) in result_and_state.state.iter() {
+                    if account.is_selfdestructed() {
+                        write_set.insert(
+                            MemoryLocation::Basic(*address),
+                            MemoryValue::Basic(Box::default()),
+                        );
+                        continue;
+                    }
+
                     if account.is_touched()
                         && db.read_set.accounts.get(address) != Some(&account.info)
                     {
@@ -400,6 +408,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                             MemoryValue::Basic(Box::new(account_info)),
                         );
                     }
+
                     // TODO: We should move this to our read set like for account info?
                     for (slot, value) in account.changed_storage_slots() {
                         write_set.insert(
