@@ -95,7 +95,7 @@ struct VmDb<'a, S: Storage> {
     vm: &'a Vm<'a, S>,
     tx_idx: &'a TxIdx,
     from: &'a Address,
-    to: &'a Option<Address>,
+    to: Option<&'a Address>,
     is_data_empty: bool,
     // List of memory locations that this transaction reads.
     read_set: ReadSet,
@@ -109,7 +109,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
         vm: &'a Vm<'a, S>,
         tx_idx: &'a TxIdx,
         from: &'a Address,
-        to: &'a Option<Address>,
+        to: Option<&'a Address>,
         is_data_empty: bool,
     ) -> Self {
         Self {
@@ -239,7 +239,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         // We return a mock for a non-contract recipient to avoid unncessarily
         // evaluating its balance here. Also skip transactions with the same from
         // & to until we have lazy updates for the sender nonce & balance.
-        if self.is_data_empty && &Some(address) == self.to && &address != self.from {
+        if self.is_data_empty && Some(&address) == self.to && &address != self.from {
             // TODO: Live check for a contract deployed then used in the same block!
             let basic = self.vm.storage.basic(&address).unwrap();
             if basic.is_none() || basic.is_some_and(|basic| basic.code.is_none()) {
@@ -253,7 +253,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         }
         match self.read(MemoryLocation::Basic(address)) {
             Ok(MemoryValue::Basic(account)) => {
-                if &address != self.from && &Some(address) != self.to {
+                if &address != self.from && Some(&address) != self.to {
                     self.only_read_from_and_to = false;
                 }
                 let info = *account;
@@ -353,18 +353,17 @@ impl<'a, S: Storage> Vm<'a, S> {
     // execution).
     pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
         // SATEFY: A correct scheduler would guarantee this index to be inbound.
-        let tx = unsafe { self.txs.get_unchecked(tx_idx) }.clone();
-        let from = tx.caller;
-        let (is_create_tx, to) = match tx.transact_to {
+        let tx = unsafe { self.txs.get_unchecked(tx_idx) };
+        let from = &tx.caller;
+        let (is_create_tx, to) = match &tx.transact_to {
             TransactTo::Call(address) => (false, Some(address)),
             TransactTo::Create => (true, None),
         };
         // TODO: The perfect condition is if the recipient is contract.
         let is_data_empty = tx.data.is_empty();
-        let value = tx.value;
 
         // Set up DB
-        let mut db = VmDb::new(self, &tx_idx, &from, &to, is_data_empty);
+        let mut db = VmDb::new(self, &tx_idx, from, to, is_data_empty);
 
         // Gas price
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
@@ -375,7 +374,13 @@ impl<'a, S: Storage> Vm<'a, S> {
         if self.spec_id.is_enabled_in(LONDON) {
             gas_price = gas_price.saturating_sub(self.block_env.basefee);
         }
-        match execute_tx(&mut db, self.spec_id, self.block_env.clone(), tx, false) {
+        match execute_tx(
+            &mut db,
+            self.spec_id,
+            self.block_env.clone(),
+            tx.clone(),
+            false,
+        ) {
             Ok(result_and_state) => {
                 let mut gas_payment =
                     Some(gas_price * U256::from(result_and_state.result.gas_used()));
@@ -412,13 +417,13 @@ impl<'a, S: Storage> Vm<'a, S> {
                         // Skip transactions with the same from & to until we have lazy updates
                         // for the sender nonce & balance.
                         if is_data_empty
-                            && to == Some(*address)
-                            && address != &from
+                            && Some(address) == to
+                            && address != from
                             && account.info.is_empty_code_hash()
                         {
                             write_set.push((
                                 account_location_hash,
-                                MemoryValue::LazyBalanceAddition(value),
+                                MemoryValue::LazyBalanceAddition(tx.value),
                             ));
                         } else {
                             write_set.push((
@@ -501,7 +506,7 @@ pub(crate) fn execute_tx<DB: Database>(
 ) -> Result<ResultAndState, EVMError<DB::Error>> {
     // This is much uglier than the builder interface but can be up to 50% faster!!
     let context = Context {
-        evm: EvmContext::new_with_env(db, Env::boxed(CfgEnv::default(), block_env.clone(), tx)),
+        evm: EvmContext::new_with_env(db, Env::boxed(CfgEnv::default(), block_env, tx)),
         external: (),
     };
     // TODO: Support OP handlers
