@@ -95,7 +95,9 @@ struct VmDb<'a, S: Storage> {
     vm: &'a Vm<'a, S>,
     tx_idx: &'a TxIdx,
     from: &'a Address,
+    from_hash: MemoryLocationHash,
     to: Option<&'a Address>,
+    to_hash: Option<MemoryLocationHash>,
     is_data_empty: bool,
     // List of memory locations that this transaction reads.
     read_set: ReadSet,
@@ -109,23 +111,42 @@ impl<'a, S: Storage> VmDb<'a, S> {
         vm: &'a Vm<'a, S>,
         tx_idx: &'a TxIdx,
         from: &'a Address,
+        from_hash: MemoryLocationHash,
         to: Option<&'a Address>,
+        to_hash: Option<MemoryLocationHash>,
         is_data_empty: bool,
     ) -> Self {
         Self {
             vm,
             tx_idx,
             from,
+            from_hash,
             to,
+            to_hash,
             is_data_empty,
             only_read_from_and_to: true,
             read_set: ReadSet::default(),
         }
     }
 
-    fn read(&mut self, location: MemoryLocation) -> Result<MemoryValue, ReadError> {
-        let location_hash = self.vm.hasher.hash_one(location.clone());
+    fn get_address_hash(&self, address: &Address) -> MemoryLocationHash {
+        if address == self.from {
+            self.from_hash
+        } else if Some(address) == self.to {
+            self.to_hash.unwrap()
+        } else {
+            self.vm.get_address_hash(address)
+        }
+    }
 
+    // TODO: Get the hash inside here for less redundancy. For now, there are
+    // cases where the call site already has the hash or need the hash  for
+    // post-processing and it's too noisier to add it to the return type here.
+    fn read(
+        &mut self,
+        location: MemoryLocation,
+        location_hash: MemoryLocationHash,
+    ) -> Result<MemoryValue, ReadError> {
         self.read_set.locations.insert(location_hash, vec![]);
         let read_origins = self.read_set.locations.get_mut(&location_hash).unwrap();
 
@@ -251,7 +272,8 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                 }));
             }
         }
-        match self.read(MemoryLocation::Basic(address)) {
+        let location_hash = self.get_address_hash(&address);
+        match self.read(MemoryLocation::Basic(address), location_hash) {
             Ok(MemoryValue::Basic(account)) => {
                 if &address != self.from && Some(&address) != self.to {
                     self.only_read_from_and_to = false;
@@ -260,7 +282,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                 self.read_set
                     .accounts
                     // Avoid cloning the code as we can compare its hash
-                    .insert(address, AccountInfo { code: None, ..info });
+                    .insert(location_hash, AccountInfo { code: None, ..info });
                 Ok(Some(info))
             }
             Err(ReadError::NotFound) => Ok(None),
@@ -286,7 +308,8 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         self.only_read_from_and_to = false;
-        match self.read(MemoryLocation::Storage(address, index)) {
+        let location = MemoryLocation::Storage(address, index);
+        match self.read(location.clone(), self.vm.hasher.hash_one(location)) {
             Err(err) => Err(err),
             Ok(MemoryValue::Storage(value)) => Ok(value),
             _ => Err(ReadError::InvalidMemoryLocationType),
@@ -334,6 +357,14 @@ impl<'a, S: Storage> Vm<'a, S> {
         }
     }
 
+    fn get_address_hash(&self, address: &Address) -> MemoryLocationHash {
+        if address == &self.block_env.coinbase {
+            self.beneficiary_location_hash
+        } else {
+            self.hasher.hash_one(MemoryLocation::Basic(*address))
+        }
+    }
+
     // Execute a transaction. This can read from memory but cannot modify any state.
     // A successful execution returns:
     //   - A write-set consisting of memory locations and their updated values.
@@ -355,15 +386,18 @@ impl<'a, S: Storage> Vm<'a, S> {
         // SATEFY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_idx) };
         let from = &tx.caller;
-        let (is_create_tx, to) = match &tx.transact_to {
-            TransactTo::Call(address) => (false, Some(address)),
-            TransactTo::Create => (true, None),
+        let from_hash = self.get_address_hash(from);
+        let (is_create_tx, to, to_hash) = match &tx.transact_to {
+            TransactTo::Call(address) => {
+                (false, Some(address), Some(self.get_address_hash(address)))
+            }
+            TransactTo::Create => (true, None, None),
         };
         // TODO: The perfect condition is if the recipient is contract.
         let is_data_empty = tx.data.is_empty();
 
         // Set up DB
-        let mut db = VmDb::new(self, &tx_idx, from, to, is_data_empty);
+        let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash, is_data_empty);
 
         // Gas price
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
@@ -391,45 +425,43 @@ impl<'a, S: Storage> Vm<'a, S> {
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
                         write_set.push((
-                            self.hasher.hash_one(MemoryLocation::Basic(*address)),
+                            self.get_address_hash(address),
                             MemoryValue::Basic(Box::default()),
                         ));
                         continue;
                     }
 
-                    if account.is_touched()
-                        && db.read_set.accounts.get(address) != Some(&account.info)
-                    {
-                        // TODO: More granularity here to ensure we only notify new
-                        // memory writes, for instance, only an account's balance instead
-                        // of the whole account. That way we may also generalize beneficiary
-                        // balance's lazy update behaviour into `MemoryValue` for more use cases.
-                        // TODO: Confirm that we're not missing anything, like bytecode.
-                        let mut account_info = account.info.clone();
+                    if account.is_touched() {
+                        let account_location_hash = self.get_address_hash(address);
+                        if db.read_set.accounts.get(&account_location_hash) != Some(&account.info) {
+                            // TODO: More granularity here to ensure we only notify new
+                            // memory writes, for instance, only an account's balance instead
+                            // of the whole account. That way we may also generalize beneficiary
+                            // balance's lazy update behaviour into `MemoryValue` for more use cases.
+                            // TODO: Confirm that we're not missing anything, like bytecode.
+                            let mut account_info = account.info.clone();
 
-                        let account_location_hash = if address == &self.block_env.coinbase {
-                            account_info.balance += gas_payment.take().unwrap();
-                            self.beneficiary_location_hash
-                        } else {
-                            self.hasher.hash_one(MemoryLocation::Basic(*address))
-                        };
+                            if address == &self.block_env.coinbase {
+                                account_info.balance += gas_payment.take().unwrap();
+                            }
 
-                        // Skip transactions with the same from & to until we have lazy updates
-                        // for the sender nonce & balance.
-                        if is_data_empty
-                            && Some(address) == to
-                            && address != from
-                            && account.info.is_empty_code_hash()
-                        {
-                            write_set.push((
-                                account_location_hash,
-                                MemoryValue::LazyBalanceAddition(tx.value),
-                            ));
-                        } else {
-                            write_set.push((
-                                account_location_hash,
-                                MemoryValue::Basic(Box::new(account_info)),
-                            ));
+                            // Skip transactions with the same from & to until we have lazy updates
+                            // for the sender nonce & balance.
+                            if is_data_empty
+                                && Some(address) == to
+                                && address != from
+                                && account.info.is_empty_code_hash()
+                            {
+                                write_set.push((
+                                    account_location_hash,
+                                    MemoryValue::LazyBalanceAddition(tx.value),
+                                ));
+                            } else {
+                                write_set.push((
+                                    account_location_hash,
+                                    MemoryValue::Basic(Box::new(account_info)),
+                                ));
+                            }
                         }
                     }
 
@@ -451,32 +483,33 @@ impl<'a, S: Storage> Vm<'a, S> {
                     ));
                 }
 
-                let mut next_validation_idx = None;
-                if tx_idx > 0 {
+                let next_validation_idx =
+                    // Don't need to validate the first transaction
+                    if tx_idx == 0 {
+                        None
+                    }
                     // Validate from this transaction if it reads something outside of its
                     // sender and to infos.
-                    if !db.only_read_from_and_to {
-                        next_validation_idx = Some(tx_idx);
+                    else if !db.only_read_from_and_to {
+                        Some(tx_idx)
                     }
                     // Validate from the next transaction if doesn't read externally but
-                    // deploy a new contract.
-                    else if is_create_tx {
-                        next_validation_idx = Some(tx_idx + 1);
-                    }
-                    // Validate from the next transaction if it writes to a location outside
+                    // deploy a new contract, or if it writes to a location outside
                     // of the beneficiary account, its sender and to infos.
-                    else {
-                        let from_hash = self.hasher.hash_one(from);
-                        let to_hash = self.hasher.hash_one(to.unwrap());
-                        if write_set.iter().any(|(location_hash, _)| {
+                    else if is_create_tx
+                        || write_set.iter().any(|(location_hash, _)| {
                             location_hash != &from_hash
-                                && location_hash != &to_hash
+                                && location_hash != &to_hash.unwrap()
                                 && location_hash != &self.beneficiary_location_hash
-                        }) {
-                            next_validation_idx = Some(tx_idx + 1);
-                        }
+                        })
+                    {
+                        Some(tx_idx + 1)
                     }
-                }
+                    // Don't need to validate transactions that don't read nor write to
+                    // any location outside of its read & to accounts.
+                    else {
+                        None
+                    };
 
                 VmExecutionResult::Ok {
                     execution_result: PevmTxExecutionResult::from_revm(

@@ -1,17 +1,17 @@
 use std::{
     cmp::min,
+    collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
     },
 };
 
-use ahash::AHashMap;
 use crossbeam::utils::CachePadded;
 
 use crate::{
-    ExecutionTask, IncarnationStatus, Task, TransactionsDependencies, TransactionsDependents,
-    TransactionsStatus, TxIdx, TxStatus, TxVersion, ValidationTask,
+    BuildIdentityHasher, ExecutionTask, IncarnationStatus, Task, TransactionsDependencies,
+    TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion, ValidationTask,
 };
 
 // The BlockSTM collaborative scheduler coordinates execution & validation
@@ -79,7 +79,7 @@ pub(crate) struct Scheduler {
     /// before they clear and think that the dependent is not yet
     /// ready, making it forever unexecuted.
     // TODO: Build a fuller dependency graph.
-    transactions_dependencies: AHashMap<TxIdx, Mutex<Vec<TxIdx>>>,
+    transactions_dependencies: HashMap<TxIdx, Mutex<Vec<TxIdx>>, BuildIdentityHasher>,
 }
 
 impl Scheduler {
