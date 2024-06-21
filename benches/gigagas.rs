@@ -33,12 +33,14 @@ static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let spec_id = SpecId::LATEST;
+    let chain_spec = pevm::ChainSpec::Ethereum { chain_id: 1 };
     let block_env = BlockEnv::default();
     let storage = InMemoryStorage::new(state, []);
     let mut group = c.benchmark_group(name);
     group.bench_function("Sequential", |b| {
         b.iter(|| {
             execute_revm_sequential(
+                black_box(&chain_spec),
                 black_box(storage.clone()),
                 black_box(spec_id),
                 black_box(block_env.clone()),
@@ -49,6 +51,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
     group.bench_function("Parallel", |b| {
         b.iter(|| {
             execute_revm(
+                black_box(&chain_spec),
                 black_box(storage.clone()),
                 black_box(spec_id),
                 black_box(block_env.clone()),

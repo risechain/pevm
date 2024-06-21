@@ -13,6 +13,7 @@ pub mod common;
 fn raw_transfers_independent() {
     let block_size = 100_000; // number of transactions
     common::test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
         SpecId::LATEST,
@@ -45,6 +46,7 @@ fn raw_transfers_same_sender_multiple_txs() {
     let mut same_sender_nonce: u64 = 0;
 
     common::test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
         SpecId::LATEST,
@@ -80,6 +82,7 @@ fn raw_transfers_same_sender_multiple_txs() {
 fn raw_transfers_independent_alloy() {
     let block_size = 100_000; // number of transactions
     common::test_execute_alloy(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
         Block {

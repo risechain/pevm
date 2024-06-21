@@ -59,6 +59,7 @@ fn mixed_block() {
         }
     }
     common::test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         InMemoryStorage::new(final_state, []),
         SpecId::LATEST,
         BlockEnv::default(),

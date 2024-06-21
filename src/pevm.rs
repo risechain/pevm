@@ -17,7 +17,7 @@ use revm::{
 
 use crate::{
     mv_memory::MvMemory,
-    primitives::{get_block_env, get_block_spec, get_tx_envs},
+    primitives::{get_block_env, get_block_spec, get_tx_env, ChainSpec},
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
@@ -49,6 +49,7 @@ pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
 pub fn execute<S: Storage + Send + Sync>(
+    chain_spec: &ChainSpec,
     storage: S,
     block: Block,
     concurrency_level: NonZeroUsize,
@@ -60,7 +61,12 @@ pub fn execute<S: Storage + Send + Sync>(
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
-    let Some(tx_envs) = get_tx_envs(&block.transactions) else {
+    let tx_envs: Vec<_> = block
+        .transactions
+        .txns()
+        .map(|tx| get_tx_env(chain_spec, tx))
+        .collect();
+    if tx_envs.is_empty() {
         return Err(PevmError::MissingTransactionData);
     };
 
@@ -68,9 +74,16 @@ pub fn execute<S: Storage + Send + Sync>(
     // For instance, to still execute sequentially when used gas is high
     // but preprocessing yields little to no parallelism.
     if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
-        execute_revm_sequential(storage, spec_id, block_env, tx_envs)
+        execute_revm_sequential(chain_spec, storage, spec_id, block_env, tx_envs)
     } else {
-        execute_revm(storage, spec_id, block_env, tx_envs, concurrency_level)
+        execute_revm(
+            chain_spec,
+            storage,
+            spec_id,
+            block_env,
+            tx_envs,
+            concurrency_level,
+        )
     }
 }
 
@@ -79,6 +92,7 @@ pub fn execute<S: Storage + Send + Sync>(
 // The end goal is to mock Alloy blocks for test and not leak
 // REVM anywhere.
 pub fn execute_revm<S: Storage + Send + Sync>(
+    chain_spec: &ChainSpec,
     storage: S,
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -94,13 +108,20 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     let Some((scheduler, max_concurrency_level)) =
         preprocess_dependencies(&beneficiary_address, &txs)
     else {
-        return execute_revm_sequential(storage, spec_id, block_env, txs);
+        return execute_revm_sequential(chain_spec, storage, spec_id, block_env, txs);
     };
 
     // Initialize the remaining core components
     let block_size = txs.len();
     let hasher = ahash::RandomState::new();
     let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(beneficiary_address));
+    let l1_fee_recipient_address = revm::optimism::L1_FEE_RECIPIENT;
+    let l1_fee_recipient_location_hash =
+        hasher.hash_one(MemoryLocation::Basic(l1_fee_recipient_address));
+    let base_fee_vault_address = revm::optimism::BASE_FEE_RECIPIENT;
+    let base_fee_vault_location_hash =
+        hasher.hash_one(MemoryLocation::Basic(base_fee_vault_address));
+
     let mv_memory = MvMemory::new(block_size);
     let to_addresses: Vec<Address> = txs
         .iter()
@@ -109,7 +130,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             TransactTo::Create => None,
         })
         .collect();
-    let vm = Vm::new(&hasher, &storage, &mv_memory, spec_id, block_env, txs);
+    let vm = Vm::new(
+        &hasher, chain_spec, &storage, &mv_memory, spec_id, block_env, txs,
+    );
 
     let mut execution_error = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
@@ -181,16 +204,37 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         Ok(Some(account)) => account.into(),
         _ => AccountInfo::default(),
     };
-    let beneficiary_values: Vec<(TxIdx, MemoryValue)> = mv_memory
+    let beneficiary_values: HashMap<TxIdx, MemoryValue> = mv_memory
         .consume_location(&beneficiary_location_hash)
         .unwrap()
         .into_iter()
         .collect();
-    // TODO: Assert that there are exactly a beneficiary value for each transaction.
+
+    let mut l1_fee_recipient_account = match storage.basic(&l1_fee_recipient_address) {
+        Ok(Some(account)) => account.into(),
+        _ => AccountInfo::default(),
+    };
+
+    let l1_fee_recipient_values: HashMap<TxIdx, MemoryValue> = mv_memory
+        .consume_location(&l1_fee_recipient_location_hash)
+        .unwrap()
+        .into_iter()
+        .collect();
+
+    let mut base_fee_vault_account = match storage.basic(&base_fee_vault_address) {
+        Ok(Some(account)) => account.into(),
+        _ => AccountInfo::default(),
+    };
+
+    let base_fee_vault_values: HashMap<TxIdx, MemoryValue> = mv_memory
+        .consume_location(&base_fee_vault_location_hash)
+        .unwrap()
+        .into_iter()
+        .collect();
 
     let mut fully_evaluated_results = Vec::with_capacity(block_size);
     let mut cumulative_gas_used: u128 = 0;
-    for (mutex, (_, beneficiary_value)) in execution_results.into_iter().zip(beneficiary_values) {
+    for (index, mutex) in execution_results.into_iter().enumerate() {
         let mut execution_result = mutex.into_inner().unwrap().unwrap();
 
         // Cumulative gas
@@ -198,29 +242,89 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
 
         // Fully evaluate beneficiary account
-        match beneficiary_value {
-            MemoryValue::Basic(info) => {
-                beneficiary_account = *info;
+        let beneficiary_touched = match beneficiary_values.get(&index) {
+            None => false,
+            Some(MemoryValue::Basic(info)) => {
+                beneficiary_account = *info.clone();
+                true
             }
-            MemoryValue::LazyBalanceAddition(addition) => {
+            Some(MemoryValue::LazyBalanceAddition(addition)) => {
                 beneficiary_account.balance += addition;
+                !addition.is_zero()
             }
             _ => unreachable!(),
+        };
+
+        if beneficiary_touched {
+            execution_result.state.insert(
+                beneficiary_address,
+                // Ad-hoc condition to pass Ethereum state tests. Realistically the beneficiary
+                // account should not be empty.
+                if beneficiary_account.is_empty() {
+                    None
+                } else {
+                    Some(EvmAccount {
+                        basic: beneficiary_account.clone().into(),
+                        // EOA beneficiary accounts currently cannot have storage.
+                        storage: Default::default(),
+                    })
+                },
+            );
         }
-        execution_result.state.insert(
-            beneficiary_address,
-            // Ad-hoc condition to pass Ethereum state tests. Realistically the beneficiary
-            // account should not be empty.
-            if beneficiary_account.is_empty() {
-                None
-            } else {
-                Some(EvmAccount {
-                    basic: beneficiary_account.clone().into(),
-                    // EOA beneficiary accounts currently cannot have storage.
-                    storage: Default::default(),
-                })
-            },
-        );
+
+        let _l1_fee_recipient_touched = match l1_fee_recipient_values.get(&index) {
+            None => false,
+            Some(MemoryValue::Basic(info)) => {
+                l1_fee_recipient_account = *info.clone();
+                true
+            }
+            Some(MemoryValue::LazyBalanceAddition(addition)) => {
+                l1_fee_recipient_account.balance += addition;
+                !addition.is_zero()
+            }
+            _ => unreachable!(),
+        };
+
+        if index != 0 {
+            execution_result.state.insert(
+                l1_fee_recipient_address,
+                if l1_fee_recipient_account.is_empty() {
+                    None
+                } else {
+                    Some(EvmAccount {
+                        basic: l1_fee_recipient_account.clone().into(),
+                        storage: Default::default(),
+                    })
+                },
+            );
+        }
+
+        let _base_fee_vault_touched = match base_fee_vault_values.get(&index) {
+            None => false,
+            Some(MemoryValue::Basic(info)) => {
+                base_fee_vault_account = *info.clone();
+                true
+            }
+            Some(MemoryValue::LazyBalanceAddition(addition)) => {
+                base_fee_vault_account.balance += addition;
+                !addition.is_zero()
+            }
+            _ => unreachable!(),
+        };
+
+        if index != 0 {
+            execution_result.state.insert(
+                base_fee_vault_address,
+                if base_fee_vault_account.is_empty() {
+                    None
+                } else {
+                    Some(EvmAccount {
+                        basic: base_fee_vault_account.clone().into(),
+                        storage: Default::default(),
+                    })
+                },
+            );
+        }
 
         fully_evaluated_results.push(execution_result);
     }
@@ -271,6 +375,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 // Useful for fallback back for a small block,
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
 pub fn execute_revm_sequential<S: Storage>(
+    chain_spec: &ChainSpec,
     storage: S,
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -280,7 +385,7 @@ pub fn execute_revm_sequential<S: Storage>(
     let mut results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
     for tx in txs {
-        match execute_tx(&mut db, spec_id, block_env.clone(), tx, true) {
+        match execute_tx(&mut db, chain_spec, spec_id, block_env.clone(), tx, true) {
             Ok(result_and_state) => {
                 db.commit(result_and_state.state.clone());
 

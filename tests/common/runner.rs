@@ -1,8 +1,7 @@
-use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
-use alloy_provider::network::eip2718::Encodable2718;
+use alloy_rlp::Encodable;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{PevmResult, PevmTxExecutionResult, Storage};
+use pevm::{ChainSpec, PevmResult, PevmTxExecutionResult, Storage};
 use revm::{
     db::PlainAccount,
     primitives::{alloy_primitives::U160, AccountInfo, Address, BlockEnv, SpecId, TxEnv, U256},
@@ -28,6 +27,7 @@ pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: 
 // Execute an REVM block sequentially & with PEVM and assert that
 // the execution results match.
 pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
+    chain_spec: &ChainSpec,
     storage: S,
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -35,47 +35,74 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result(
-        &pevm::execute_revm_sequential(storage.clone(), spec_id, block_env.clone(), txs.clone()),
-        &pevm::execute_revm(storage, spec_id, block_env, txs, concurrency_level),
+        &pevm::execute_revm_sequential(
+            chain_spec,
+            storage.clone(),
+            spec_id,
+            block_env.clone(),
+            txs.clone(),
+        ),
+        &pevm::execute_revm(
+            chain_spec,
+            storage,
+            spec_id,
+            block_env,
+            txs,
+            concurrency_level,
+        ),
     );
 }
 
 // Refer to section 4.3.2. Holistic Validity in the Ethereum Yellow Paper.
+// https://specs.optimism.io/protocol/deposits.html#deposit-receipt
 // https://github.com/ethereum/go-ethereum/blob/master/cmd/era/main.go#L289
+// https://github.com/risechain/rise-reth/blob/d611f11a07fc7192595f58c5effcb3199aacbf61/crates/primitives/src/receipt.rs#L487-L503
+// https://github.com/risechain/rise-reth/blob/6a104cc17461bac28164f3c2f08e7e1889708ab6/crates/revm/src/optimism/processor.rs#L133
 fn calculate_receipt_root(
+    chain_spec: &ChainSpec,
     txs: &BlockTransactions<Transaction>,
     tx_results: &[PevmTxExecutionResult],
 ) -> B256 {
-    // 1. Create an iterator of ReceiptEnvelope
-    let tx_type_iter = txs
-        .txns()
-        .map(|tx| TxType::try_from(tx.transaction_type.unwrap_or_default()).unwrap());
-
-    let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone().with_bloom());
-
-    let receipt_envelope_iter =
-        Iterator::zip(tx_type_iter, receipt_iter).map(|(tx_type, receipt)| match tx_type {
-            TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
-            TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
-            TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
-            TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
-        });
-
-    // 2. Create a trie then calculate the root hash
-    // We use BTreeMap because the keys must be sorted in ascending order.
-    let trie_entries: BTreeMap<_, _> = receipt_envelope_iter
+    let trie_entries: BTreeMap<_, _> = Iterator::zip(txs.txns(), tx_results)
         .enumerate()
-        .map(|(index, receipt)| {
-            let key_buffer = alloy_rlp::encode_fixed_size(&index);
+        .map(|(index, (tx, result))| {
+            let tx_type = tx.transaction_type.unwrap_or_default();
+
+            let mut buf = Vec::new();
+            result.receipt.status.encode(&mut buf);
+            result.receipt.cumulative_gas_used.encode(&mut buf);
+            result.receipt.bloom_slow().encode(&mut buf);
+            result.receipt.logs.encode(&mut buf);
+
+            if matches!(chain_spec, ChainSpec::Optimism { .. }) && tx_type == 126 {
+                let account_maybe = result.state.get(&tx.from).expect("Sender not found");
+                let account = account_maybe.as_ref().expect("Sender not changed");
+                let deposit_nonce = account.basic.nonce - 1;
+                deposit_nonce.encode(&mut buf);
+                let deposit_receipt_version: u64 = 1;
+                deposit_receipt_version.encode(&mut buf);
+            }
+
             let mut value_buffer = Vec::new();
-            receipt.encode_2718(&mut value_buffer);
-            (key_buffer, value_buffer)
+            if tx_type != 0 {
+                tx_type.encode(&mut value_buffer);
+            };
+            let rlp_head = alloy_rlp::Header {
+                list: true,
+                payload_length: buf.len(),
+            };
+            rlp_head.encode(&mut value_buffer);
+            value_buffer.append(&mut buf);
+
+            let key_buffer = alloy_rlp::encode_fixed_size(&index);
+            let key_nibbles = alloy_trie::Nibbles::unpack(key_buffer);
+            (key_nibbles, value_buffer)
         })
         .collect();
 
     let mut hash_builder = alloy_trie::HashBuilder::default();
     for (k, v) in trie_entries {
-        hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
+        hash_builder.add_leaf(k, &v);
     }
     hash_builder.root()
 }
@@ -83,13 +110,21 @@ fn calculate_receipt_root(
 // Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
 pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
+    chain_spec: &ChainSpec,
     storage: S,
     block: Block,
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let sequential_result = pevm::execute(storage.clone(), block.clone(), concurrency_level, true);
-    let parallel_result = pevm::execute(storage, block.clone(), concurrency_level, false);
+    let sequential_result = pevm::execute(
+        chain_spec,
+        storage.clone(),
+        block.clone(),
+        concurrency_level,
+        true,
+    );
+    let parallel_result =
+        pevm::execute(chain_spec, storage, block.clone(), concurrency_level, false);
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {
@@ -102,7 +137,7 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
         if block.header.number.unwrap() >= 4370000 {
             assert_eq!(
                 block.header.receipts_root,
-                calculate_receipt_root(&block.transactions, &tx_results)
+                calculate_receipt_root(chain_spec, &block.transactions, &tx_results)
             );
         }
 

@@ -13,6 +13,7 @@ const BLOCK_SIZE: usize = 100_000;
 
 fn test_beneficiary(get_address: fn(usize) -> Address) {
     common::test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         // Mock the beneficiary account (`Address:ZERO`) and the next `BLOCK_SIZE` user accounts.
         InMemoryStorage::new((0..=BLOCK_SIZE).map(common::mock_account), []),
         SpecId::LATEST,

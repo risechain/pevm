@@ -40,6 +40,7 @@ fn mainnet_blocks_from_rpc() {
                // 17035010, // SHANGHAI
                // 19426587, // CANCUN
     ] {
+        let chain_spec = pevm::ChainSpec::Ethereum { chain_id: 1 };
         let runtime = Runtime::new().unwrap();
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
         let block = runtime
@@ -51,7 +52,7 @@ fn mainnet_blocks_from_rpc() {
         let spec_id = pevm::get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let db = CacheDB::new(&rpc_storage);
-        common::test_execute_alloy(db.clone(), block.clone(), true);
+        common::test_execute_alloy(&chain_spec, db.clone(), block.clone(), true);
 
         // Snapshot blocks (for benchmark)
         // TODO: Port to a dedicated CLI instead?
@@ -86,7 +87,12 @@ fn mainnet_blocks_from_disk() {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(storage.clone(), block.clone(), true)
+            common::test_execute_alloy(
+                &pevm::ChainSpec::Ethereum { chain_id: 1 },
+                storage.clone(),
+                block.clone(),
+                true,
+            )
         }
     });
 }

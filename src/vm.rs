@@ -8,12 +8,13 @@ use revm::{
         SpecId::{self, LONDON},
         TransactTo, TxEnv, B256, U256,
     },
-    Context, Database, Evm, EvmContext, Handler,
+    Context, Database, Evm, EvmContext, Handler, L1BlockInfo,
 };
 
 use crate::{
-    mv_memory::MvMemory, EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue,
-    ReadError, ReadLocations, ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
+    mv_memory::MvMemory, primitives::ChainSpec, EvmAccount, MemoryEntry, MemoryLocation,
+    MemoryLocationHash, MemoryValue, ReadError, ReadLocations, ReadOrigin, ReadSet, Storage, TxIdx,
+    TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -303,6 +304,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 // `Vm` can be shared among threads.
 pub(crate) struct Vm<'a, S: Storage> {
     hasher: &'a ahash::RandomState,
+    chain_spec: &'a ChainSpec,
     storage: &'a S,
     mv_memory: &'a MvMemory,
     spec_id: SpecId,
@@ -314,6 +316,7 @@ pub(crate) struct Vm<'a, S: Storage> {
 impl<'a, S: Storage> Vm<'a, S> {
     pub(crate) fn new(
         hasher: &'a ahash::RandomState,
+        chain_spec: &'a ChainSpec,
         storage: &'a S,
         mv_memory: &'a MvMemory,
         spec_id: SpecId,
@@ -322,6 +325,7 @@ impl<'a, S: Storage> Vm<'a, S> {
     ) -> Self {
         Self {
             hasher,
+            chain_spec,
             storage,
             mv_memory,
             spec_id,
@@ -370,7 +374,27 @@ impl<'a, S: Storage> Vm<'a, S> {
         if self.spec_id.is_enabled_in(LONDON) {
             gas_price = gas_price.saturating_sub(self.block_env.basefee);
         }
-        match execute_tx(&mut db, self.spec_id, self.block_env.clone(), tx, false) {
+
+        let is_deposit = match self.chain_spec {
+            ChainSpec::Ethereum { .. } => false,
+            #[cfg(feature = "optimism")]
+            ChainSpec::Optimism { .. } => tx.optimism.source_hash.is_some(),
+        };
+
+        let enveloped_tx = match self.chain_spec {
+            ChainSpec::Ethereum { .. } => None,
+            #[cfg(feature = "optimism")]
+            ChainSpec::Optimism { .. } => tx.optimism.enveloped_tx.clone(),
+        };
+
+        match execute_tx(
+            &mut db,
+            self.chain_spec,
+            self.spec_id,
+            self.block_env.clone(),
+            tx,
+            false,
+        ) {
             Ok(result_and_state) => {
                 let mut gas_payment =
                     Some(gas_price * U256::from(result_and_state.result.gas_used()));
@@ -440,6 +464,52 @@ impl<'a, S: Storage> Vm<'a, S> {
                     ));
                 }
 
+                #[cfg(feature = "optimism")]
+                {
+                    if !is_deposit {
+                        let l1_fee_recipient_address = revm::optimism::L1_FEE_RECIPIENT;
+                        let l1_fee_recipient_location_hash = self
+                            .hasher
+                            .hash_one(MemoryLocation::Basic(l1_fee_recipient_address));
+
+                        let base_fee_vault_address = revm::optimism::BASE_FEE_RECIPIENT;
+                        let base_fee_vault_location_hash = self
+                            .hasher
+                            .hash_one(MemoryLocation::Basic(base_fee_vault_address));
+
+                        let l1_block_info = match L1BlockInfo::try_fetch(&mut db, self.spec_id) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                return VmExecutionResult::ExecutionError(EVMError::Database(
+                                    error,
+                                ));
+                            }
+                        };
+
+                        let Some(enveloped_tx) = &enveloped_tx else {
+                            return VmExecutionResult::ExecutionError(EVMError::Custom(
+                                "[OPTIMISM] Failed to load enveloped transaction.".to_string(),
+                            ));
+                        };
+
+                        let l1_cost =
+                            l1_block_info.calculate_tx_l1_cost(enveloped_tx, self.spec_id);
+
+                        write_set.push((
+                            l1_fee_recipient_location_hash,
+                            MemoryValue::LazyBalanceAddition(l1_cost),
+                        ));
+
+                        write_set.push((
+                            base_fee_vault_location_hash,
+                            MemoryValue::LazyBalanceAddition(
+                                self.block_env.basefee
+                                    * U256::from(result_and_state.result.gas_used()),
+                            ),
+                        ));
+                    }
+                }
+
                 let mut next_validation_idx = None;
                 if tx_idx > 0 {
                     // Validate from this transaction if it reads something outside of its
@@ -488,6 +558,7 @@ impl<'a, S: Storage> Vm<'a, S> {
 // TODO: Move to better place?
 pub(crate) fn execute_tx<DB: Database>(
     db: DB,
+    chain_spec: &ChainSpec,
     spec_id: SpecId,
     block_env: BlockEnv,
     tx: TxEnv,
@@ -495,10 +566,21 @@ pub(crate) fn execute_tx<DB: Database>(
 ) -> Result<ResultAndState, EVMError<DB::Error>> {
     // This is much uglier than the builder interface but can be up to 50% faster!!
     let context = Context {
-        evm: EvmContext::new_with_env(db, Env::boxed(CfgEnv::default(), block_env.clone(), tx)),
+        evm: EvmContext::new_with_env(
+            db,
+            Env::boxed(
+                CfgEnv::default().with_chain_id(chain_spec.chain_id()),
+                block_env.clone(),
+                tx,
+            ),
+        ),
         external: (),
     };
     // TODO: Support OP handlers
-    let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
+    let handler = match chain_spec {
+        ChainSpec::Ethereum { .. } => Handler::mainnet_with_spec(spec_id, with_reward_beneficiary),
+        #[cfg(feature = "optimism")]
+        ChainSpec::Optimism { .. } => Handler::optimism_with_spec(spec_id, with_reward_beneficiary),
+    };
     Evm::new(context, handler).transact()
 }

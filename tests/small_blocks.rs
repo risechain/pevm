@@ -11,6 +11,7 @@ pub mod common;
 #[test]
 fn empty_alloy_block() {
     common::test_execute_alloy(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         InMemoryStorage::default(),
         Block {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
@@ -24,6 +25,7 @@ fn empty_alloy_block() {
 #[test]
 fn empty_revm_block() {
     common::test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         InMemoryStorage::default(),
         SpecId::LATEST,
         BlockEnv::default(),
@@ -34,6 +36,7 @@ fn empty_revm_block() {
 #[test]
 fn one_tx_alloy_block() {
     common::test_execute_alloy(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         InMemoryStorage::new([common::mock_account(0)], []),
         Block {
             // Legit header but with no transactions
@@ -56,6 +59,7 @@ fn one_tx_alloy_block() {
 #[test]
 fn one_tx_revm_block() {
     common::test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         InMemoryStorage::new([common::mock_account(0)], []),
         SpecId::LATEST,
         BlockEnv::default(),

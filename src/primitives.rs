@@ -1,7 +1,36 @@
 // TODO: Support custom chains like OP & RISE
 
-use alloy_rpc_types::{BlockTransactions, Header};
-use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, SpecId, TransactTo, TxEnv, U256};
+use alloy_primitives::{Bytes, ChainId, B256, U128};
+use alloy_rpc_types::{Header, Transaction};
+use revm::primitives::{
+    BlobExcessGasAndPrice, BlockEnv, OptimismFields, SpecId, TransactTo, TxEnv, U256,
+};
+
+/// Represents the network type.
+#[derive(Debug, Clone)]
+pub enum ChainSpec {
+    /// Ethereum network.
+    Ethereum {
+        /// Represents the ID of the chain. (Ethereum Mainnet: 1)
+        chain_id: ChainId,
+    },
+    /// Optimism network.
+    #[cfg(feature = "optimism")]
+    Optimism {
+        /// Represents the ID of the chain. (Optimism Mainnet: 10)
+        chain_id: ChainId,
+    },
+}
+
+impl ChainSpec {
+    /// Returns the chain ID associated with the ChainSpec.
+    pub fn chain_id(&self) -> ChainId {
+        match self {
+            ChainSpec::Ethereum { chain_id } => *chain_id,
+            ChainSpec::Optimism { chain_id } => *chain_id,
+        }
+    }
+}
 
 /// Get the REVM spec id of an Alloy block.
 // Currently hardcoding Ethereum hardforks from these reference:
@@ -57,49 +86,64 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
     })
 }
 
-/// Get the REVM tx envs of an Alloy block.
+/// Get the REVM tx env of an Alloy transaction
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
-// TODO: Better error handling & properly test this.
-pub(crate) fn get_tx_envs(transactions: &BlockTransactions) -> Option<Vec<TxEnv>> {
-    let mut tx_envs = Vec::with_capacity(transactions.len());
-    for tx in transactions.as_transactions()? {
-        tx_envs.push(TxEnv {
-            caller: tx.from,
-            gas_limit: tx.gas.try_into().ok()?,
-            gas_price: U256::from(if tx.transaction_type? >= 2 {
-                tx.max_fee_per_gas?
-            } else {
-                tx.gas_price?
-            }),
-            gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
-            transact_to: match tx.to {
-                Some(address) => TransactTo::Call(address),
-                None => TransactTo::Create,
-            },
-            value: tx.value,
-            data: tx.input.clone(),
-            nonce: Some(tx.nonce),
-            chain_id: tx.chain_id,
-            access_list: tx
-                .access_list
-                .clone()
-                .unwrap_or_default()
-                .iter()
-                .map(|access| {
-                    (
-                        access.address,
-                        access
-                            .storage_keys
-                            .iter()
-                            .map(|k| U256::from_be_bytes(**k))
-                            .collect(),
-                    )
-                })
-                .collect(),
-            blob_hashes: tx.blob_versioned_hashes.clone().unwrap_or_default(),
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-        })
+// TODO: Properly test this.
+pub(crate) fn get_tx_env(chain_spec: &ChainSpec, tx: &Transaction) -> TxEnv {
+    TxEnv {
+        caller: tx.from,
+        gas_limit: tx.gas as u64,
+        gas_price: match tx.transaction_type.unwrap() {
+            0 | 1 => U256::from(tx.gas_price.expect("Missing gasprice")),
+            2 | 3 => U256::from(tx.max_fee_per_gas.expect("Missing max_fee_per_gas")),
+            #[cfg(feature = "optimism")]
+            126 if matches!(chain_spec, ChainSpec::Optimism { .. }) => U256::ZERO,
+            unknown_value => panic!("Unknown tx type: {}", unknown_value),
+        },
+        gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
+        transact_to: match tx.to {
+            Some(address) => TransactTo::Call(address),
+            None => TransactTo::Create,
+        },
+        value: tx.value,
+        data: tx.input.clone(),
+        nonce: Some(tx.nonce),
+        chain_id: tx.chain_id,
+        access_list: tx
+            .access_list
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|access| {
+                (
+                    access.address,
+                    access
+                        .storage_keys
+                        .iter()
+                        .map(|&k| U256::from_be_bytes(*k))
+                        .collect(),
+                )
+            })
+            .collect(),
+        blob_hashes: tx.blob_versioned_hashes.clone().unwrap_or_default(),
+        max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
+
+        #[cfg(feature = "optimism")]
+        optimism: OptimismFields {
+            source_hash: tx
+                .other
+                .get_deserialized::<B256>("sourceHash")
+                .map(|result| result.unwrap()),
+            mint: tx
+                .other
+                .get_deserialized::<U128>("mint")
+                .map(|result| result.unwrap().to()),
+            is_system_transaction: tx
+                .other
+                .get_deserialized("isSystemTx")
+                .map(|result| result.unwrap()),
+            enveloped_tx: Some(Bytes::default()),
+        },
     }
-    Some(tx_envs)
 }

@@ -33,6 +33,7 @@ fn uniswap_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         InMemoryStorage::new(final_state, []),
         SpecId::LATEST,
         BlockEnv::default(),

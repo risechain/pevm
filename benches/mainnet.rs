@@ -22,6 +22,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         // will yield many overheads and hurt execution on (small) blocks
         // with many dependencies.
         .min(NonZeroUsize::new(8).unwrap());
+    let chain_spec = pevm::ChainSpec::Ethereum { chain_id: 1 };
 
     common::for_each_block_from_disk(|block, storage| {
         let mut group = c.benchmark_group(format!(
@@ -33,6 +34,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Sequential", |b| {
             b.iter(|| {
                 pevm::execute(
+                    black_box(&chain_spec),
                     black_box(storage.clone()),
                     black_box(block.clone()),
                     black_box(concurrency_level),
@@ -43,6 +45,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Parallel", |b| {
             b.iter(|| {
                 pevm::execute(
+                    black_box(&chain_spec),
                     black_box(storage.clone()),
                     black_box(block.clone()),
                     black_box(concurrency_level),

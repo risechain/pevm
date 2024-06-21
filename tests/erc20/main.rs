@@ -23,6 +23,7 @@ fn erc20_independent() {
     let (mut state, txs) = generate_cluster(N, 1, 1);
     state.insert(Address::ZERO, PlainAccount::default()); // Beneficiary
     test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         InMemoryStorage::new(state, []),
         SpecId::LATEST,
         BlockEnv::default(),
@@ -49,6 +50,7 @@ fn erc20_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
+        &pevm::ChainSpec::Ethereum { chain_id: 1 },
         InMemoryStorage::new(final_state, []),
         SpecId::LATEST,
         BlockEnv::default(),

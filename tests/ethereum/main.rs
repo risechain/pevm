@@ -14,8 +14,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, TransactTo,
-    TxEnv, U256,
+    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, OptimismFields,
+    TransactTo, TxEnv, U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -88,14 +88,15 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv,
                     item.address,
                     item.storage_keys
                         .iter()
-                        .map(|key| U256::from_be_bytes(key.0))
-                        .collect::<Vec<_>>(),
+                        .map(|&k| U256::from_be_bytes(*k))
+                        .collect(),
                 )
             })
             .collect(),
         gas_priority_fee: tx.max_priority_fee_per_gas,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+        optimism: OptimismFields::default(),
     })
 }
 
@@ -132,6 +133,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
             match (
                 test.expect_exception.as_deref(),
                 pevm::execute_revm(
+                    &pevm::ChainSpec::Ethereum{chain_id: 1},
                     InMemoryStorage::new(chain_state.clone(), []),
                     spec_id,
                     build_block_env(&unit.env),
