@@ -29,11 +29,6 @@ impl InMemoryStorage {
             block_hashes: block_hashes.into_iter().collect(),
         }
     }
-
-    /// Insert an account
-    pub fn insert_account(&mut self, address: Address, account: EvmAccount) {
-        self.accounts.insert(address, account);
-    }
 }
 
 impl Storage for InMemoryStorage {

@@ -96,6 +96,7 @@ struct VmDb<'a, S: Storage> {
     tx_idx: &'a TxIdx,
     from: &'a Address,
     to: &'a Option<Address>,
+    is_data_empty: bool,
     // List of memory locations that this transaction reads.
     read_set: ReadSet,
     // Check if this transaction has read anything other than its sender
@@ -109,12 +110,14 @@ impl<'a, S: Storage> VmDb<'a, S> {
         tx_idx: &'a TxIdx,
         from: &'a Address,
         to: &'a Option<Address>,
+        is_data_empty: bool,
     ) -> Self {
         Self {
             vm,
             tx_idx,
             from,
             to,
+            is_data_empty,
             only_read_from_and_to: true,
             read_set: ReadSet::default(),
         }
@@ -236,7 +239,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         // We return a mock for a non-contract recipient to avoid unncessarily
         // evaluating its balance here. Also skip transactions with the same from
         // & to until we have lazy updates for the sender nonce & balance.
-        if &Some(address) == self.to && &address != self.from {
+        if self.is_data_empty && &Some(address) == self.to && &address != self.from {
             // TODO: Live check for a contract deployed then used in the same block!
             let basic = self.vm.storage.basic(&address).unwrap();
             if basic.is_none() || basic.is_some_and(|basic| basic.code.is_none()) {
@@ -356,10 +359,12 @@ impl<'a, S: Storage> Vm<'a, S> {
             TransactTo::Call(address) => (false, Some(address)),
             TransactTo::Create => (true, None),
         };
+        // TODO: The perfect condition is if the recipient is contract.
+        let is_data_empty = tx.data.is_empty();
         let value = tx.value;
 
         // Set up DB
-        let mut db = VmDb::new(self, &tx_idx, &from, &to);
+        let mut db = VmDb::new(self, &tx_idx, &from, &to, is_data_empty);
 
         // Gas price
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
@@ -406,7 +411,8 @@ impl<'a, S: Storage> Vm<'a, S> {
 
                         // Skip transactions with the same from & to until we have lazy updates
                         // for the sender nonce & balance.
-                        if to == Some(*address)
+                        if is_data_empty
+                            && to == Some(*address)
                             && address != &from
                             && account.info.is_empty_code_hash()
                         {

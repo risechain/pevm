@@ -6,8 +6,8 @@ use dashmap::{
 };
 
 use crate::{
-    BuildIdentityHasher, MemoryEntry, MemoryLocationHash, MemoryValue, ReadLocations, ReadOrigin,
-    TxIdx, TxVersion, WriteSet,
+    BuildIdentityHasher, MemoryEntry, MemoryLocationHash, ReadLocations, ReadOrigin, TxIdx,
+    TxVersion, WriteSet,
 };
 
 // The MvMemory contains shared memory in a form of a multi-version data
@@ -24,6 +24,7 @@ pub(crate) struct MvMemory {
 impl MvMemory {
     pub(crate) fn new(block_size: usize) -> Self {
         Self {
+            // TODO: Pre-allocate for known accounts to avoid runtime re-allocation.
             data: DashMap::default(),
             last_written_locations: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
             last_read_locations: (0..block_size).map(|_| Mutex::default()).collect(),
@@ -157,18 +158,15 @@ impl MvMemory {
     pub(crate) fn read_location(
         &self,
         location: &MemoryLocationHash,
-    ) -> Option<Ref<MemoryLocationHash, BTreeMap<usize, MemoryEntry>>> {
+    ) -> Option<Ref<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>>> {
         self.data.get(location)
     }
 
     pub(crate) fn consume_location(
         &self,
         location: &MemoryLocationHash,
-    ) -> Option<impl IntoIterator<Item = (TxIdx, MemoryValue)>> {
+    ) -> Option<BTreeMap<TxIdx, MemoryEntry>> {
         let (_, tree) = self.data.remove(location)?;
-        Some(tree.into_iter().map(|(tx_idx, entry)| match entry {
-            MemoryEntry::Data(_, value) => (tx_idx, value),
-            MemoryEntry::Estimate => unreachable!("Trying to consume unfinalized data!"),
-        }))
+        Some(tree)
     }
 }

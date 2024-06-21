@@ -1,12 +1,11 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fmt::Debug,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
     thread,
 };
 
-use ahash::AHashMap;
 use alloy_primitives::Address;
 use alloy_rpc_types::Block;
 use revm::{
@@ -21,9 +20,9 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    BuildAddressHasher, EvmAccount, ExecutionTask, IncarnationStatus, MemoryLocation, MemoryValue,
-    Storage, Task, TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx,
-    TxStatus, TxVersion, ValidationTask,
+    BuildAddressHasher, BuildIdentityHasher, EvmAccount, ExecutionTask, IncarnationStatus,
+    MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependencies,
+    TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion, ValidationTask,
 };
 
 /// Errors when executing a block with PEVM.
@@ -102,11 +101,16 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     let hasher = ahash::RandomState::new();
     let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(beneficiary_address));
     let mv_memory = MvMemory::new(block_size);
-    let to_addresses: Vec<Address> = txs
+    let lazy_to_addresses: Vec<Address> = txs
         .iter()
-        .filter_map(|to| match to.transact_to {
-            TransactTo::Call(address) => Some(address),
-            TransactTo::Create => None,
+        .filter_map(|tx| {
+            // The ideal condition is a non-contract recipient
+            if tx.data.is_empty() {
+                if let TransactTo::Call(address) = tx.transact_to {
+                    return Some(address);
+                }
+            }
+            None
         })
         .collect();
     let vm = Vm::new(&hasher, &storage, &mv_memory, spec_id, block_env, txs);
@@ -181,12 +185,10 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         Ok(Some(account)) => account.into(),
         _ => AccountInfo::default(),
     };
-    let beneficiary_values: Vec<(TxIdx, MemoryValue)> = mv_memory
-        .consume_location(&beneficiary_location_hash)
-        .unwrap()
-        .into_iter()
-        .collect();
     // TODO: Assert that there are exactly a beneficiary value for each transaction.
+    let beneficiary_values = mv_memory
+        .consume_location(&beneficiary_location_hash)
+        .unwrap();
 
     let mut fully_evaluated_results = Vec::with_capacity(block_size);
     let mut cumulative_gas_used: u128 = 0;
@@ -199,12 +201,13 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
         // Fully evaluate beneficiary account
         match beneficiary_value {
-            MemoryValue::Basic(info) => {
+            MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                 beneficiary_account = *info;
             }
-            MemoryValue::LazyBalanceAddition(addition) => {
+            MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
                 beneficiary_account.balance += addition;
             }
+            // TODO: Better error handling
             _ => unreachable!(),
         }
         execution_result.state.insert(
@@ -226,28 +229,27 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     }
 
     // Fully evaluate recipient balances
-    let mut evaluated_values = AHashMap::<Address, AccountInfo>::new();
-    for to in to_addresses {
-        if let Some(writes) = mv_memory
-            .consume_location(&hasher.hash_one(MemoryLocation::Basic(to)))
-            .map(|data| data.into_iter().collect::<BTreeMap<TxIdx, MemoryValue>>())
-        {
+    let mut evaluated_values =
+        HashMap::with_capacity_and_hasher(lazy_to_addresses.len(), BuildIdentityHasher::default());
+    for to in lazy_to_addresses {
+        let location_hash = hasher.hash_one(MemoryLocation::Basic(to));
+        if let Some(writes) = mv_memory.consume_location(&location_hash) {
             for (tx_idx, value) in writes {
-                let current_value =
-                    evaluated_values
-                        .entry(to)
-                        .or_insert_with(|| match storage.basic(&to) {
-                            Ok(Some(account)) => account.into(),
-                            _ => AccountInfo::default(),
-                        });
+                let current_value = evaluated_values.entry(location_hash).or_insert_with(|| {
+                    match storage.basic(&to) {
+                        Ok(Some(account)) => account.into(),
+                        _ => AccountInfo::default(),
+                    }
+                });
 
                 match value {
-                    MemoryValue::Basic(info) => {
+                    MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                         *current_value = *info;
                     }
-                    MemoryValue::LazyBalanceAddition(addition) => {
+                    MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
                         current_value.balance += addition;
                     }
+                    // TODO: Better error handling
                     _ => unreachable!(),
                 }
 
@@ -255,10 +257,12 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 // over block size.
                 let tx_state =
                     unsafe { &mut fully_evaluated_results.get_unchecked_mut(tx_idx).state };
-                if current_value.is_empty() {
-                    tx_state.insert(to, None);
-                } else if let Some(Some(account)) = tx_state.get_mut(&to) {
-                    account.basic = current_value.clone().into();
+                if let Some(account) = tx_state.get_mut(&to) {
+                    if current_value.is_empty() {
+                        *account = None;
+                    } else if let Some(account) = account {
+                        account.basic = current_value.clone().into();
+                    }
                 }
             }
         }
