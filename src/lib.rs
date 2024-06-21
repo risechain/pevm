@@ -185,12 +185,15 @@ pub enum ReadError {
 // The memory locations needed to execute an incarnation.
 // While a hash map is cleaner and reduce duplication chances,
 // vectors are noticeably faster in the mainnet benchmark.
+// TODO: Implement a [Default] that pre-allocate two slots for each
+// array, which are the [from] and [to] accounts of the transaction.
 #[derive(Default)]
 struct ReadSet {
     locations: ReadLocations,
     // Execution cache to determine if an account was changed.
     // TODO: Better organize the type to seprate what is needed
     // for execution only, and what is needed for validation.
+    // TODO: We can use [MemoryLocationHash] here!
     accounts: HashMap<Address, AccountInfo, BuildAddressHasher>,
 }
 
