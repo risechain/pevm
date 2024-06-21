@@ -5,8 +5,6 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
-use ahash::AHashMap;
-
 use revm::primitives::{AccountInfo, Address, U256};
 
 // We take the last 8 bytes of an address as its hash. This
@@ -51,6 +49,9 @@ struct IdentityHasher(MemoryLocationHash);
 impl Hasher for IdentityHasher {
     fn write_u64(&mut self, hash: MemoryLocationHash) {
         self.0 = hash;
+    }
+    fn write_usize(&mut self, hash: usize) {
+        self.0 = hash as u64;
     }
     fn finish(&self) -> MemoryLocationHash {
         self.0
@@ -136,7 +137,7 @@ type TransactionsStatus = Vec<TxStatus>;
 // while adding new dependencies.
 // TODO: Intuitively both should share a similar data structure?
 type TransactionsDependents = Vec<Vec<TxIdx>>;
-type TransactionsDependencies = AHashMap<TxIdx, Vec<TxIdx>>;
+type TransactionsDependencies = HashMap<TxIdx, Vec<TxIdx>, BuildIdentityHasher>;
 
 // BlockSTM maintains an in-memory multi-version data structure that
 // stores for each memory location the latest value written per
@@ -194,7 +195,7 @@ struct ReadSet {
     // TODO: Better organize the type to seprate what is needed
     // for execution only, and what is needed for validation.
     // TODO: We can use [MemoryLocationHash] here!
-    accounts: HashMap<Address, AccountInfo, BuildAddressHasher>,
+    accounts: HashMap<MemoryLocationHash, AccountInfo, BuildIdentityHasher>,
 }
 
 // The updates made by this transaction incarnation, which is applied

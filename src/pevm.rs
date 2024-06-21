@@ -319,7 +319,8 @@ fn preprocess_dependencies(
         })
         .collect();
     let mut transactions_dependents: TransactionsDependents = vec![vec![]; block_size];
-    let mut transactions_dependencies = TransactionsDependencies::default();
+    let mut transactions_dependencies =
+        TransactionsDependencies::with_hasher(BuildIdentityHasher::default());
 
     // Marking transactions from thee same sender as dependencies to avoid fatal nonce errors.
     let mut last_tx_idx_by_sender = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
