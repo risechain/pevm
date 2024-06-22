@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Debug,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
@@ -107,13 +107,15 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         beneficiary_location_hash,
         (0..block_size).collect::<Vec<TxIdx>>(),
     );
-    let lazy_to_addresses: Vec<Address> = txs
+    let lazy_to_addresses: HashSet<Address, BuildAddressHasher> = txs
         .iter()
         .filter_map(|tx| {
-            // The ideal condition is a non-contract recipient
+            // TODO: Unifiy this condition with [Vm::execute]
             if tx.data.is_empty() {
-                if let TransactTo::Call(address) = tx.transact_to {
-                    return Some(address);
+                if let TransactTo::Call(to_address) = tx.transact_to {
+                    if to_address != tx.caller {
+                        return Some(to_address);
+                    }
                 }
             }
             None
