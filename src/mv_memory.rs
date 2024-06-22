@@ -10,6 +10,12 @@ use crate::{
     TxVersion, WriteSet,
 };
 
+#[derive(Default)]
+struct LastLocations {
+    read: ReadLocations,
+    write: Vec<MemoryLocationHash>,
+}
+
 // The MvMemory contains shared memory in a form of a multi-version data
 // structure for values written and read by different transactions. It stores
 // multiple writes for each memory location, along with a value and an associated
@@ -17,8 +23,7 @@ use crate::{
 // TODO: Better concurrency control if possible.
 pub(crate) struct MvMemory {
     data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
-    last_written_locations: Vec<Mutex<Vec<MemoryLocationHash>>>,
-    last_read_locations: Vec<Mutex<ReadLocations>>,
+    last_locations: Vec<Mutex<LastLocations>>,
 }
 
 impl MvMemory {
@@ -42,8 +47,7 @@ impl MvMemory {
         }
         Self {
             data,
-            last_written_locations: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
-            last_read_locations: (0..block_size).map(|_| Mutex::default()).collect(),
+            last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
         }
     }
 
@@ -77,9 +81,8 @@ impl MvMemory {
             }
         }
         // TODO: Faster "difference" function when there are many locations
-        let mut last_written_locations =
-            index_mutex!(self.last_written_locations, tx_version.tx_idx);
-        for prev_location in last_written_locations.iter() {
+        let mut last_locations = index_mutex!(self.last_locations, tx_version.tx_idx);
+        for prev_location in last_locations.write.iter() {
             if !new_locations.contains(prev_location) {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
                     written_transactions.remove(&tx_version.tx_idx);
@@ -88,16 +91,16 @@ impl MvMemory {
         }
 
         // Update this transaction's read & write set for the next validation.
-        *index_mutex!(self.last_read_locations, tx_version.tx_idx) = read_locations;
+        last_locations.read = read_locations;
         for new_location in new_locations.iter() {
-            if !last_written_locations.contains(new_location) {
+            if !last_locations.write.contains(new_location) {
                 // We update right before returning to avoid an early clone.
-                *last_written_locations = new_locations;
+                last_locations.write = new_locations;
                 return true;
             }
         }
         // We update right before returning to avoid an early clone.
-        *last_written_locations = new_locations;
+        last_locations.write = new_locations;
         false
     }
 
@@ -119,9 +122,7 @@ impl MvMemory {
     // (only validations that successfully abort affect the state and each
     // incarnation can be aborted at most once).
     pub(crate) fn validate_read_locations(&self, tx_idx: TxIdx) -> bool {
-        let last_read_locations = index_mutex!(self.last_read_locations, tx_idx);
-
-        for (location, prior_origins) in last_read_locations.iter() {
+        for (location, prior_origins) in index_mutex!(self.last_locations, tx_idx).read.iter() {
             if let Some(written_transactions) = self.read_location(location) {
                 let mut iter = written_transactions.range(..tx_idx);
                 for prior_origin in prior_origins {
@@ -155,7 +156,6 @@ impl MvMemory {
                 return false;
             }
         }
-
         true
     }
 
@@ -164,7 +164,7 @@ impl MvMemory {
     // that read them.
     pub(crate) fn convert_writes_to_estimates(&self, tx_idx: TxIdx) {
         // TODO: Better error handling
-        for location in index_mutex!(self.last_written_locations, tx_idx).iter() {
+        for location in index_mutex!(self.last_locations, tx_idx).write.iter() {
             if let Some(mut written_transactions) = self.data.get_mut(location) {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }
