@@ -22,10 +22,26 @@ pub(crate) struct MvMemory {
 }
 
 impl MvMemory {
-    pub(crate) fn new(block_size: usize) -> Self {
+    pub(crate) fn new(
+        block_size: usize,
+        estimated_locations: impl IntoIterator<Item = (MemoryLocationHash, Vec<TxIdx>)>,
+    ) -> Self {
+        let data = DashMap::default();
+        // We preallocate estimated locations to avoid restructuring trees at runtime
+        // while holding a write lock. Ideally [dashmap] would have an atomic-free
+        // construction API. This is acceptable for now as it's a non-congested one-time
+        // cost.
+        for (location_hash, estimated_tx_idxs) in estimated_locations {
+            data.insert(
+                location_hash,
+                estimated_tx_idxs
+                    .into_iter()
+                    .map(|tx_idx| (tx_idx, MemoryEntry::Estimate))
+                    .collect(),
+            );
+        }
         Self {
-            // TODO: Pre-allocate for known accounts to avoid runtime re-allocation.
-            data: DashMap::default(),
+            data,
             last_written_locations: (0..block_size).map(|_| Mutex::new(Vec::new())).collect(),
             last_read_locations: (0..block_size).map(|_| Mutex::default()).collect(),
         }

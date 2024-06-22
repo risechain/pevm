@@ -96,11 +96,17 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return execute_revm_sequential(storage, spec_id, block_env, txs);
     };
 
-    // Initialize the remaining core components
+    // Preprocess locations
+    // TODO: Move to a dedicated preprocessing module with preprocessing deps
     let block_size = txs.len();
     let hasher = ahash::RandomState::new();
     let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(beneficiary_address));
-    let mv_memory = MvMemory::new(block_size);
+    // TODO: Estimate more locations based on sender, to, etc.
+    let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
+    estimated_locations.insert(
+        beneficiary_location_hash,
+        (0..block_size).collect::<Vec<TxIdx>>(),
+    );
     let lazy_to_addresses: Vec<Address> = txs
         .iter()
         .filter_map(|tx| {
@@ -113,6 +119,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             None
         })
         .collect();
+
+    // Initialize the remaining core components
+    let mv_memory = MvMemory::new(block_size, estimated_locations);
     let vm = Vm::new(&hasher, &storage, &mv_memory, spec_id, block_env, txs);
 
     let mut execution_error = OnceLock::new();
