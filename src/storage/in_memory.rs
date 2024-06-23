@@ -42,6 +42,13 @@ impl Storage for InMemoryStorage {
             .map(|account| account.basic.clone()))
     }
 
+    fn is_contract(&self, address: &Address) -> Result<bool, Self::Error> {
+        Ok(self
+            .accounts
+            .get(address)
+            .is_some_and(|account| account.basic.code.is_some()))
+    }
+
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
         for account in self.accounts.values() {
             if account

@@ -144,6 +144,15 @@ pub trait Storage {
     /// Get basic account information.
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error>;
 
+    /// Check if an address is a contract.
+    /// This default implementation is slow as it clones the account basic via
+    /// the [basic] call. Performant storages should re-implement it with an
+    /// internal reference check.
+    fn is_contract(&self, address: &Address) -> Result<bool, Self::Error> {
+        self.basic(address)
+            .map(|account| account.is_some_and(|account| account.code.is_some()))
+    }
+
     /// Get account code by its hash.
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error>;
 
