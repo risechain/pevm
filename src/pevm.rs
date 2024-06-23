@@ -11,7 +11,7 @@ use alloy_rpc_types::Block;
 use defer_drop::DeferDrop;
 use revm::{
     db::CacheDB,
-    primitives::{AccountInfo, BlockEnv, SpecId, TransactTo, TxEnv},
+    primitives::{BlockEnv, SpecId, TransactTo, TxEnv},
     DatabaseCommit,
 };
 
@@ -21,9 +21,10 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    BuildAddressHasher, BuildIdentityHasher, EvmAccount, ExecutionTask, IncarnationStatus,
-    MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependencies,
-    TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion, ValidationTask,
+    AccountBasic, BuildAddressHasher, BuildIdentityHasher, EvmAccount, ExecutionTask,
+    IncarnationStatus, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task,
+    TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx, TxStatus,
+    TxVersion, ValidationTask,
 };
 
 /// Errors when executing a block with PEVM.
@@ -196,8 +197,8 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // We fully evaluate the final beneficiary account's and recpipients' balance that may
     // have been atomically updated to avoid "cheap" dependencies.
     let mut beneficiary_account = match storage.basic(&beneficiary_address) {
-        Ok(Some(account)) => account.into(),
-        _ => AccountInfo::default(),
+        Ok(Some(account)) => account,
+        _ => AccountBasic::default(),
     };
     // TODO: Assert that there are exactly a beneficiary value for each transaction.
     let beneficiary_values = mv_memory
@@ -216,7 +217,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         // Fully evaluate beneficiary account
         match beneficiary_value {
             MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                beneficiary_account = *info;
+                // TODO: Can beneficiary change code mid-block??
+                beneficiary_account.balance = info.balance;
+                beneficiary_account.nonce = info.nonce;
             }
             MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
                 beneficiary_account.balance += addition;
@@ -236,12 +239,15 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             // There is an explicit write -- only overwrite the account info in case there
             // are storage changes.
             if let Some(account) = beneficiary_result {
-                account.basic = beneficiary_account.clone().into();
+                // Only balance can differ for now.
+                // TODO: Make the execution results tighter so that explicit writes don't
+                // need post-processing.
+                account.basic.balance = beneficiary_account.balance;
             }
             // Implicit write -- can make storage update empty.
             else {
                 *beneficiary_result = Some(EvmAccount {
-                    basic: beneficiary_account.clone().into(),
+                    basic: beneficiary_account.clone(),
                     storage: Default::default(),
                 });
             }
@@ -251,25 +257,25 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     }
 
     // Fully evaluate recipient balances
-    let mut evaluated_values =
-        HashMap::with_capacity_and_hasher(lazy_to_addresses.len(), BuildIdentityHasher::default());
     for to in lazy_to_addresses {
         let location_hash = hasher.hash_one(MemoryLocation::Basic(to));
         if let Some(writes) = mv_memory.consume_location(&location_hash) {
-            for (tx_idx, value) in writes {
-                let current_value = evaluated_values.entry(location_hash).or_insert_with(|| {
-                    match storage.basic(&to) {
-                        Ok(Some(account)) => account.into(),
-                        _ => AccountInfo::default(),
-                    }
-                });
+            // TODO: We don't need to read from storage if the first entry is a fully
+            // evaluated account.
+            let mut current_account = match storage.basic(&to) {
+                Ok(Some(account)) => account,
+                _ => AccountBasic::default(),
+            };
 
+            for (tx_idx, value) in writes {
                 match value {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                        *current_value = *info;
+                        // TODO: Can the code change mid-block?
+                        current_account.balance = info.balance;
+                        current_account.nonce = info.nonce;
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
-                        current_value.balance += addition;
+                        current_account.balance += addition;
                     }
                     // TODO: Better error handling
                     _ => unreachable!(),
@@ -280,10 +286,11 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 let tx_state =
                     unsafe { &mut fully_evaluated_results.get_unchecked_mut(tx_idx).state };
                 if let Some(account) = tx_state.get_mut(&to) {
-                    if current_value.is_empty() {
+                    if current_account.is_empty() {
                         *account = None;
                     } else if let Some(account) = account {
-                        account.basic = current_value.clone().into();
+                        account.basic.balance = current_account.balance;
+                        account.basic.nonce = current_account.nonce;
                     }
                 }
             }
