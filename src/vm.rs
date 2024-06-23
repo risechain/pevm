@@ -261,17 +261,18 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         // We return a mock for a non-contract recipient to avoid unncessarily
         // evaluating its balance here. Also skip transactions with the same from
         // & to until we have lazy updates for the sender nonce & balance.
-        if self.is_maybe_lazy && Some(&address) == self.to {
-            // TODO: Live check for a contract deployed then used in the same block!
-            let basic = self.vm.storage.basic(&address).unwrap();
-            if basic.is_none() || basic.is_some_and(|basic| basic.code.is_none()) {
-                return Ok(Some(AccountInfo {
-                    // We need this hack to not flag this an empty account for
-                    // destruction. Would definitely want a cleaner solution here.
-                    nonce: 1,
-                    ..AccountInfo::default()
-                }));
-            }
+        if self.is_maybe_lazy
+            && Some(&address) == self.to
+            // TODO: Live check (i.e., from [MvMemory] not [Storage]) for a
+            // contract deployed then used in the same block with non-data!!
+            && !self.vm.storage.is_contract(&address).unwrap()
+        {
+            return Ok(Some(AccountInfo {
+                // We need this hack to not flag this an empty account for
+                // destruction. Would definitely want a cleaner solution here.
+                nonce: 1,
+                ..AccountInfo::default()
+            }));
         }
         let location_hash = self.get_address_hash(&address);
         match self.read(MemoryLocation::Basic(address), location_hash) {
