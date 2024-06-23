@@ -8,6 +8,7 @@ use std::{
 
 use alloy_primitives::Address;
 use alloy_rpc_types::Block;
+use defer_drop::DeferDrop;
 use revm::{
     db::CacheDB,
     primitives::{AccountInfo, BlockEnv, SpecId, TransactTo, TxEnv},
@@ -123,7 +124,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         .collect();
 
     // Initialize the remaining core components
-    let mv_memory = MvMemory::new(block_size, estimated_locations);
+    // TODO: Provide more explicit garbage collecting configs for users over random background
+    // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
+    let mv_memory = DeferDrop::new(MvMemory::new(block_size, estimated_locations));
     let vm = Vm::new(&hasher, &storage, &mv_memory, spec_id, block_env, txs);
 
     let mut execution_error = OnceLock::new();
@@ -320,7 +323,7 @@ pub fn execute_revm_sequential<S: Storage>(
 fn preprocess_dependencies(
     beneficiary_address: &Address,
     txs: &[TxEnv],
-) -> Option<(Scheduler, NonZeroUsize)> {
+) -> Option<(DeferDrop<Scheduler>, NonZeroUsize)> {
     let block_size = txs.len();
 
     let mut transactions_status: TransactionsStatus = (0..block_size)
@@ -387,12 +390,12 @@ fn preprocess_dependencies(
             .max(min_concurrency_level);
 
     Some((
-        Scheduler::new(
+        DeferDrop::new(Scheduler::new(
             block_size,
             transactions_status,
             transactions_dependents,
             transactions_dependencies,
-        ),
+        )),
         max_concurrency_level,
     ))
 }

@@ -13,6 +13,7 @@ alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "a4bb5f0be3
 bitvec = "1.0.1"
 crossbeam = "0.8.4"
 dashmap = "6.0.0"
+defer-drop = "1.3.0"
 
 # Let's do our best to port needed REVM changes upstream
 revm = { git = "https://github.com/risechain/revm", rev = "91a3dc0bfde26a08bf9b719892b1524c016ebcb9", features = [

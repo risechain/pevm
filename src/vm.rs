@@ -2,6 +2,7 @@ use std::cmp::min;
 
 use ahash::AHashMap;
 use alloy_rpc_types::Receipt;
+use defer_drop::DeferDrop;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, ResultAndState,
@@ -334,7 +335,10 @@ pub(crate) struct Vm<'a, S: Storage> {
     spec_id: SpecId,
     block_env: BlockEnv,
     beneficiary_location_hash: MemoryLocationHash,
-    txs: Vec<TxEnv>,
+    // TODO: Make REVM [Evm] or at least [Handle] thread safe to consume
+    // the [TxEnv] into them here, to avoid heavy re-initialization when
+    // re-executing a transaction.
+    txs: DeferDrop<Vec<TxEnv>>,
 }
 
 impl<'a, S: Storage> Vm<'a, S> {
@@ -353,7 +357,7 @@ impl<'a, S: Storage> Vm<'a, S> {
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             block_env,
-            txs,
+            txs: DeferDrop::new(txs),
         }
     }
 
