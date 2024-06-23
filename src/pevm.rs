@@ -224,20 +224,28 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             // TODO: Better error handling
             _ => unreachable!(),
         }
-        execution_result.state.insert(
-            beneficiary_address,
-            // Ad-hoc condition to pass Ethereum state tests. Realistically the beneficiary
-            // account should not be empty.
-            if beneficiary_account.is_empty() {
-                None
-            } else {
-                Some(EvmAccount {
+        // Ad-hoc condition to pass Ethereum state tests. Realistically the beneficiary
+        // account should not be empty.
+        if beneficiary_account.is_empty() {
+            execution_result.state.insert(beneficiary_address, None);
+        } else {
+            let beneficiary_result = execution_result
+                .state
+                .entry(beneficiary_address)
+                .or_default();
+            // There is an explicit write -- only overwrite the account info in case there
+            // are storage changes.
+            if let Some(account) = beneficiary_result {
+                account.basic = beneficiary_account.clone().into();
+            }
+            // Implicit write -- can make storage update empty.
+            else {
+                *beneficiary_result = Some(EvmAccount {
                     basic: beneficiary_account.clone().into(),
-                    // EOA beneficiary accounts currently cannot have storage.
                     storage: Default::default(),
-                })
-            },
-        );
+                });
+            }
+        }
 
         fully_evaluated_results.push(execution_result);
     }
