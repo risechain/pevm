@@ -59,6 +59,14 @@ pub struct AccountBasic {
     pub code_hash: Option<B256>,
 }
 
+impl AccountBasic {
+    /// Check if an account is empty for removal per EIP-161
+    // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
+    pub fn is_empty(&self) -> bool {
+        self.balance == U256::ZERO && self.nonce == 0 && self.code.is_none()
+    }
+}
+
 impl From<AccountBasic> for AccountInfo {
     fn from(account: AccountBasic) -> Self {
         let code = account.code.map(Bytecode::from).unwrap_or_default();
