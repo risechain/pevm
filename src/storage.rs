@@ -118,11 +118,7 @@ impl From<EvmCode> for Bytecode {
         // a [Bytecode]. On failure we should fallback to legacy and
         // analyse again.
         unsafe {
-            Bytecode::new_analyzed(
-                code.bytecode,
-                code.original_len,
-                JumpTable(code.jump_table.clone()),
-            )
+            Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table))
         }
     }
 }
@@ -132,9 +128,9 @@ impl From<Bytecode> for EvmCode {
         match code {
             Bytecode::LegacyRaw(_) => to_analysed(code).into(),
             Bytecode::LegacyAnalyzed(code) => EvmCode {
-                bytecode: code.bytecode().clone(),
-                original_len: code.original_len(),
-                jump_table: code.jump_table().0.clone(),
+                bytecode: code.bytecode,
+                original_len: code.original_len,
+                jump_table: code.jump_table.0,
             },
             Bytecode::Eof(_) => unimplemented!("TODO: Support EOF"),
         }
