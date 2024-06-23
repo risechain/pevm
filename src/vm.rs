@@ -139,106 +139,6 @@ impl<'a, S: Storage> VmDb<'a, S> {
             self.vm.get_address_hash(address)
         }
     }
-
-    // TODO: Get the hash inside here for less redundancy. For now, there are
-    // cases where the call site already has the hash or need the hash  for
-    // post-processing and it's too noisier to add it to the return type here.
-    fn read(
-        &mut self,
-        location: MemoryLocation,
-        location_hash: MemoryLocationHash,
-    ) -> Result<MemoryValue, ReadError> {
-        self.read_set.locations.insert(location_hash, vec![]);
-        let read_origins = self.read_set.locations.get_mut(&location_hash).unwrap();
-
-        if self.tx_idx == &0 {
-            read_origins.push(ReadOrigin::Storage);
-            return self.read_from_storage(&location, U256::ZERO);
-        }
-
-        // We enforce consecutive indexes for locations that all transactions write to like
-        // the beneficiary balance. The goal is to not wastefully evaluate when we know
-        // we're missing data -- let's just depend on the missing data instead.
-        let need_consecutive_idxs = location_hash == self.vm.beneficiary_location_hash;
-        // While we can depend on the precise missing transaction index (known during lazy evaluation),
-        // through benchmark constantly retrying via the previous transaction index performs much better.
-        let reschedule = Err(ReadError::BlockingIndex(self.tx_idx - 1));
-
-        let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) else {
-            if need_consecutive_idxs {
-                return reschedule;
-            }
-            read_origins.push(ReadOrigin::Storage);
-            return self.read_from_storage(&location, U256::ZERO);
-        };
-
-        let mut total_addition = U256::ZERO;
-        let mut current_idx = self.tx_idx;
-        let mut iter = written_transactions.range(..current_idx);
-        loop {
-            match iter.next_back() {
-                Some((blocking_idx, MemoryEntry::Estimate)) => {
-                    return if need_consecutive_idxs {
-                        reschedule
-                    } else {
-                        Err(ReadError::BlockingIndex(*blocking_idx))
-                    }
-                }
-                Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
-                    if need_consecutive_idxs && closest_idx != &(current_idx - 1) {
-                        return reschedule;
-                    }
-                    read_origins.push(ReadOrigin::MvMemory(TxVersion {
-                        tx_idx: *closest_idx,
-                        tx_incarnation: *tx_incarnation,
-                    }));
-                    match value {
-                        MemoryValue::Basic(account) => {
-                            let mut info = account.clone();
-                            info.balance += total_addition;
-                            break Ok(MemoryValue::Basic(info));
-                        }
-                        MemoryValue::LazyBalanceAddition(addition) => {
-                            total_addition += addition;
-                            current_idx = closest_idx;
-                        }
-                        storage => break Ok(storage.clone()),
-                    }
-                }
-                _ => {
-                    if need_consecutive_idxs && current_idx > &0 {
-                        return reschedule;
-                    }
-                    read_origins.push(ReadOrigin::Storage);
-                    return self.read_from_storage(&location, total_addition);
-                }
-            }
-        }
-    }
-
-    fn read_from_storage(
-        &self,
-        location: &MemoryLocation,
-        balance_addition: U256, // For lazy evaluation of atomically updated balances
-    ) -> Result<MemoryValue, ReadError> {
-        match location {
-            MemoryLocation::Basic(address) => match self.vm.storage.basic(address) {
-                Ok(Some(account)) => {
-                    let mut info = AccountInfo::from(account);
-                    info.balance += balance_addition;
-                    Ok(MemoryValue::Basic(Box::new(info)))
-                }
-                Ok(None) => Err(ReadError::NotFound),
-                Err(err) => Err(ReadError::StorageError(format!("{err:?}"))),
-            },
-            MemoryLocation::Storage(address, index) => self
-                .vm
-                .storage
-                .storage(address, index)
-                .map(MemoryValue::Storage)
-                .map_err(|err| ReadError::StorageError(format!("{err:?}"))),
-        }
-    }
 }
 
 impl<'a, S: Storage> Database for VmDb<'a, S> {
@@ -258,6 +158,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         if is_preload {
             return Ok(None);
         }
+
         // We return a mock for a non-contract recipient to avoid unncessarily
         // evaluating its balance here. Also skip transactions with the same from
         // & to until we have lazy updates for the sender nonce & balance.
@@ -274,23 +175,106 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                 ..AccountInfo::default()
             }));
         }
-        let location_hash = self.get_address_hash(&address);
-        match self.read(MemoryLocation::Basic(address), location_hash) {
-            Ok(MemoryValue::Basic(account)) => {
-                if &address != self.from && Some(&address) != self.to {
-                    self.only_read_from_and_to = false;
-                }
-                let info = *account;
-                self.read_set
-                    .accounts
-                    // Avoid cloning the code as we can compare its hash
-                    .insert(location_hash, AccountInfo { code: None, ..info });
-                Ok(Some(info))
-            }
-            Err(ReadError::NotFound) => Ok(None),
-            Err(err) => Err(err),
-            _ => Err(ReadError::InvalidMemoryLocationType),
+
+        if &address != self.from && Some(&address) != self.to {
+            self.only_read_from_and_to = false;
         }
+
+        let location_hash = self.get_address_hash(&address);
+        let read_origins = self.read_set.locations.entry(location_hash).or_default();
+        // For some reasons REVM may call to the same location several time!
+        // We can return caches here but early benchmarks show it's not worth
+        // it. Clearing the origins for now.
+        read_origins.clear();
+
+        let mut final_account = None;
+        let mut balance_addition = U256::ZERO;
+
+        // Try reading from multi-verion data
+        if self.tx_idx > &0 {
+            // We enforce consecutive indexes for locations that all transactions write to like
+            // the beneficiary balance. The goal is to not wastefully evaluate when we know
+            // we're missing data -- let's just depend on the missing data instead.
+            let need_consecutive_idxs = location_hash == self.vm.beneficiary_location_hash;
+            // While we can depend on the precise missing transaction index (known during lazy evaluation),
+            // through benchmark constantly retrying via the previous transaction index performs much better.
+            let reschedule = Err(ReadError::BlockingIndex(self.tx_idx - 1));
+
+            if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
+                let mut current_idx = self.tx_idx;
+                let mut iter = written_transactions.range(..current_idx);
+
+                // Fully evaluate lazy updates
+                loop {
+                    match iter.next_back() {
+                        Some((blocking_idx, MemoryEntry::Estimate)) => {
+                            return if need_consecutive_idxs {
+                                reschedule
+                            } else {
+                                Err(ReadError::BlockingIndex(*blocking_idx))
+                            }
+                        }
+                        Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                            if need_consecutive_idxs && closest_idx != &(current_idx - 1) {
+                                return reschedule;
+                            }
+                            read_origins.push(ReadOrigin::MvMemory(TxVersion {
+                                tx_idx: *closest_idx,
+                                tx_incarnation: *tx_incarnation,
+                            }));
+                            match value {
+                                MemoryValue::Basic(account) => {
+                                    let mut info = *account.clone();
+                                    info.balance += balance_addition;
+                                    final_account = Some(info);
+                                    break;
+                                }
+                                MemoryValue::LazyBalanceAddition(addition) => {
+                                    balance_addition += addition;
+                                    current_idx = closest_idx;
+                                }
+                                _ => return Err(ReadError::InvalidMemoryLocationType),
+                            }
+                        }
+                        _ => {
+                            if need_consecutive_idxs && current_idx > &0 {
+                                return reschedule;
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else if need_consecutive_idxs {
+                return reschedule;
+            }
+        }
+
+        // Fall back to storage
+        if final_account.is_none() {
+            read_origins.push(ReadOrigin::Storage);
+            final_account = match self.vm.storage.basic(&address) {
+                Ok(Some(account)) => {
+                    let mut info = AccountInfo::from(account);
+                    info.balance += balance_addition;
+                    Some(info)
+                }
+                Ok(None) => None,
+                Err(err) => return Err(ReadError::StorageError(format!("{err:?}"))),
+            };
+        }
+
+        if let Some(account) = &final_account {
+            self.read_set.accounts.insert(
+                location_hash,
+                AccountInfo {
+                    // Avoid cloning the code as we can compare its hash
+                    code: None,
+                    ..*account
+                },
+            );
+        }
+
+        Ok(final_account)
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
@@ -309,13 +293,46 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.only_read_from_and_to = false;
-        let location = MemoryLocation::Storage(address, index);
-        match self.read(location.clone(), self.vm.hasher.hash_one(location)) {
-            Err(err) => Err(err),
-            Ok(MemoryValue::Storage(value)) => Ok(value),
-            _ => Err(ReadError::InvalidMemoryLocationType),
+        let location_hash = self
+            .vm
+            .hasher
+            .hash_one(MemoryLocation::Storage(address, index));
+
+        let read_origins = self.read_set.locations.entry(location_hash).or_default();
+        // For some reasons REVM may call to the same location several time!
+        // We can return caches here but early benchmarks show it's not worth
+        // it. Clearing the origins for now.
+        read_origins.clear();
+
+        // Try reading from multi-verion data
+        if self.tx_idx > &0 {
+            if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
+                if let Some((closest_idx, entry)) =
+                    written_transactions.range(..self.tx_idx).next_back()
+                {
+                    match entry {
+                        MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
+                            read_origins.push(ReadOrigin::MvMemory(TxVersion {
+                                tx_idx: *closest_idx,
+                                tx_incarnation: *tx_incarnation,
+                            }));
+                            return Ok(*value);
+                        }
+                        MemoryEntry::Estimate => {
+                            return Err(ReadError::BlockingIndex(*closest_idx))
+                        }
+                        _ => return Err(ReadError::InvalidMemoryLocationType),
+                    }
+                }
+            }
         }
+
+        // Fall back to storage
+        read_origins.push(ReadOrigin::Storage);
+        self.vm
+            .storage
+            .storage(&address, &index)
+            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
@@ -439,17 +456,6 @@ impl<'a, S: Storage> Vm<'a, S> {
                     if account.is_touched() {
                         let account_location_hash = self.get_address_hash(address);
                         if db.read_set.accounts.get(&account_location_hash) != Some(&account.info) {
-                            // TODO: More granularity here to ensure we only notify new
-                            // memory writes, for instance, only an account's balance instead
-                            // of the whole account. That way we may also generalize beneficiary
-                            // balance's lazy update behaviour into `MemoryValue` for more use cases.
-                            // TODO: Confirm that we're not missing anything, like bytecode.
-                            let mut account_info = account.info.clone();
-
-                            if address == &self.block_env.coinbase {
-                                account_info.balance += gas_payment.take().unwrap();
-                            }
-
                             // Skip transactions with the same from & to until we have lazy updates
                             // for the sender nonce & balance.
                             if is_maybe_lazy
@@ -461,6 +467,17 @@ impl<'a, S: Storage> Vm<'a, S> {
                                     MemoryValue::LazyBalanceAddition(tx.value),
                                 ));
                             } else {
+                                // TODO: More granularity here to ensure we only notify new
+                                // memory writes, for instance, only an account's balance instead
+                                // of the whole account. That way we may also generalize beneficiary
+                                // balance's lazy update behaviour into `MemoryValue` for more use cases.
+                                // TODO: Confirm that we're not missing anything, like bytecode.
+                                let mut account_info = account.info.clone();
+
+                                if address == &self.block_env.coinbase {
+                                    account_info.balance += gas_payment.take().unwrap();
+                                }
+
                                 write_set.push((
                                     account_location_hash,
                                     MemoryValue::Basic(Box::new(account_info)),
