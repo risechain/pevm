@@ -1,6 +1,6 @@
-//! Blazingly fast Parallel EVM for EVM.
+//! Blazingly fast Parallel EVM in Rust.
 
-// TODO: Better types & API please
+// TODO: Better types & API for third-party integration
 
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -25,35 +25,34 @@ impl Hasher for AddressHasher {
 }
 type BuildAddressHasher = BuildHasherDefault<AddressHasher>;
 
-// TODO: More granularity here, for instance, to separate an account's
-// balance, nonce, etc. instead of marking conflict at the whole account.
-// That way we may also generalize beneficiary balance's lazy update
-// behaviour into `MemoryValue` for more use cases.
-// TODO: It would be nice if we could tie the different cases of
-// memory locations & values at the type level, to prevent lots of
-// matches & potentially dangerous mismatch mistakes.
-// TODO: Confirm that we're not missing anything, like bytecode.
+// TODO: More granularity here to separate an account's balance, nonce, and
+// code instead of marking conflict at the whole account. That way checking
+// for a mid-block code change (contract deployment) doesn't need to traverse
+// a potential long list of lazy balance updates, etc.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum MemoryLocation {
     Basic(Address),
     Storage(Address, U256),
 }
 
-// No more hashing is required as we already identify memory locations by
-// their hash in the multi-version data structure, read & write sets. [dashmap]
-// having a dedicated interface for this use case (that skips hashing for `u64`
-// keys) would make our code cleaner and "faster". Nevertheless, the compiler
-// should be good enough to optimize these cases anyway.
+// We only need the full memory location to read from storage.
+// We then identify the locations with its hash in the multi-version
+// data, write and read sets, which is much faster than rehashing
+// on every single lookup & validation.
+type MemoryLocationHash = u64;
+
+// This is primarily used for memory location hash, but can also be used for
+// transaction indexes, etc.
 #[derive(Default)]
-struct IdentityHasher(MemoryLocationHash);
+struct IdentityHasher(u64);
 impl Hasher for IdentityHasher {
-    fn write_u64(&mut self, hash: MemoryLocationHash) {
-        self.0 = hash;
+    fn write_u64(&mut self, id: u64) {
+        self.0 = id;
     }
-    fn write_usize(&mut self, hash: usize) {
-        self.0 = hash as u64;
+    fn write_usize(&mut self, id: usize) {
+        self.0 = id as u64;
     }
-    fn finish(&self) -> MemoryLocationHash {
+    fn finish(&self) -> u64 {
         self.0
     }
     fn write(&mut self, _: &[u8]) {
@@ -62,23 +61,18 @@ impl Hasher for IdentityHasher {
 }
 type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 
-// We only need the full memory location to read from storage.
-// We then identify the locations with its hash in the multi-version
-// data, write and read sets, which is much faster than rehashing
-// on every single lookup & validation.
-type MemoryLocationHash = u64;
-
+// TODO: It would be nice if we could tie the different cases of
+// memory locations & values at the type level, to prevent lots of
+// matches & potentially dangerous mismatch mistakes.
 #[derive(Debug, Clone)]
 enum MemoryValue {
     Basic(Box<AccountInfo>),
     // We lazily update the beneficiary balance to avoid continuous
-    // dependencies as all transactions read and write to it. We
-    // either evaluate all these beneficiary account states at the
-    // end of BlockSTM, or when there is an explicit read.
-    // Important: The value of this lazy (update) balance is the gas
-    // it receives in the transaction, to be added to the absolute
-    // balance at the end of the previous transaction.
-    // We can probably generalize this to `AtomicBalanceAddition`.
+    // dependencies as all transactions read and write to it. We also
+    // lazy update the recipient balance of raw transfers, which is also
+    // common (popular CEX addresses, etc).
+    // We fully evaluate these account states at the end of the block or
+    // when there is an explicit read.
     LazyBalanceAddition(U256),
     Storage(U256),
 }
@@ -88,20 +82,22 @@ enum MemoryEntry {
     // When an incarnation is aborted due to a validation failure, the
     // entries in the multi-version data structure corresponding to its
     // write set are replaced with this special ESTIMATE marker.
-    // This signifies that the next incarnation is estimated to write to the
-    // same memory locations. An incarnation stops and is immediately aborted
-    // whenever it reads a value marked as an ESTIMATE written by a lower
-    // transaction, instead of potentially wasting a full execution and aborting
-    // during validation.
+    // This signifies that the next incarnation is estimated to write to
+    // the same memory locations. An incarnation stops and is immediately
+    // aborted whenever it reads a value marked as an ESTIMATE written by
+    // a lower transaction, instead of potentially wasting a full execution
+    // and aborting during validation.
     // The ESTIMATE markers that are not overwritten are removed by the next
     // incarnation.
     Estimate,
 }
 
 // The index of the transaction in the block.
+// TODO: Consider downsizing to [u32].
 type TxIdx = usize;
 
 // The i-th time a transaction is re-executed, counting from 0.
+// TODO: Consider downsizing to [u32].
 type TxIncarnation = usize;
 
 // - ReadyToExecute(i) --try_incarnate--> Executing(i)
@@ -133,22 +129,19 @@ type TransactionsStatus = Vec<TxStatus>;
 // We use `Vec` for dependents to simplify runtime update code.
 // We use `HashMap` for dependencies as we're only adding
 // them during preprocessing and removing them during processing.
-// The underlying `HashSet` is to simplify index deduplication logic
-// while adding new dependencies.
 // TODO: Intuitively both should share a similar data structure?
+// TODO: Consider using [SmallVec] for these `[DepsList]`
 type TransactionsDependents = Vec<Vec<TxIdx>>;
 type TransactionsDependencies = HashMap<TxIdx, Vec<TxIdx>, BuildIdentityHasher>;
 
-// BlockSTM maintains an in-memory multi-version data structure that
-// stores for each memory location the latest value written per
-// transaction, along with the associated transaction version. When a
-// transaction reads a memory location, it obtains from the
-// multi-version data structure the value written to this location by
-// the highest transaction that appears before it in the block, along
-// with the associated version. For instance, tx5 would read the value
-// written by tx3 even when tx6 has also written to it. If no previous
-// transactions have written to a location, the value would be read
-// from the storage state before block execution.
+// We maintain an in-memory multi-version data structure that stores for
+// each memory location the latest value written per transaction, along
+// with the associated transaction incarnation. When a transaction reads
+// a memory location, it obtains from the multi-version data structure the
+// value written to this location by the highest transaction that appears
+// before it in the block, along with the associated version. If no previous
+// transactions have written to a location, the value would be read from the
+// storage state before block execution.
 #[derive(Clone, Debug, PartialEq)]
 struct TxVersion {
     tx_idx: TxIdx,
@@ -159,7 +152,6 @@ struct TxVersion {
 // data structure or from storage (chain state before block execution).
 #[derive(Debug, PartialEq)]
 enum ReadOrigin {
-    // The previous transaction version that wrote the value.
     MvMemory(TxVersion),
     Storage,
 }
@@ -168,8 +160,17 @@ enum ReadOrigin {
 // for each read memory location.
 type ReadLocations = HashMap<MemoryLocationHash, Vec<ReadOrigin>, BuildIdentityHasher>;
 
-/// Errors when reading a memory location while executing BlockSTM.
-/// TODO: Better name & elaboration
+// The memory locations needed to execute an incarnation.
+// TODO: Implement a [Default] that pre-allocate two slots for each
+// container, which are the [from] and [to] accounts of the transaction.
+#[derive(Default)]
+struct ReadSet {
+    locations: ReadLocations,
+    // Execution cache to determine if an account was changed.
+    accounts: HashMap<MemoryLocationHash, AccountInfo, BuildIdentityHasher>,
+}
+
+/// Errors when reading a memory location.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReadError {
     /// Cannot read memory location from storage.
@@ -177,48 +178,30 @@ pub enum ReadError {
     /// Memory location not found.
     NotFound,
     /// This memory location has been written by a lower transaction.
-    BlockingIndex(usize),
+    BlockingIndex(TxIdx),
     /// The stored memory value type doesn't match its location type.
     /// TODO: Handle this at the type level?
     InvalidMemoryLocationType,
-}
-
-// The memory locations needed to execute an incarnation.
-// While a hash map is cleaner and reduce duplication chances,
-// vectors are noticeably faster in the mainnet benchmark.
-// TODO: Implement a [Default] that pre-allocate two slots for each
-// array, which are the [from] and [to] accounts of the transaction.
-#[derive(Default)]
-struct ReadSet {
-    locations: ReadLocations,
-    // Execution cache to determine if an account was changed.
-    // TODO: Better organize the type to seprate what is needed
-    // for execution only, and what is needed for validation.
-    // TODO: We can use [MemoryLocationHash] here!
-    accounts: HashMap<MemoryLocationHash, AccountInfo, BuildIdentityHasher>,
 }
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.
 type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
 
-// TODO: Properly type this
-type ExecutionTask = TxVersion;
-
-// TODO: Properly type this
-type ValidationTask = TxVersion;
-
-// TODO: Properly type this
+// A scheduled worker task
+// TODO: Add more useful work when there are idle workers like near
+// the end of block execution, while waiting for a huge blocking
+// transaction to resolve, etc.
 #[derive(Debug)]
 enum Task {
-    Execution(ExecutionTask),
-    Validation(ValidationTask),
+    Execution(TxVersion),
+    Validation(TxVersion),
 }
 
 // This optimization is desired as we constantly index into many
 // vectors of the block-size size. It can yield up to 5% improvement.
 macro_rules! index_mutex {
-    ( $vec:expr, $index:expr) => {
+    ($vec:expr, $index:expr) => {
         // SAFETY: A correct scheduler would not leak indexes larger
         // than the block size, which is the size of all vectors we
         // index via this macro. Otherwise, DO NOT USE!

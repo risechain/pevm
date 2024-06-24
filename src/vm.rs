@@ -22,23 +22,23 @@ use crate::{
 pub type ExecutionError = EVMError<ReadError>;
 
 /// Represents the state transitions of the EVM accounts after execution.
-/// If the value is `None`, it indicates that the account is marked for removal.
-/// If the value is `Some(new_state)`, it indicates that the account has become `new_state`.
+/// If the value is [None], it indicates that the account is marked for removal.
+/// If the value is [Some(new_state)], it indicates that the account has become [new_state].
 type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
 
 /// Execution result of a transaction
 #[derive(Debug, Clone, PartialEq)]
 pub struct PevmTxExecutionResult {
     /// Receipt of execution
-    // TODO: Consider promoting to `ReceiptEnvelope` if there is high demand
+    // TODO: Consider promoting to [ReceiptEnvelope] if there is high demand
     pub receipt: Receipt,
     /// State that got updated
     pub state: EvmStateTransitions,
 }
 
 impl PevmTxExecutionResult {
-    /// Create a new execution from a raw REVM result.
-    /// Note that `cumulative_gas_used` is preset to the gas used of this transaction.
+    /// Construct a Pevm execution result from a raw Revm result.
+    /// Note that [cumulative_gas_used] is preset to the gas used of this transaction.
     /// It should be post-processed with the remaining transactions in the block.
     pub fn from_revm(spec_id: SpecId, ResultAndState { result, state }: ResultAndState) -> Self {
         Self {
@@ -75,23 +75,23 @@ pub(crate) enum VmExecutionResult {
         read_locations: ReadLocations,
         write_set: WriteSet,
         // From which transaction index do we need to validate from after
-        // this execution. This is `None` when no validation is required.
+        // this execution. This is [None] when no validation is required.
         // For instance, for transactions that only read and write to the
-        // from and to addresses, which preprocessing has already ordered
-        // dependencies correctly. Note that this is used to set the min
-        // validation index in the scheduler, meaing a `None` here will
-        // still be validated if there was a lower transaction that has
-        // broken the preprocessed dependency chain and returned `Some`.
-        // TODO: Better name & doc please.
+        // from and to addresses, which preprocessing & lazy evaluation has
+        // already covered. Note that this is used to set the min validation
+        // index in the scheduler, meaing a `None` here will still be validated
+        // if there was a lower transaction that has broken the preprocessed
+        // dependency chain and returned [Some].
+        // TODO: Better name & doc
         next_validation_idx: Option<TxIdx>,
     },
 }
 
 // A database interface that intercepts reads while executing a specific
-// transaction with revm. It provides values from the multi-version data
+// transaction with Revm. It provides values from the multi-version data
 // structure & storage, and tracks the read set of the current execution.
-// TODO: Simplify this type, like grouping `from` and `to` into a
-// `preprocessed_addresses` or a `preprocessed_locations` vector.
+// TODO: Simplify this type, like grouping [from] and [to] into a
+// [preprocessed_addresses] or a [preprocessed_locations] vector.
 struct VmDb<'a, S: Storage> {
     vm: &'a Vm<'a, S>,
     tx_idx: &'a TxIdx,
@@ -100,7 +100,6 @@ struct VmDb<'a, S: Storage> {
     to: Option<&'a Address>,
     to_hash: Option<MemoryLocationHash>,
     is_maybe_lazy: bool,
-    // List of memory locations that this transaction reads.
     read_set: ReadSet,
     // Check if this transaction has read anything other than its sender
     // and to accounts. We must validate from this transaction if it has.
@@ -145,9 +144,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
     type Error = ReadError;
 
     // TODO: More granularity here to ensure we only record dependencies for,
-    // for instance, only an account's balance instead of the whole account
-    // info. That way we may also generalize beneficiary balance's lazy update
-    // behaviour into `MemoryValue` for more use cases.
+    // say, only an account's balance instead of the whole account info.
     fn basic(
         &mut self,
         address: Address,
@@ -170,7 +167,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         {
             return Ok(Some(AccountInfo {
                 // We need this hack to not flag this an empty account for
-                // destruction. Would definitely want a cleaner solution here.
+                // destruction. TODO: A cleaner solution here.
                 nonce: 1,
                 ..AccountInfo::default()
             }));
@@ -263,6 +260,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             };
         }
 
+        // Register read accounts to check if they have changed (been written to)
         if let Some(account) = &final_account {
             self.read_set.accounts.insert(
                 location_hash,
@@ -343,9 +341,6 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
     }
 }
 
-// The VM describes how to read values to execute transactions. Also, it
-// captures the read & write sets of each execution. Note that a single
-// `Vm` can be shared among threads.
 pub(crate) struct Vm<'a, S: Storage> {
     hasher: &'a ahash::RandomState,
     storage: &'a S,
@@ -390,13 +385,12 @@ impl<'a, S: Storage> Vm<'a, S> {
     // Execute a transaction. This can read from memory but cannot modify any state.
     // A successful execution returns:
     //   - A write-set consisting of memory locations and their updated values.
-    //   - A read-set consisting of memory locations read during incarnation and its
-    //   origin.
+    //   - A read-set consisting of memory locations and their origins.
     //
     // An execution may observe a read dependency on a lower transaction. This happens
     // when the last incarnation of the dependency wrote to a memory location that
     // this transaction reads, but it aborted before the read. In this case, the
-    // dependency index is returned via `blocking_tx_idx`. An execution task for this
+    // dependency index is returned via [blocking_tx_idx]. An execution task for this
     // transaction is re-scheduled after the blocking dependency finishes its
     // next incarnation.
     //
@@ -418,9 +412,6 @@ impl<'a, S: Storage> Vm<'a, S> {
         // TODO: The perfect condition is if the recipient is contract.
         let is_maybe_lazy = tx.data.is_empty() && Some(from) != to;
 
-        // Set up DB
-        let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash, is_maybe_lazy);
-
         // Gas price
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
             min(tx.gas_price, priority_fee + self.block_env.basefee)
@@ -430,6 +421,9 @@ impl<'a, S: Storage> Vm<'a, S> {
         if self.spec_id.is_enabled_in(LONDON) {
             gas_price = gas_price.saturating_sub(self.block_env.basefee);
         }
+
+        // Execute
+        let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash, is_maybe_lazy);
         match execute_tx(
             &mut db,
             self.spec_id,
@@ -443,6 +437,7 @@ impl<'a, S: Storage> Vm<'a, S> {
 
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
+                // TODO: Allocate up to [result_and_state.state.len()] anyway?
                 let mut write_set = WriteSet::with_capacity(3);
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
@@ -469,9 +464,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                             } else {
                                 // TODO: More granularity here to ensure we only notify new
                                 // memory writes, for instance, only an account's balance instead
-                                // of the whole account. That way we may also generalize beneficiary
-                                // balance's lazy update behaviour into `MemoryValue` for more use cases.
-                                // TODO: Confirm that we're not missing anything, like bytecode.
+                                // of the whole account.
                                 let mut account_info = account.info.clone();
 
                                 if address == &self.block_env.coinbase {
@@ -486,7 +479,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                         }
                     }
 
-                    // TODO: We should move this to our read set like for account info?
+                    // TODO: We should move this changed check to our read set like for account info?
                     for (slot, value) in account.changed_storage_slots() {
                         write_set.push((
                             self.hasher
@@ -550,7 +543,6 @@ impl<'a, S: Storage> Vm<'a, S> {
     }
 }
 
-// TODO: Move to better place?
 pub(crate) fn execute_tx<DB: Database>(
     db: DB,
     spec_id: SpecId,

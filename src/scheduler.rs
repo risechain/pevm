@@ -10,12 +10,12 @@ use std::{
 use crossbeam::utils::CachePadded;
 
 use crate::{
-    BuildIdentityHasher, ExecutionTask, IncarnationStatus, Task, TransactionsDependencies,
-    TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion, ValidationTask,
+    BuildIdentityHasher, IncarnationStatus, Task, TransactionsDependencies, TransactionsDependents,
+    TransactionsStatus, TxIdx, TxStatus, TxVersion,
 };
 
-// The BlockSTM collaborative scheduler coordinates execution & validation
-// tasks among threads.
+// The Pevm collaborative scheduler coordinates execution & validation
+// tasks among work threads.
 //
 // To pick a task, threads increment the smaller of the (execution and
 // validation) task counters until they find a task that is ready to be
@@ -53,31 +53,29 @@ use crate::{
 // to start at a new 64-or-128-bytes cache line.
 #[repr(align(128))]
 pub(crate) struct Scheduler {
-    /// The next transaction to try and execute.
+    // The next transaction to try and execute.
     execution_idx: CachePadded<AtomicUsize>,
-    /// The next transaction to try and validate.
+    // The next transaction to try and validate.
     validation_idx: CachePadded<AtomicUsize>,
-    /// The most up-to-date incarnation number (initially 0) and
-    /// the status of this incarnation.
+    // The most up-to-date incarnation number (initially 0) and
+    // the status of this incarnation.
+    // TODO: Consider packing [TxStatus]s into atomics instead of
+    // [Mutex] given how small they are.
     transactions_status: Vec<CachePadded<Mutex<TxStatus>>>,
-    /// The number of transactions in this block.
+    // The number of transactions in this block.
     block_size: usize,
     // We won't validate until we find the first transaction that
     // reads or writes outside of its preprocessed dependencies.
     min_validation_idx: AtomicUsize,
-    /// The number of validated transactions
+    // The number of validated transactions
     num_validated: AtomicUsize,
-    /// The list of dependent transactions to resume when the
-    /// key transaction is re-executed.
+    // The list of dependent transactions to resume when the
+    // key transaction is re-executed.
     transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
-    /// A list of optional dependencies flagged during preprocessing.
-    /// For instance, for a transaction to depend on two lower others,
-    /// one send to the same recipient address, and one is from
-    /// the same sender. We cannot casually check if all dependencies
-    /// are clear with the dependents map as it can only lock the
-    /// dependency. Two dependencies may check at the same time
-    /// before they clear and think that the dependent is not yet
-    /// ready, making it forever unexecuted.
+    // A list of optional dependencies flagged during preprocessing.
+    // For instance, for a transaction to depend on two lower others,
+    // one send to the same recipient address, and one is from
+    // the same sender.
     // TODO: Build a fuller dependency graph.
     transactions_dependencies: HashMap<TxIdx, Mutex<Vec<TxIdx>>, BuildIdentityHasher>,
 }
@@ -171,11 +169,10 @@ impl Scheduler {
         None
     }
 
-    // Add `tx_idx` as a dependent of `blocking_tx_idx` so `tx_idx` is
-    // re-executed when the next `blocking_tx_idx` incarnation is executed.
-    // Return `false` if we encounter a race condition when `blocking_tx_idx`
+    // Add [tx_idx] as a dependent of [blocking_tx_idx] so [tx_idx] is
+    // re-executed when the next [blocking_tx_idx] incarnation is executed.
+    // Return [false] if we encounter a race condition when [blocking_tx_idx]
     // gets re-executed before the dependency can be added.
-    // TODO: Better error handling, including asserting that both indices are in range.
     pub(crate) fn add_dependency(&self, tx_idx: TxIdx, blocking_tx_idx: TxIdx) -> bool {
         // This is an important lock to prevent a race condition where the blocking
         // transaction completes re-execution before this dependency can be added.
@@ -192,7 +189,6 @@ impl Scheduler {
             tx.status = IncarnationStatus::Aborting;
             drop(tx);
 
-            // TODO: Better error handling here
             let mut blocking_dependents =
                 index_mutex!(self.transactions_dependents, blocking_tx_idx);
             blocking_dependents.push(tx_idx);
@@ -204,10 +200,7 @@ impl Scheduler {
         unreachable!("Trying to abort & add dependency in non-executing state!")
     }
 
-    // Be careful as this one is usually called as a sub-routine that is very
-    // easy to dead-lock.
     fn set_ready_status(&self, tx_idx: TxIdx) {
-        // TODO: Better error handling
         let mut tx = index_mutex!(self.transactions_status, tx_idx);
         if tx.status == IncarnationStatus::Aborting {
             tx.status = IncarnationStatus::ReadyToExecute;
@@ -217,18 +210,12 @@ impl Scheduler {
         }
     }
 
-    // Finish execution and resume dependents of a transaction incarnation.
-    // When a new location was written, schedule the re-execution of all
-    // higher transactions. If not, return the validation task to validate
-    // only this incarnation. Return no task if we've already rolled back to
-    // re-validating smaller transactions.
     pub(crate) fn finish_execution(
         &self,
         tx_version: TxVersion,
         wrote_new_location: bool,
         next_validation_idx: Option<TxIdx>,
-    ) -> Option<ValidationTask> {
-        // TODO: Better error handling
+    ) -> Option<Task> {
         let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
         if tx.status == IncarnationStatus::Executing {
             // TODO: Assert that `i` equals `tx_version.tx_incarnation`?
@@ -240,7 +227,6 @@ impl Scheduler {
             let mut min_dependent_idx = None;
             for tx_idx in dependents.iter() {
                 if let Some(deps) = self.transactions_dependencies.get(tx_idx) {
-                    // TODO: Better error handling
                     let mut deps = deps.lock().unwrap();
                     deps.retain(|dep_idx| dep_idx != &tx_version.tx_idx);
                     // Skip this dependent as it has other pending dependencies.
@@ -287,7 +273,7 @@ impl Scheduler {
                         self.validation_idx
                             .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
                     }
-                    return Some(tx_version);
+                    return Some(Task::Validation(tx_version));
                 }
                 // Don't need to validate anything if the current validation index is
                 // lower or equal -- it will catch up later.
@@ -301,10 +287,9 @@ impl Scheduler {
 
     // Return whether the abort was successful. A successful abort leads to
     // scheduling the transaction for re-execution and the higher transactions
-    // for validation during `finish_validation`. The scheduler ensures that only
+    // for validation during [finish_validation]. The scheduler ensures that only
     // one failing validation per version can lead to a successful abort.
     pub(crate) fn try_validation_abort(&self, tx_version: &TxVersion) -> bool {
-        // TODO: Better error handling
         let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
         if tx.status == IncarnationStatus::Validated {
             self.num_validated.fetch_sub(1, Ordering::Release);
@@ -323,17 +308,13 @@ impl Scheduler {
     // When there is a successful abort, schedule the transaction for re-execution
     // and the higher transactions for validation. The re-execution task is returned
     // for the aborted transaction.
-    pub(crate) fn finish_validation(
-        &self,
-        tx_version: &TxVersion,
-        aborted: bool,
-    ) -> Option<ExecutionTask> {
+    pub(crate) fn finish_validation(&self, tx_version: &TxVersion, aborted: bool) -> Option<Task> {
         if aborted {
             self.set_ready_status(tx_version.tx_idx);
             self.validation_idx
                 .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
             if self.execution_idx.load(Ordering::Acquire) > tx_version.tx_idx {
-                return self.try_execute(tx_version.tx_idx);
+                return self.try_execute(tx_version.tx_idx).map(Task::Execution);
             }
         } else {
             let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
