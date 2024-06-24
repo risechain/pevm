@@ -21,10 +21,9 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    AccountBasic, BuildAddressHasher, BuildIdentityHasher, EvmAccount, ExecutionTask,
-    IncarnationStatus, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task,
-    TransactionsDependencies, TransactionsDependents, TransactionsStatus, TxIdx, TxStatus,
-    TxVersion, ValidationTask,
+    AccountBasic, BuildAddressHasher, BuildIdentityHasher, EvmAccount, IncarnationStatus,
+    MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependencies,
+    TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion,
 };
 
 /// Errors when executing a block with PEVM.
@@ -66,8 +65,6 @@ pub fn execute<S: Storage + Send + Sync>(
     };
 
     // TODO: Continue to fine tune this condition.
-    // For instance, to still execute sequentially when used gas is high
-    // but preprocessing yields little to no parallelism.
     if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
         execute_revm_sequential(storage, spec_id, block_env, tx_envs)
     } else {
@@ -76,9 +73,8 @@ pub fn execute<S: Storage + Send + Sync>(
 }
 
 /// Execute an REVM block.
-// TODO: Do not expose this. Only exposing for ease of testing.
-// The end goal is to mock Alloy blocks for test and not leak
-// REVM anywhere.
+// Ideally everyone would go through the [Alloy] interface. This one is currently
+// useful for testing, and for users that are heavily tied to Revm like Reth.
 pub fn execute_revm<S: Storage + Send + Sync>(
     storage: S,
     spec_id: SpecId,
@@ -137,25 +133,8 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     thread::scope(|scope| {
         for _ in 0..concurrency_level.min(max_concurrency_level).into() {
             scope.spawn(|| {
-                // Find and perform the next execution or validation task.
                 let mut task = scheduler.next_task();
                 while task.is_some() {
-                    // After an incarnation executes it needs to pass validation. The
-                    // validation re-reads the read-set and compares the observed versions.
-                    // A successful validation implies that the applied writes are still
-                    // up-to-date. A failed validation means the incarnation must be
-                    // aborted and the transaction is re-executed in a next one.
-                    //
-                    // A successful validation does not guarantee that an incarnation can be
-                    // committed. Since an abortion and re-execution of an earlier transaction
-                    // in the block might invalidate the incarnation read set and necessitate
-                    // re-execution. Thus, when a transaction aborts, all higher transactions
-                    // are scheduled for re-validation. The same incarnation may be validated
-                    // multiple times, by different threads, and potentially in parallel, but
-                    // BlockSTM ensures that only the first abort per version succeeds.
-                    //
-                    // Since transactions must be committed in order, BlockSTM prioritizes
-                    // tasks associated with lower-indexed transactions.
                     task = match task.unwrap() {
                         Task::Execution(tx_version) => try_execute(
                             &mv_memory,
@@ -164,10 +143,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                             &execution_error,
                             &execution_results,
                             tx_version,
-                        )
-                        .map(Task::Validation),
+                        ),
                         Task::Validation(tx_version) => {
-                            try_validate(&mv_memory, &scheduler, &tx_version).map(Task::Execution)
+                            try_validate(&mv_memory, &scheduler, &tx_version)
                         }
                     };
 
@@ -194,8 +172,8 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return Err(PevmError::ExecutionError(format!("{err:?}")));
     }
 
-    // We fully evaluate the final beneficiary account's and recpipients' balance that may
-    // have been atomically updated to avoid "cheap" dependencies.
+    // We fully evaluate the final beneficiary account's and raw transfer recpipients'
+    // balance that may have been atomically updated to avoid dependencies.
     let mut beneficiary_account = match storage.basic(&beneficiary_address) {
         Ok(Some(account)) => account,
         _ => AccountBasic::default(),
@@ -301,7 +279,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 }
 
 /// Execute REVM transactions sequentially.
-// Useful for fallback back for a small block,
+// Useful for falling back for (small) blocks with many dependencies.
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
 pub fn execute_revm_sequential<S: Storage>(
     storage: S,
@@ -355,7 +333,6 @@ fn preprocess_dependencies(
     let mut last_tx_idx_by_sender = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
 
     for (tx_idx, tx) in txs.iter().enumerate() {
-        // Register a lower transaction as this one's dependency.
         let mut register_dependency = |dependency_idxs: Vec<usize>| {
             // SAFETY: The dependency index is guaranteed to be smaller than the block
             // size in this scope.
@@ -415,13 +392,6 @@ fn preprocess_dependencies(
     ))
 }
 
-// Execute the next incarnation of a transaction.
-// If an ESTIMATE is read, abort and add dependency for re-execution.
-// Otherwise:
-// - If there is a write to a memory location to which the
-//   previous finished incarnation has not written, create validation
-//   tasks for all higher transactions.
-// - Otherwise, return a validation task for the transaction.
 fn try_execute<S: Storage>(
     mv_memory: &MvMemory,
     vm: &Vm<S>,
@@ -429,7 +399,7 @@ fn try_execute<S: Storage>(
     execution_error: &OnceLock<ExecutionError>,
     execution_results: &[Mutex<Option<PevmTxExecutionResult>>],
     tx_version: TxVersion,
-) -> Option<ValidationTask> {
+) -> Option<Task> {
     loop {
         return match vm.execute(tx_version.tx_idx) {
             VmExecutionResult::ReadError { blocking_tx_idx } => {
@@ -459,18 +429,11 @@ fn try_execute<S: Storage>(
     }
 }
 
-// Validate the last incarnation of the transaction.
-// If validation fails:
-// - Mark every memory value written by the incarnation as ESTIMATE.
-// - Create validation tasks for all higher transactions that have
-//   not been executed.
-// - Return a re-execution task for this transaction with an incremented
-//   incarnation.
 fn try_validate(
     mv_memory: &MvMemory,
     scheduler: &Scheduler,
     tx_version: &TxVersion,
-) -> Option<ExecutionTask> {
+) -> Option<Task> {
     let read_set_valid = mv_memory.validate_read_locations(tx_version.tx_idx);
     let aborted = !read_set_valid && scheduler.try_validation_abort(tx_version);
     if aborted {

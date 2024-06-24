@@ -13,6 +13,7 @@ use crate::{
 #[derive(Default)]
 struct LastLocations {
     read: ReadLocations,
+    // Consider [SmallVec] since most transactions explicitly write to 2 locations!
     write: Vec<MemoryLocationHash>,
 }
 
@@ -20,8 +21,11 @@ struct LastLocations {
 // structure for values written and read by different transactions. It stores
 // multiple writes for each memory location, along with a value and an associated
 // version of a corresponding transaction.
-// TODO: Better concurrency control if possible.
 pub(crate) struct MvMemory {
+    // No more hashing is required as we already identify memory locations by their hash
+    // in the read & write sets. [dashmap] having a dedicated interface for this use case
+    // (that skips hashing for [u64] keys) would make our code cleaner and "faster".
+    // Nevertheless, the compiler should be good enough to optimize these cases anyway.
     data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
     last_locations: Vec<Mutex<LastLocations>>,
 }
@@ -33,7 +37,7 @@ impl MvMemory {
     ) -> Self {
         let data = DashMap::default();
         // We preallocate estimated locations to avoid restructuring trees at runtime
-        // while holding a write lock. Ideally [dashmap] would have an atomic-free
+        // while holding a write lock. Ideally [dashmap] would have a lock-free
         // construction API. This is acceptable for now as it's a non-congested one-time
         // cost.
         for (location_hash, estimated_tx_idxs) in estimated_locations {
@@ -66,8 +70,8 @@ impl MvMemory {
         let new_locations: Vec<MemoryLocationHash> = write_set.iter().map(|(l, _)| *l).collect();
         for (location, value) in write_set.into_iter() {
             let entry = MemoryEntry::Data(tx_version.tx_incarnation, value);
-            // We must not use `get_mut` here, else there's a race condition where
-            // two threads get `None` first, then the latter's `insert` overwrote
+            // We must not use [get_mut] here, else there's a race condition where
+            // two threads get [None] first, then the latter's [insert] overwrote
             // the former's.
             match self.data.entry(location) {
                 Entry::Occupied(mut written_transactions) => {
@@ -104,23 +108,18 @@ impl MvMemory {
         false
     }
 
-    // Obtain the last read set recorded by an execution of `tx_idx` and check
+    // Obtain the last read set recorded by an execution of [tx_idx] and check
     // that re-reading each memory location in the read set still yields the
-    // same value. For every value that was read, the read set stores a read
-    // origin containing the version of the transaction (during the execution
-    // of which the value was written), or if the value was read from storage
-    // (i.e., not written by a smaller transaction). The incarnation numbers
-    // are monotonically increasing, so it is sufficient to validate the read set
-    // by comparing the corresponding origin.
+    // same read origins.
     // This is invoked during validation, when the incarnation being validated is
     // already executed and has recorded the read set. However, if the thread
     // performing a validation for incarnation i of a transaction is slow, it is
     // possible that this function invocation observes a read set recorded by a
     // latter (> i) incarnation. In this case, incarnation i is guaranteed to be
     // already aborted (else higher incarnations would never start), and the
-    // validation task will have no effect on the system regardless of the outcome
-    // (only validations that successfully abort affect the state and each
-    // incarnation can be aborted at most once).
+    // validation task will have no effect regardless of the outcome (only
+    // validations that successfully abort affect the state and each incarnation
+    // can be aborted at most once).
     pub(crate) fn validate_read_locations(&self, tx_idx: TxIdx) -> bool {
         for (location, prior_origins) in index_mutex!(self.last_locations, tx_idx).read.iter() {
             if let Some(written_transactions) = self.read_location(location) {

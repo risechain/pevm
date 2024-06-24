@@ -11,9 +11,9 @@ use revm::{
 };
 
 /// An EVM account.
-// TODO: Flatten `AccountBasic` or more ideally, replace this with an Alloy type.
-// `AccountBasic` works for now as we're tightly tied to REVM types, hence
-// conversions between `AccountBasic` & `AccountInfo` are very convenient.
+// TODO: Flatten [AccountBasic] or more ideally, replace this with an Alloy type.
+// [AccountBasic] works for now as we're tightly tied to REVM types, hence
+// conversions between [AccountBasic] & [AccountInfo] are very convenient.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct EvmAccount {
     /// The account's basic information.
@@ -46,7 +46,6 @@ impl From<Account> for EvmAccount {
 
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
-// TODO: More proper testing.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AccountBasic {
     /// The balance of the account.
@@ -73,7 +72,6 @@ impl From<AccountBasic> for AccountInfo {
         AccountInfo::new(
             account.balance,
             account.nonce,
-            // TODO: try faster hashing with `asm-keccak`, `native-keccak`, etc.
             account.code_hash.unwrap_or_else(|| code.hash_slow()),
             code,
         )
@@ -137,7 +135,7 @@ impl From<Bytecode> for EvmCode {
     }
 }
 
-/// An interface to provide chain state to BlockSTM for transaction execution.
+/// An interface to provide chain state to Pevm for transaction execution.
 /// Staying close to the underlying REVM's Database trait while not leaking
 /// its primitives to library users (favoring Alloy at the moment).
 /// TODO: Better API for third-party integration.
@@ -171,9 +169,9 @@ pub trait Storage {
 }
 
 // We can use any REVM database as storage provider. Convenient for
-// testing blocks fetched from RPC via REVM's CachedDB. Otherwise, use
-// our `Storage` types to avoid redundant conversions.
-// TODO: Do something equivalent to `CachedDB` ourselves and remove this.
+// testing blocks fetched from RPC via REVM's [CachedDB]. Otherwise, use
+// our [Storage] types to avoid redundant conversions.
+// TODO: Do something equivalent to [CachedDB] ourselves and remove this.
 impl<D: DatabaseRef> Storage for D
 where
     D::Error: Debug,
@@ -207,7 +205,7 @@ where
     }
 }
 
-// We want to use the Storage as REVM's DatabaseRef to provide data for
+// We want to use our [Storage] as REVM's [DatabaseRef] to provide data for
 // things like sequential execution fallback.
 pub(crate) struct StorageWrapper<S: Storage>(pub(crate) S);
 

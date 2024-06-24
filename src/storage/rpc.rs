@@ -1,5 +1,3 @@
-// A storage that fetches state data via RPC for execution.
-
 use std::{fmt::Debug, future::IntoFuture, sync::Mutex};
 
 use ahash::AHashMap;
@@ -22,7 +20,7 @@ use tokio::runtime::Runtime;
 // library with RPC network & transport dependencies, etc.
 type RpcProvider = RootProvider<Http<Client>>;
 
-/// Fetch state data via RPC to execute.
+/// A storage that fetches state data via RPC for execution.
 #[derive(Debug)]
 pub struct RpcStorage {
     provider: RpcProvider,
@@ -32,9 +30,9 @@ pub struct RpcStorage {
     // as in-memory storage for benchmarks & testing. Also work well when
     // the storage is re-used, like for comparing sequential & parallel
     // execution on the same block.
-    // Using a `Mutex` so we don't propagate mutability requirements back
-    // to our `Storage` trait and meet `Send`/`Sync` requirements for PEVM.
-    // TODO: Replace `PlainAccount` by our own `Account`.
+    // Using a [Mutex] so we don't propagate mutability requirements back
+    // to our [Storage] trait and meet [Send]/[Sync] requirements for Pevm.
+    // TODO: Replace [PlainAccount] with our own [Account`].
     cache_accounts: Mutex<AHashMap<Address, PlainAccount>>,
     cache_block_hashes: Mutex<AHashMap<U256, B256>>,
     // TODO: Better async handling.
@@ -66,8 +64,8 @@ impl RpcStorage {
     }
 }
 
-// TODO: Implement `Storage` instead.
-// Going with REVM's Database simply to make it easier
+// TODO: Implement [Storage] instead.
+// Going with Revm's [Database] simply to make it easier
 // to try matching sequential & parallel execution.
 // In the future we should match block roots anyway.
 impl DatabaseRef for RpcStorage {
@@ -122,7 +120,7 @@ impl DatabaseRef for RpcStorage {
     }
 
     fn has_storage_ref(&self, _address: Address) -> Result<bool, Self::Error> {
-        // FIXME! Returning `false` that should cover EIP-7610 for the time being.
+        // FIXME! Returning [false] should cover EIP-7610 for the time being.
         Ok(false)
     }
 
@@ -152,7 +150,6 @@ impl DatabaseRef for RpcStorage {
         Ok(value)
     }
 
-    // TODO: Proper error handling & testing.
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
         if let Some(&block_hash) = self.cache_block_hashes.lock().unwrap().get(&number) {
             return Ok(block_hash);
