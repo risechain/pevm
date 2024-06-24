@@ -291,6 +291,8 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        self.only_read_from_and_to = false;
+
         let location_hash = self
             .vm
             .hasher
@@ -504,7 +506,9 @@ impl<'a, S: Storage> Vm<'a, S> {
                     }
                     // Validate from this transaction if it reads something outside of its
                     // sender and to infos.
-                    else if !db.only_read_from_and_to {
+                    // Or if this one is lazy updated. We can remove the [is_maybe_lazy]
+                    // check once we have lazy updates for raw transfer senders.
+                    else if !db.only_read_from_and_to || is_maybe_lazy {
                         Some(tx_idx)
                     }
                     // Validate from the next transaction if doesn't read externally but
