@@ -1,6 +1,7 @@
 use std::cmp::min;
 
 use ahash::AHashMap;
+use alloy_chains::Chain;
 use alloy_rpc_types::Receipt;
 use defer_drop::DeferDrop;
 use revm::{
@@ -347,6 +348,7 @@ pub(crate) struct Vm<'a, S: Storage> {
     hasher: &'a ahash::RandomState,
     storage: &'a S,
     mv_memory: &'a MvMemory,
+    chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
     beneficiary_location_hash: MemoryLocationHash,
@@ -361,6 +363,7 @@ impl<'a, S: Storage> Vm<'a, S> {
         hasher: &'a ahash::RandomState,
         storage: &'a S,
         mv_memory: &'a MvMemory,
+        chain: Chain,
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
@@ -369,6 +372,7 @@ impl<'a, S: Storage> Vm<'a, S> {
             hasher,
             storage,
             mv_memory,
+            chain,
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             block_env,
@@ -428,6 +432,7 @@ impl<'a, S: Storage> Vm<'a, S> {
         let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash, is_maybe_lazy);
         match execute_tx(
             &mut db,
+            self.chain,
             self.spec_id,
             self.block_env.clone(),
             tx.clone(),
@@ -549,6 +554,7 @@ impl<'a, S: Storage> Vm<'a, S> {
 
 pub(crate) fn execute_tx<DB: Database>(
     db: DB,
+    chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
     tx: TxEnv,
@@ -556,7 +562,10 @@ pub(crate) fn execute_tx<DB: Database>(
 ) -> Result<ResultAndState, EVMError<DB::Error>> {
     // This is much uglier than the builder interface but can be up to 50% faster!!
     let context = Context {
-        evm: EvmContext::new_with_env(db, Env::boxed(CfgEnv::default(), block_env, tx)),
+        evm: EvmContext::new_with_env(
+            db,
+            Env::boxed(CfgEnv::default().with_chain_id(chain.id()), block_env, tx),
+        ),
         external: (),
     };
     // TODO: Support OP handlers

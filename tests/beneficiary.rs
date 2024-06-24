@@ -1,6 +1,7 @@
 // Tests for the beneficiary account, especially for the lazy update of its balance to avoid
 // "implicit" dependency among consecutive transactions.
 
+use alloy_chains::Chain;
 use pevm::InMemoryStorage;
 use rand::random;
 use revm::primitives::{
@@ -15,6 +16,7 @@ fn test_beneficiary(get_address: fn(usize) -> Address) {
     common::test_execute_revm(
         // Mock the beneficiary account (`Address:ZERO`) and the next `BLOCK_SIZE` user accounts.
         InMemoryStorage::new((0..=BLOCK_SIZE).map(common::mock_account), []),
+        Chain::mainnet(),
         SpecId::LATEST,
         BlockEnv::default(),
         // Mock `BLOCK_SIZE` transactions sending some tokens to itself.

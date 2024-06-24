@@ -6,6 +6,7 @@ use std::{
     thread,
 };
 
+use alloy_chains::Chain;
 use alloy_primitives::Address;
 use alloy_rpc_types::Block;
 use defer_drop::DeferDrop;
@@ -50,6 +51,7 @@ pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 /// TODO: Better error handling.
 pub fn execute<S: Storage + Send + Sync>(
     storage: S,
+    chain: Chain,
     block: Block,
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
@@ -66,9 +68,16 @@ pub fn execute<S: Storage + Send + Sync>(
 
     // TODO: Continue to fine tune this condition.
     if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
-        execute_revm_sequential(storage, spec_id, block_env, tx_envs)
+        execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
     } else {
-        execute_revm(storage, spec_id, block_env, tx_envs, concurrency_level)
+        execute_revm(
+            storage,
+            chain,
+            spec_id,
+            block_env,
+            tx_envs,
+            concurrency_level,
+        )
     }
 }
 
@@ -77,6 +86,7 @@ pub fn execute<S: Storage + Send + Sync>(
 // useful for testing, and for users that are heavily tied to Revm like Reth.
 pub fn execute_revm<S: Storage + Send + Sync>(
     storage: S,
+    chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
@@ -91,7 +101,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     let Some((scheduler, max_concurrency_level)) =
         preprocess_dependencies(&beneficiary_address, &txs)
     else {
-        return execute_revm_sequential(storage, spec_id, block_env, txs);
+        return execute_revm_sequential(storage, chain, spec_id, block_env, txs);
     };
 
     // Preprocess locations
@@ -124,7 +134,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // TODO: Provide more explicit garbage collecting configs for users over random background
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
     let mv_memory = DeferDrop::new(MvMemory::new(block_size, estimated_locations));
-    let vm = Vm::new(&hasher, &storage, &mv_memory, spec_id, block_env, txs);
+    let vm = Vm::new(
+        &hasher, &storage, &mv_memory, chain, spec_id, block_env, txs,
+    );
 
     let mut execution_error = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
@@ -283,6 +295,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
 pub fn execute_revm_sequential<S: Storage>(
     storage: S,
+    chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
@@ -291,7 +304,7 @@ pub fn execute_revm_sequential<S: Storage>(
     let mut results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
     for tx in txs {
-        match execute_tx(&mut db, spec_id, block_env.clone(), tx, true) {
+        match execute_tx(&mut db, chain, spec_id, block_env.clone(), tx, true) {
             Ok(result_and_state) => {
                 db.commit(result_and_state.state.clone());
 

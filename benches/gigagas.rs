@@ -7,6 +7,7 @@
 use std::{num::NonZeroUsize, thread};
 
 use ahash::AHashMap;
+use alloy_chains::Chain;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{execute_revm, execute_revm_sequential, InMemoryStorage};
@@ -32,6 +33,7 @@ static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
 pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
+    let chain = Chain::mainnet();
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
     let storage = InMemoryStorage::new(state, []);
@@ -40,6 +42,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
         b.iter(|| {
             execute_revm_sequential(
                 black_box(storage.clone()),
+                black_box(chain),
                 black_box(spec_id),
                 black_box(block_env.clone()),
                 black_box(txs.clone()),
@@ -50,6 +53,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
         b.iter(|| {
             execute_revm(
                 black_box(storage.clone()),
+                black_box(chain),
                 black_box(spec_id),
                 black_box(block_env.clone()),
                 black_box(txs.clone()),

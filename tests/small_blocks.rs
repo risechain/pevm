@@ -1,6 +1,7 @@
 // Test small blocks that we have specific handling for, like implicit fine-tuning
 // the concurrency level, falling back to sequential processing, etc.
 
+use alloy_chains::Chain;
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
 use pevm::InMemoryStorage;
@@ -12,6 +13,7 @@ pub mod common;
 fn empty_alloy_block() {
     common::test_execute_alloy(
         InMemoryStorage::default(),
+        Chain::mainnet(),
         Block {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
             transactions: BlockTransactions::Full(Vec::new()),
@@ -25,6 +27,7 @@ fn empty_alloy_block() {
 fn empty_revm_block() {
     common::test_execute_revm(
         InMemoryStorage::default(),
+        Chain::mainnet(),
         SpecId::LATEST,
         BlockEnv::default(),
         Vec::new(),
@@ -35,6 +38,7 @@ fn empty_revm_block() {
 fn one_tx_alloy_block() {
     common::test_execute_alloy(
         InMemoryStorage::new([common::mock_account(0)], []),
+        Chain::mainnet(),
         Block {
             // Legit header but with no transactions
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
@@ -57,6 +61,7 @@ fn one_tx_alloy_block() {
 fn one_tx_revm_block() {
     common::test_execute_revm(
         InMemoryStorage::new([common::mock_account(0)], []),
+        Chain::mainnet(),
         SpecId::LATEST,
         BlockEnv::default(),
         vec![TxEnv {
