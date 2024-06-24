@@ -13,11 +13,10 @@ pub mod uniswap;
 
 use crate::uniswap::generate_cluster;
 use ahash::AHashMap;
-use alloy_chains::Chain;
 use pevm::InMemoryStorage;
 use revm::{
     db::PlainAccount,
-    primitives::{Address, BlockEnv, SpecId, TxEnv},
+    primitives::{Address, TxEnv},
 };
 
 #[test]
@@ -33,11 +32,5 @@ fn uniswap_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(
-        InMemoryStorage::new(final_state, []),
-        Chain::mainnet(),
-        SpecId::LATEST,
-        BlockEnv::default(),
-        final_txs,
-    )
+    common::test_execute_revm(InMemoryStorage::new(final_state, []), final_txs)
 }

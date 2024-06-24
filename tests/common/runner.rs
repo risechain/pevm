@@ -28,23 +28,24 @@ pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: 
 
 // Execute an REVM block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
-    storage: S,
-    chain: Chain,
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    txs: Vec<TxEnv>,
-) {
+pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result(
         &pevm::execute_revm_sequential(
             storage.clone(),
-            chain,
-            spec_id,
-            block_env.clone(),
+            Chain::mainnet(),
+            SpecId::LATEST,
+            BlockEnv::default(),
             txs.clone(),
         ),
-        &pevm::execute_revm(storage, chain, spec_id, block_env, txs, concurrency_level),
+        &pevm::execute_revm(
+            storage,
+            Chain::mainnet(),
+            SpecId::LATEST,
+            BlockEnv::default(),
+            txs,
+            concurrency_level,
+        ),
     );
 }
 

@@ -4,9 +4,7 @@ use alloy_chains::Chain;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
 use pevm::InMemoryStorage;
 use rand::random;
-use revm::primitives::{
-    alloy_primitives::U160, env::TxEnv, Address, BlockEnv, SpecId, TransactTo, U256,
-};
+use revm::primitives::{alloy_primitives::U160, env::TxEnv, Address, TransactTo, U256};
 
 pub mod common;
 
@@ -16,9 +14,6 @@ fn raw_transfers_independent() {
     common::test_execute_revm(
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
-        Chain::mainnet(),
-        SpecId::LATEST,
-        BlockEnv::default(),
         // Mock `block_size` transactions sending some tokens to itself.
         // Skipping `Address::ZERO` as the beneficiary account.
         (1..=block_size)
@@ -49,9 +44,6 @@ fn raw_transfers_same_sender_multiple_txs() {
     common::test_execute_revm(
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
-        Chain::mainnet(),
-        SpecId::LATEST,
-        BlockEnv::default(),
         (1..=block_size)
             .map(|i| {
                 // Insert a "parallel" transaction every ~256 transactions
