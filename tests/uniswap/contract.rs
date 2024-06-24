@@ -55,8 +55,7 @@ impl WETH9 {
                 1u64,
                 bytecode.hash_slow(),
                 bytecode.clone().into(),
-            )
-            .into(),
+            ),
             storage: store.build().into_iter().collect(),
         }
     }
@@ -136,8 +135,7 @@ impl UniswapV3Factory {
                 1u64,
                 bytecode.hash_slow(),
                 bytecode.clone().into(),
-            )
-            .into(),
+            ),
             storage: store.build().into_iter().collect(),
         }
     }
@@ -259,8 +257,7 @@ impl UniswapV3Pool {
                 1u64,
                 bytecode.hash_slow(),
                 bytecode.clone().into(),
-            )
-            .into(),
+            ),
             storage: store.build().into_iter().collect(),
         }
     }
@@ -332,8 +329,7 @@ impl SwapRouter {
                 1u64,
                 bytecode.hash_slow(),
                 bytecode.clone().into(),
-            )
-            .into(),
+            ),
             storage: store.build().into_iter().collect(),
         }
     }
@@ -379,8 +375,7 @@ impl SingleSwap {
                 1u64,
                 bytecode.hash_slow(),
                 bytecode.clone().into(),
-            )
-            .into(),
+            ),
             storage: store.build().into_iter().collect(),
         }
     }
