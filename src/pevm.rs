@@ -22,7 +22,7 @@ use crate::{
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
     AccountBasic, BuildAddressHasher, BuildIdentityHasher, EvmAccount, IncarnationStatus,
-    MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependencies,
+    MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependenciesNum,
     TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion,
 };
 
@@ -327,9 +327,9 @@ fn preprocess_dependencies(
         .collect();
     let mut transactions_dependents: TransactionsDependents = vec![vec![]; block_size];
     let mut transactions_dependencies =
-        TransactionsDependencies::with_hasher(BuildIdentityHasher::default());
+        TransactionsDependenciesNum::with_hasher(BuildIdentityHasher::default());
 
-    // Marking transactions from thee same sender as dependencies to avoid fatal nonce errors.
+    // Marking transactions from the same sender as dependencies to avoid fatal nonce errors.
     let mut last_tx_idx_by_sender = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
 
     for (tx_idx, tx) in txs.iter().enumerate() {
@@ -343,7 +343,7 @@ fn preprocess_dependencies(
                         .get_unchecked_mut(*dependency_idx)
                         .push(tx_idx);
                 }
-                transactions_dependencies.insert(tx_idx, dependency_idxs);
+                transactions_dependencies.insert(tx_idx, dependency_idxs.len());
             }
         };
 

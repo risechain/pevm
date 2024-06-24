@@ -132,7 +132,7 @@ type TransactionsStatus = Vec<TxStatus>;
 // TODO: Intuitively both should share a similar data structure?
 // TODO: Consider using [SmallVec] for these `[DepsList]`
 type TransactionsDependents = Vec<Vec<TxIdx>>;
-type TransactionsDependencies = HashMap<TxIdx, Vec<TxIdx>, BuildIdentityHasher>;
+type TransactionsDependenciesNum = HashMap<TxIdx, usize, BuildIdentityHasher>;
 
 // We maintain an in-memory multi-version data structure that stores for
 // each memory location the latest value written per transaction, along
