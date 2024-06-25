@@ -8,7 +8,7 @@ edition = "2021"
 # that need more security guarantees even for internally hashing
 # EVM memory locations (we do not persist these hashes).
 ahash = "0.8.11"
-alloy-chains = { version = "0.1.22", features = ["serde"] }
+alloy-chains = { version = "0.1.22" }
 alloy-primitives = { version = "0.7.5", features = ["asm-keccak"] }
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "a4bb5f0be3eec5c8679bdab93c1482df38ba8509" }
 bitvec = "1.0.1"
