@@ -2,8 +2,7 @@ use crate::common::storage::{from_address, from_indices, from_short_string, Stor
 use ahash::AHashMap;
 use pevm::{AccountBasic, EvmAccount};
 use revm::primitives::{
-    fixed_bytes, hex::FromHex, ruint::UintTryFrom, Address, Bytecode, Bytes, B256,
-    U256,
+    fixed_bytes, hex::FromHex, ruint::UintTryFrom, Address, Bytecode, Bytes, B256, U256,
 };
 
 const ERC20_TOKEN: &str = include_str!("./assets/ERC20Token.hex");
@@ -91,8 +90,7 @@ impl ERC20Token {
                 1u64,
                 bytecode.hash_slow(),
                 bytecode.clone().into(),
-            )
-            .into(),
+            ),
             storage: store.build().into_iter().collect(),
         }
     }
