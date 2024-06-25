@@ -22,6 +22,26 @@ pub struct EvmAccount {
     pub storage: AHashMap<U256, U256>,
 }
 
+impl EvmAccount {
+    /// Create a new `EvmAccount` with a given balance.
+    pub fn with_balance(balance: U256) -> Self {
+        AccountBasic {
+            balance,
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+impl From<EvmAccount> for PlainAccount {
+    fn from(account: EvmAccount) -> Self {
+        PlainAccount {
+            info: account.basic.into(),
+            storage: account.storage.into_iter().collect(),
+        }
+    }
+}
+
 impl From<PlainAccount> for EvmAccount {
     fn from(account: PlainAccount) -> Self {
         EvmAccount {
@@ -40,6 +60,15 @@ impl From<Account> for EvmAccount {
                 .iter()
                 .map(|(k, v)| (*k, v.present_value))
                 .collect(),
+        }
+    }
+}
+
+impl From<AccountBasic> for EvmAccount {
+    fn from(basic: AccountBasic) -> Self {
+        EvmAccount {
+            basic,
+            storage: AHashMap::default(),
         }
     }
 }

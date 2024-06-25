@@ -8,12 +8,13 @@ use alloy_transport::TransportError;
 use alloy_transport_http::Http;
 use reqwest::Client;
 use revm::{
-    db::PlainAccount,
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{AccountInfo, Bytecode, SpecId},
     DatabaseRef,
 };
 use tokio::runtime::Runtime;
+
+use crate::{AccountBasic, EvmAccount};
 
 // TODO: Support generic network & transport types.
 // TODO: Put this behind an RPC flag to not pollute the core
@@ -32,8 +33,7 @@ pub struct RpcStorage {
     // execution on the same block.
     // Using a [Mutex] so we don't propagate mutability requirements back
     // to our [Storage] trait and meet [Send]/[Sync] requirements for Pevm.
-    // TODO: Replace [PlainAccount] with our own [Account`].
-    cache_accounts: Mutex<AHashMap<Address, PlainAccount>>,
+    cache_accounts: Mutex<AHashMap<Address, EvmAccount>>,
     cache_block_hashes: Mutex<AHashMap<U256, B256>>,
     // TODO: Better async handling.
     runtime: Runtime,
@@ -54,7 +54,7 @@ impl RpcStorage {
     }
 
     /// Get a snapshot of accounts
-    pub fn get_cache_accounts(&self) -> AHashMap<Address, PlainAccount> {
+    pub fn get_cache_accounts(&self) -> AHashMap<Address, EvmAccount> {
         self.cache_accounts.lock().unwrap().clone()
     }
 
@@ -73,7 +73,7 @@ impl DatabaseRef for RpcStorage {
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         if let Some(account) = self.cache_accounts.lock().unwrap().get(&address) {
-            return Ok(Some(account.info.clone()));
+            return Ok(Some(account.basic.clone().into()));
         }
         self.runtime.block_on(async {
             let (res_balance, res_nonce, res_code) = tokio::join!(
@@ -106,12 +106,17 @@ impl DatabaseRef for RpcStorage {
                 return Ok(None);
             }
             let code = Bytecode::new_raw(code);
-            let info = AccountInfo::new(balance, nonce, code.hash_slow(), code);
+            let basic = AccountBasic {
+                balance,
+                nonce,
+                code_hash: Some(code.hash_slow()),
+                code: Some(code.into()),
+            };
             self.cache_accounts
                 .lock()
                 .unwrap()
-                .insert(address, info.clone().into());
-            Ok(Some(info))
+                .insert(address, basic.clone().into());
+            Ok(Some(basic.into()))
         })
     }
 
@@ -141,8 +146,8 @@ impl DatabaseRef for RpcStorage {
                 account.get_mut().storage.insert(index, value);
             }
             std::collections::hash_map::Entry::Vacant(vacant) => {
-                vacant.insert(PlainAccount {
-                    info: self.basic_ref(address)?.unwrap_or_default(),
+                vacant.insert(EvmAccount {
+                    basic: self.basic_ref(address)?.unwrap_or_default().into(),
                     storage: [(index, value)].into_iter().collect(),
                 });
             }
