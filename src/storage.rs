@@ -23,6 +23,18 @@ pub struct EvmAccount {
     pub storage: AHashMap<U256, U256>,
 }
 
+impl EvmAccount {
+    /// Create `PlainAccount` from `EvmAccount`.
+    ///
+    /// This is useful for testing and conversion between storage types.
+    pub fn into_plain(self) -> PlainAccount {
+        PlainAccount {
+            info: self.basic.into(),
+            storage: self.storage.into_iter().collect(),
+        }
+    }
+}
+
 impl From<PlainAccount> for EvmAccount {
     fn from(account: PlainAccount) -> Self {
         EvmAccount {
