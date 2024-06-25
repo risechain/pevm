@@ -9,12 +9,13 @@ use alloy_transport_http::Http;
 use reqwest::Client;
 use revm::{
     precompile::{PrecompileSpecId, Precompiles},
-    primitives::{AccountInfo, Bytecode, SpecId},
-    DatabaseRef,
+    primitives::{Bytecode, SpecId},
 };
 use tokio::runtime::Runtime;
 
-use crate::{AccountBasic, EvmAccount};
+use crate::{AccountBasic, EvmAccount, Storage};
+
+use super::EvmCode;
 
 // TODO: Support generic network & transport types.
 // TODO: Put this behind an RPC flag to not pollute the core
@@ -64,29 +65,25 @@ impl RpcStorage {
     }
 }
 
-// TODO: Implement [Storage] instead.
-// Going with Revm's [Database] simply to make it easier
-// to try matching sequential & parallel execution.
-// In the future we should match block roots anyway.
-impl DatabaseRef for RpcStorage {
+impl Storage for RpcStorage {
     type Error = TransportError;
 
-    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        if let Some(account) = self.cache_accounts.lock().unwrap().get(&address) {
-            return Ok(Some(account.basic.clone().into()));
+    fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
+        if let Some(account) = self.cache_accounts.lock().unwrap().get(address) {
+            return Ok(Some(account.basic.clone()));
         }
         self.runtime.block_on(async {
             let (res_balance, res_nonce, res_code) = tokio::join!(
                 self.provider
-                    .get_balance(address)
+                    .get_balance(*address)
                     .block_id(self.block_id)
                     .into_future(),
                 self.provider
-                    .get_transaction_count(address)
+                    .get_transaction_count(*address)
                     .block_id(self.block_id)
                     .into_future(),
                 self.provider
-                    .get_code_at(address)
+                    .get_code_at(*address)
                     .block_id(self.block_id)
                     .into_future()
             );
@@ -98,7 +95,7 @@ impl DatabaseRef for RpcStorage {
             if !self
                 .precompiles
                 .addresses()
-                .any(|precompile_address| precompile_address == &address)
+                .any(|precompile_address| precompile_address == address)
                 && balance.is_zero()
                 && nonce == 0
                 && code.is_empty()
@@ -115,48 +112,48 @@ impl DatabaseRef for RpcStorage {
             self.cache_accounts
                 .lock()
                 .unwrap()
-                .insert(address, basic.clone().into());
-            Ok(Some(basic.into()))
+                .insert(*address, basic.clone().into());
+            Ok(Some(basic))
         })
     }
 
-    fn code_by_hash_ref(&self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
+    fn code_by_hash(&self, _code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
         panic!("This should not be called as the code is already loaded via account");
     }
 
-    fn has_storage_ref(&self, _address: Address) -> Result<bool, Self::Error> {
+    fn has_storage(&self, _address: &Address) -> Result<bool, Self::Error> {
         // FIXME! Returning [false] should cover EIP-7610 for the time being.
         Ok(false)
     }
 
-    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        if let Some(account) = self.cache_accounts.lock().unwrap().get(&address) {
-            if let Some(value) = account.storage.get(&index) {
+    fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
+        if let Some(account) = self.cache_accounts.lock().unwrap().get(address) {
+            if let Some(value) = account.storage.get(index) {
                 return Ok(*value);
             }
         }
         let value = self.runtime.block_on(
             self.provider
-                .get_storage_at(address, index)
+                .get_storage_at(*address, *index)
                 .block_id(self.block_id)
                 .into_future(),
         )?;
-        match self.cache_accounts.lock().unwrap().entry(address) {
+        match self.cache_accounts.lock().unwrap().entry(*address) {
             std::collections::hash_map::Entry::Occupied(mut account) => {
-                account.get_mut().storage.insert(index, value);
+                account.get_mut().storage.insert(*index, value);
             }
             std::collections::hash_map::Entry::Vacant(vacant) => {
                 vacant.insert(EvmAccount {
-                    basic: self.basic_ref(address)?.unwrap_or_default().into(),
-                    storage: [(index, value)].into_iter().collect(),
+                    basic: self.basic(address)?.unwrap_or_default(),
+                    storage: [(*index, value)].into_iter().collect(),
                 });
             }
         };
         Ok(value)
     }
 
-    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        if let Some(&block_hash) = self.cache_block_hashes.lock().unwrap().get(&number) {
+    fn block_hash(&self, number: &U256) -> Result<B256, Self::Error> {
+        if let Some(&block_hash) = self.cache_block_hashes.lock().unwrap().get(number) {
             return Ok(block_hash);
         }
 
@@ -172,7 +169,7 @@ impl DatabaseRef for RpcStorage {
         self.cache_block_hashes
             .lock()
             .unwrap()
-            .insert(number, block_hash);
+            .insert(*number, block_hash);
 
         Ok(block_hash)
     }
