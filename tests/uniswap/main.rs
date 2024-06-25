@@ -16,7 +16,7 @@ use ahash::AHashMap;
 use pevm::InMemoryStorage;
 use revm::{
     db::PlainAccount,
-    primitives::{Address, BlockEnv, SpecId, TxEnv},
+    primitives::{Address, TxEnv},
 };
 
 #[test]
@@ -32,10 +32,5 @@ fn uniswap_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(
-        InMemoryStorage::new(final_state, []),
-        SpecId::LATEST,
-        BlockEnv::default(),
-        final_txs,
-    )
+    common::test_execute_revm(InMemoryStorage::new(final_state, []), final_txs)
 }

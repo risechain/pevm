@@ -6,7 +6,7 @@ use pevm::InMemoryStorage;
 use rand::random;
 use revm::{
     db::PlainAccount,
-    primitives::{env::TxEnv, Address, BlockEnv, SpecId, TransactTo, U256},
+    primitives::{env::TxEnv, Address, TransactTo, U256},
 };
 
 pub mod common;
@@ -60,8 +60,6 @@ fn mixed_block() {
     }
     common::test_execute_revm(
         InMemoryStorage::new(final_state, []),
-        SpecId::LATEST,
-        BlockEnv::default(),
         // TODO: Shuffle transactions to scatter dependencies around the block.
         // Note that we'll need to guarantee that the nonces are increasing.
         final_txs,

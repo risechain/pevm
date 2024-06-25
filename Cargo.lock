@@ -47,11 +47,12 @@ checksum = "5c6cb57a04249c6480766f7f7cef5467412af1490f8d1e243141daddada3264f"
 
 [[package]]
 name = "alloy-chains"
-version = "0.1.18"
+version = "0.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03fd095a9d70f4b1c5c102c84a4c782867a5c6416dbf6dcd42a63e7c7a89d3c8"
+checksum = "04e9a1892803b02f53e25bea3e414ddd0501f12d97456c9d5ade4edf88f9516f"
 dependencies = [
  "num_enum",
+ "serde",
  "strum",
 ]
 
@@ -2500,6 +2501,7 @@ name = "pevm"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "alloy-chains",
  "alloy-consensus",
  "alloy-primitives",
  "alloy-provider",

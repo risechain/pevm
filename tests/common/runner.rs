@@ -1,3 +1,4 @@
+use alloy_chains::Chain;
 use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
@@ -27,16 +28,24 @@ pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: 
 
 // Execute an REVM block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(
-    storage: S,
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    txs: Vec<TxEnv>,
-) {
+pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result(
-        &pevm::execute_revm_sequential(storage.clone(), spec_id, block_env.clone(), txs.clone()),
-        &pevm::execute_revm(storage, spec_id, block_env, txs, concurrency_level),
+        &pevm::execute_revm_sequential(
+            storage.clone(),
+            Chain::mainnet(),
+            SpecId::LATEST,
+            BlockEnv::default(),
+            txs.clone(),
+        ),
+        &pevm::execute_revm(
+            storage,
+            Chain::mainnet(),
+            SpecId::LATEST,
+            BlockEnv::default(),
+            txs,
+            concurrency_level,
+        ),
     );
 }
 
@@ -84,12 +93,19 @@ fn calculate_receipt_root(
 // the execution results match.
 pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     storage: S,
+    chain: Chain,
     block: Block,
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let sequential_result = pevm::execute(storage.clone(), block.clone(), concurrency_level, true);
-    let parallel_result = pevm::execute(storage, block.clone(), concurrency_level, false);
+    let sequential_result = pevm::execute(
+        storage.clone(),
+        chain,
+        block.clone(),
+        concurrency_level,
+        true,
+    );
+    let parallel_result = pevm::execute(storage, chain, block.clone(), concurrency_level, false);
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {
