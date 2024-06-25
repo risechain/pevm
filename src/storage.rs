@@ -234,9 +234,10 @@ where
     }
 }
 
-// We want to use our [Storage] as REVM's [DatabaseRef] to provide data for
-// things like sequential execution fallback.
-pub(crate) struct StorageWrapper<S: Storage>(pub(crate) S);
+/// A Storage wrapper that implements REVM's [DatabaseRef], mainly used to
+/// provide data for REVM's [CachedDB] for sequential fallback or via RPC.
+#[derive(Debug)]
+pub struct StorageWrapper<S: Storage>(pub S);
 
 impl<S: Storage> DatabaseRef for StorageWrapper<S> {
     type Error = S::Error;
