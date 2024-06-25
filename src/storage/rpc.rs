@@ -8,14 +8,13 @@ use alloy_transport::TransportError;
 use alloy_transport_http::Http;
 use reqwest::Client;
 use revm::{
-    db::PlainAccount,
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{AccountInfo, Bytecode, SpecId},
     DatabaseRef,
 };
 use tokio::runtime::Runtime;
 
-use crate::EvmAccount;
+use crate::{AccountBasic, EvmAccount};
 
 // TODO: Support generic network & transport types.
 // TODO: Put this behind an RPC flag to not pollute the core
@@ -107,13 +106,17 @@ impl DatabaseRef for RpcStorage {
                 return Ok(None);
             }
             let code = Bytecode::new_raw(code);
-            let info = AccountInfo::new(balance, nonce, code.hash_slow(), code);
-            let plain_account = PlainAccount::from(info.clone());
+            let basic = AccountBasic {
+                balance,
+                nonce,
+                code_hash: Some(code.hash_slow()),
+                code: Some(code.into()),
+            };
             self.cache_accounts
                 .lock()
                 .unwrap()
-                .insert(address, plain_account.into());
-            Ok(Some(info))
+                .insert(address, basic.clone().into());
+            Ok(Some(basic.into()))
         })
     }
 

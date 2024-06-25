@@ -85,13 +85,13 @@ impl ERC20Token {
         }
 
         EvmAccount {
-            basic: AccountBasic::new(
-                U256::ZERO,
-                1u64,
-                bytecode.hash_slow(),
-                bytecode.clone().into(),
-            ),
-            storage: store.build().into_iter().collect(),
+            basic: AccountBasic {
+                balance: U256::ZERO,
+                nonce: 1u64,
+                code: Some(bytecode.clone().into()),
+                code_hash: Some(bytecode.hash_slow()),
+            },
+            storage: store.build(),
         }
     }
 

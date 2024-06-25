@@ -1,19 +1,17 @@
-use revm::{
-    db::states::plain_account::PlainStorage,
-    primitives::{
-        alloy_primitives::U160, keccak256, ruint::UintTryFrom, Address, B256, I256, U256,
-    },
+use ahash::AHashMap;
+use revm::primitives::{
+    alloy_primitives::U160, keccak256, ruint::UintTryFrom, Address, B256, I256, U256,
 };
 
 #[derive(Debug, Default)]
 pub struct StorageBuilder {
-    dict: PlainStorage,
+    dict: AHashMap<U256, U256>,
 }
 
 impl StorageBuilder {
     pub fn new() -> Self {
         StorageBuilder {
-            dict: PlainStorage::new(),
+            dict: AHashMap::default(),
         }
     }
 
@@ -49,7 +47,7 @@ impl StorageBuilder {
         *entry = buffer.into();
     }
 
-    pub fn build(self) -> PlainStorage {
+    pub fn build(self) -> AHashMap<U256, U256> {
         self.dict
     }
 }

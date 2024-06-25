@@ -3,7 +3,7 @@ use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{AccountBasic, EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
+use pevm::{EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
 use std::{collections::BTreeMap, num::NonZeroUsize, thread};
 
@@ -15,9 +15,7 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
         address,
         // Filling half full accounts to have enough tokens for tests without worrying about
         // the corner case of balance not going beyond `U256::MAX`.
-        EvmAccount::from(AccountBasic::from_balance(
-            U256::MAX.div_ceil(U256::from(2)),
-        )),
+        EvmAccount::with_balance(U256::MAX.div_ceil(U256::from(2))),
     )
 }
 
