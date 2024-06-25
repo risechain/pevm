@@ -8,7 +8,7 @@ use std::{
 
 use alloy_chains::Chain;
 use alloy_primitives::Address;
-use alloy_rpc_types::Block;
+use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
     db::CacheDB,
@@ -18,7 +18,7 @@ use revm::{
 
 use crate::{
     mv_memory::MvMemory,
-    primitives::{get_block_env, get_block_spec, get_tx_envs},
+    primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
@@ -36,6 +36,8 @@ pub enum PevmError {
     MissingHeaderData,
     /// Transactions lack information for execution.
     MissingTransactionData,
+    /// Invalid input transaction.
+    InvalidTransaction(TransactionParsingError),
     /// EVM execution error.
     // TODO: More concrete types than just an arbitrary string.
     ExecutionError(String),
@@ -62,10 +64,14 @@ pub fn execute<S: Storage + Send + Sync>(
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
-    let Some(tx_envs) = get_tx_envs(&block.transactions) else {
-        return Err(PevmError::MissingTransactionData);
+    let tx_envs = match block.transactions {
+        BlockTransactions::Full(txs) => txs
+            .into_iter()
+            .map(get_tx_env)
+            .collect::<Result<Vec<TxEnv>, TransactionParsingError>>()
+            .map_err(PevmError::InvalidTransaction)?,
+        _ => return Err(PevmError::MissingTransactionData),
     };
-
     // TODO: Continue to fine tune this condition.
     if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
         execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
