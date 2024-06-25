@@ -1,7 +1,7 @@
 // TODO: Support custom chains like OP & RISE
 // Ideally REVM & Alloy would provide all these.
 
-use alloy_rpc_types::{BlockTransactions, Header};
+use alloy_rpc_types::{Header, Transaction};
 use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, SpecId, TransactTo, TxEnv, U256};
 
 /// Get the REVM spec id of an Alloy block.
@@ -58,49 +58,59 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
     })
 }
 
+/// Represents errors that can occur when parsing transactions
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransactionParsingError {
+    MissingGasPrice,
+    MissingMaxFeePerGas,
+    InvalidType(u8),
+}
+
 /// Get the REVM tx envs of an Alloy block.
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
-// TODO: Better error handling & properly test this.
-pub(crate) fn get_tx_envs(transactions: &BlockTransactions) -> Option<Vec<TxEnv>> {
-    let mut tx_envs = Vec::with_capacity(transactions.len());
-    for tx in transactions.as_transactions()? {
-        tx_envs.push(TxEnv {
-            caller: tx.from,
-            gas_limit: tx.gas.try_into().ok()?,
-            gas_price: U256::from(if tx.transaction_type? >= 2 {
-                tx.max_fee_per_gas?
-            } else {
-                tx.gas_price?
-            }),
-            gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
-            transact_to: match tx.to {
-                Some(address) => TransactTo::Call(address),
-                None => TransactTo::Create,
-            },
-            value: tx.value,
-            data: tx.input.clone(),
-            nonce: Some(tx.nonce),
-            chain_id: tx.chain_id,
-            access_list: tx
-                .access_list
-                .clone()
-                .unwrap_or_default()
-                .iter()
-                .map(|access| {
-                    (
-                        access.address,
-                        access
-                            .storage_keys
-                            .iter()
-                            .map(|k| U256::from_be_bytes(**k))
-                            .collect(),
-                    )
-                })
-                .collect(),
-            blob_hashes: tx.blob_versioned_hashes.clone().unwrap_or_default(),
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-        })
-    }
-    Some(tx_envs)
+// TODO: Properly test this.
+pub(crate) fn get_tx_env(tx: &Transaction) -> Result<TxEnv, TransactionParsingError> {
+    Ok(TxEnv {
+        caller: tx.from,
+        gas_limit: tx.gas as u64,
+        gas_price: match tx.transaction_type.unwrap() {
+            0 | 1 => U256::from(
+                tx.gas_price
+                    .ok_or(TransactionParsingError::MissingGasPrice)?,
+            ),
+            2 | 3 => U256::from(
+                tx.max_fee_per_gas
+                    .ok_or(TransactionParsingError::MissingMaxFeePerGas)?,
+            ),
+            unknown_value => return Err(TransactionParsingError::InvalidType(unknown_value)),
+        },
+        gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
+        transact_to: match tx.to {
+            Some(address) => TransactTo::Call(address),
+            None => TransactTo::Create,
+        },
+        value: tx.value,
+        data: tx.input.clone(),
+        nonce: Some(tx.nonce),
+        chain_id: tx.chain_id,
+        access_list: tx
+            .access_list
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|access| {
+                (
+                    access.address,
+                    access
+                        .storage_keys
+                        .iter()
+                        .map(|&k| U256::from_be_bytes(*k))
+                        .collect(),
+                )
+            })
+            .collect(),
+        blob_hashes: tx.blob_versioned_hashes.clone().unwrap_or_default(),
+        max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
+    })
 }
