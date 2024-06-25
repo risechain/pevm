@@ -12,7 +12,7 @@ use ahash::AHashMap;
 use common::test_execute_revm;
 use erc20::generate_cluster;
 use pevm::{EvmAccount, InMemoryStorage};
-use revm::primitives::{Address, BlockEnv, SpecId, TxEnv};
+use revm::primitives::{Address, TxEnv};
 
 #[test]
 fn erc20_independent() {

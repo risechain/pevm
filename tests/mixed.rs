@@ -5,7 +5,7 @@ use alloy_primitives::U160;
 use pevm::{EvmAccount, InMemoryStorage};
 use rand::random;
 use revm::
-    primitives::{env::TxEnv, Address, BlockEnv, SpecId, TransactTo, U256};
+    primitives::{env::TxEnv, Address, TransactTo, U256};
 
 pub mod common;
 pub mod erc20;
