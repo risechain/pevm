@@ -126,10 +126,6 @@ struct TxStatus {
 
 // TODO: Clearer doc. See `Scheduler` in `scheduler.rs` for now.
 type TransactionsStatus = Vec<TxStatus>;
-// We use `Vec` for dependents to simplify runtime update code.
-// We use `HashMap` for dependencies as we're only adding
-// them during preprocessing and removing them during processing.
-// TODO: Intuitively both should share a similar data structure?
 // TODO: Consider using [SmallVec] for these `[DepsList]`
 type TransactionsDependents = Vec<Vec<TxIdx>>;
 type TransactionsDependenciesNum = HashMap<TxIdx, usize, BuildIdentityHasher>;

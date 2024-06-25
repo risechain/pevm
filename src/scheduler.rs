@@ -72,10 +72,10 @@ pub(crate) struct Scheduler {
     // The list of dependent transactions to resume when the
     // key transaction is re-executed.
     transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
-    // A list of optional dependencies flagged during preprocessing.
-    // For instance, for a transaction to depend on two lower others,
-    // one send to the same recipient address, and one is from
-    // the same sender.
+    // An optional number of tx dependencies flagged during preprocessing.
+    // TODO: Turn this into a [Vec] to track the number of dependencies for
+    // each transaction live. Then we can make [add_dependency] take in a
+    // list instead of just the first estimated one.
     transactions_dependencies_num: HashMap<TxIdx, AtomicUsize, BuildIdentityHasher>,
 }
 
@@ -193,8 +193,8 @@ impl Scheduler {
             blocking_dependents.push(tx_idx);
             drop(blocking_dependents);
 
-            if let Some(dep_num) = self.transactions_dependencies_num.get(&tx_idx) {
-                dep_num.fetch_add(1, Ordering::Release);
+            if let Some(deps_num) = self.transactions_dependencies_num.get(&tx_idx) {
+                deps_num.fetch_add(1, Ordering::Release);
             }
 
             return true;
@@ -229,11 +229,10 @@ impl Scheduler {
             let mut dependents = index_mutex!(self.transactions_dependents, tx_version.tx_idx);
             let mut min_dependent_idx = None;
             for tx_idx in dependents.iter() {
-                if let Some(dep_num) = self.transactions_dependencies_num.get(tx_idx) {
-                    let original_dep_num = dep_num.fetch_sub(1, Ordering::Release);
+                if let Some(deps_num) = self.transactions_dependencies_num.get(tx_idx) {
                     // Skip this dependent as it has other pending dependencies.
                     // Let the last one evoke it.
-                    if original_dep_num > 1 {
+                    if deps_num.fetch_sub(1, Ordering::Release) > 1 {
                         continue;
                     }
                 }

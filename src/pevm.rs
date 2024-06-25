@@ -357,12 +357,12 @@ fn preprocess_dependencies(
             // size in this scope.
             unsafe {
                 transactions_status.get_unchecked_mut(tx_idx).status = IncarnationStatus::Aborting;
-                for dependency_idx in dependency_idxs.iter() {
+                transactions_dependencies.insert(tx_idx, dependency_idxs.len());
+                for dependency_idx in dependency_idxs {
                     transactions_dependents
-                        .get_unchecked_mut(*dependency_idx)
+                        .get_unchecked_mut(dependency_idx)
                         .push(tx_idx);
                 }
-                transactions_dependencies.insert(tx_idx, dependency_idxs.len());
             }
         };
 
