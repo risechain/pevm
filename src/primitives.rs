@@ -61,6 +61,7 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
 /// Represents errors that can occur when parsing transactions
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransactionParsingError {
+    OverflowedGasLimit,
     MissingGasPrice,
     MissingMaxFeePerGas,
     InvalidType(u8),
@@ -70,10 +71,13 @@ pub enum TransactionParsingError {
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
 // TODO: Properly test this.
-pub(crate) fn get_tx_env(tx: &Transaction) -> Result<TxEnv, TransactionParsingError> {
+pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingError> {
     Ok(TxEnv {
         caller: tx.from,
-        gas_limit: tx.gas as u64,
+        gas_limit: tx
+            .gas
+            .try_into()
+            .map_err(|_| TransactionParsingError::OverflowedGasLimit)?,
         gas_price: match tx.transaction_type.unwrap() {
             0 | 1 => U256::from(
                 tx.gas_price
@@ -83,7 +87,7 @@ pub(crate) fn get_tx_env(tx: &Transaction) -> Result<TxEnv, TransactionParsingEr
                 tx.max_fee_per_gas
                     .ok_or(TransactionParsingError::MissingMaxFeePerGas)?,
             ),
-            unknown_value => return Err(TransactionParsingError::InvalidType(unknown_value)),
+            unknown => return Err(TransactionParsingError::InvalidType(unknown)),
         },
         gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
         transact_to: match tx.to {
@@ -91,12 +95,11 @@ pub(crate) fn get_tx_env(tx: &Transaction) -> Result<TxEnv, TransactionParsingEr
             None => TransactTo::Create,
         },
         value: tx.value,
-        data: tx.input.clone(),
+        data: tx.input,
         nonce: Some(tx.nonce),
         chain_id: tx.chain_id,
         access_list: tx
             .access_list
-            .clone()
             .unwrap_or_default()
             .iter()
             .map(|access| {
@@ -110,7 +113,7 @@ pub(crate) fn get_tx_env(tx: &Transaction) -> Result<TxEnv, TransactionParsingEr
                 )
             })
             .collect(),
-        blob_hashes: tx.blob_versioned_hashes.clone().unwrap_or_default(),
+        blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
     })
 }

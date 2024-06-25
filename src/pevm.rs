@@ -8,7 +8,7 @@ use std::{
 
 use alloy_chains::Chain;
 use alloy_primitives::Address;
-use alloy_rpc_types::Block;
+use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
     db::CacheDB,
@@ -64,15 +64,14 @@ pub fn execute<S: Storage + Send + Sync>(
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
-    let tx_envs = block
-        .transactions
-        .as_transactions()
-        .ok_or(PevmError::MissingTransactionData)?
-        .iter()
-        .map(get_tx_env)
-        .collect::<Result<Vec<TxEnv>, TransactionParsingError>>()
-        .map_err(PevmError::InvalidTransaction)?;
-
+    let tx_envs = match block.transactions {
+        BlockTransactions::Full(txs) => txs
+            .into_iter()
+            .map(get_tx_env)
+            .collect::<Result<Vec<TxEnv>, TransactionParsingError>>()
+            .map_err(PevmError::InvalidTransaction)?,
+        _ => return Err(PevmError::MissingTransactionData),
+    };
     // TODO: Continue to fine tune this condition.
     if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
         execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
