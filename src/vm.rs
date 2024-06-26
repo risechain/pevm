@@ -219,11 +219,12 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             return Ok(None);
         }
 
-        if &address != self.from && Some(&address) != self.to {
+        let location_hash = self.get_address_hash(&address);
+
+        if location_hash != self.from_hash && Some(location_hash) != self.to_hash {
             self.only_read_from_and_to = false;
         }
 
-        let location_hash = self.get_address_hash(&address);
         let read_origins = self.read_set.entry(location_hash).or_default();
         let has_prev_origins = !read_origins.is_empty();
         // We accumulate new origins to either:
