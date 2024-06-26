@@ -1,5 +1,3 @@
-use std::cmp::min;
-
 use ahash::AHashMap;
 use alloy_chains::Chain;
 use alloy_rpc_types::Receipt;
@@ -7,9 +5,7 @@ use defer_drop::DeferDrop;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
-        ResultAndState,
-        SpecId::{self, LONDON},
-        TransactTo, TxEnv, B256, U256,
+        ResultAndState, SpecId, TransactTo, TxEnv, B256, U256,
     },
     Context, Database, Evm, EvmContext, Handler,
 };
@@ -27,6 +23,10 @@ pub type ExecutionError = EVMError<ReadError>;
 /// If the value is [None], it indicates that the account is marked for removal.
 /// If the value is [Some(new_state)], it indicates that the account has become [new_state].
 type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
+
+pub(crate) enum RewardPolicy {
+    Ethereum,
+}
 
 /// Execution result of a transaction
 #[derive(Debug, Clone, PartialEq)]
@@ -359,6 +359,7 @@ pub(crate) struct Vm<'a, S: Storage> {
     spec_id: SpecId,
     block_env: BlockEnv,
     beneficiary_location_hash: MemoryLocationHash,
+    reward_policy: &'a RewardPolicy,
     // TODO: Make REVM [Evm] or at least [Handle] thread safe to consume
     // the [TxEnv] into them here, to avoid heavy re-initialization when
     // re-executing a transaction.
@@ -366,6 +367,7 @@ pub(crate) struct Vm<'a, S: Storage> {
 }
 
 impl<'a, S: Storage> Vm<'a, S> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         hasher: &'a ahash::RandomState,
         storage: &'a S,
@@ -373,6 +375,7 @@ impl<'a, S: Storage> Vm<'a, S> {
         chain: Chain,
         spec_id: SpecId,
         block_env: BlockEnv,
+        reward_policy: &'a RewardPolicy,
         txs: Vec<TxEnv>,
     ) -> Self {
         Self {
@@ -383,6 +386,7 @@ impl<'a, S: Storage> Vm<'a, S> {
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             block_env,
+            reward_policy,
             txs: DeferDrop::new(txs),
         }
     }
@@ -392,6 +396,39 @@ impl<'a, S: Storage> Vm<'a, S> {
             self.beneficiary_location_hash
         } else {
             self.hasher.hash_one(MemoryLocation::Basic(*address))
+        }
+    }
+
+    fn apply_rewards(&self, write_set: &mut WriteSet, tx: &TxEnv, gas_used: U256) {
+        match self.reward_policy {
+            RewardPolicy::Ethereum => {
+                let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
+                    std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
+                } else {
+                    tx.gas_price
+                };
+                if self.spec_id.is_enabled_in(SpecId::LONDON) {
+                    gas_price = gas_price.saturating_sub(self.block_env.basefee);
+                }
+
+                let gas_payment = gas_price * gas_used;
+
+                if let Some((_, value)) = write_set
+                    .iter_mut()
+                    .find(|entry| entry.0 == self.beneficiary_location_hash)
+                {
+                    match value {
+                        MemoryValue::Basic(account_info) => account_info.balance += gas_payment,
+                        MemoryValue::LazyBalanceAddition(addition) => *addition += gas_payment,
+                        MemoryValue::Storage(_) => unreachable!(),
+                    }
+                } else {
+                    write_set.push((
+                        self.beneficiary_location_hash,
+                        MemoryValue::LazyBalanceAddition(gas_payment),
+                    ));
+                }
+            }
         }
     }
 
@@ -425,16 +462,6 @@ impl<'a, S: Storage> Vm<'a, S> {
         // TODO: The perfect condition is if the recipient is contract.
         let is_maybe_lazy = tx.data.is_empty() && Some(from) != to;
 
-        // Gas price
-        let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
-            min(tx.gas_price, priority_fee + self.block_env.basefee)
-        } else {
-            tx.gas_price
-        };
-        if self.spec_id.is_enabled_in(LONDON) {
-            gas_price = gas_price.saturating_sub(self.block_env.basefee);
-        }
-
         // Execute
         let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash, is_maybe_lazy);
         match execute_tx(
@@ -446,9 +473,6 @@ impl<'a, S: Storage> Vm<'a, S> {
             false,
         ) {
             Ok(result_and_state) => {
-                let mut gas_payment =
-                    Some(gas_price * U256::from(result_and_state.result.gas_used()));
-
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
                 // TODO: Allocate up to [result_and_state.state.len()] anyway?
@@ -479,15 +503,9 @@ impl<'a, S: Storage> Vm<'a, S> {
                                 // TODO: More granularity here to ensure we only notify new
                                 // memory writes, for instance, only an account's balance instead
                                 // of the whole account.
-                                let mut account_info = account.info.clone();
-
-                                if address == &self.block_env.coinbase {
-                                    account_info.balance += gas_payment.take().unwrap();
-                                }
-
                                 write_set.push((
                                     account_location_hash,
-                                    MemoryValue::Basic(Box::new(account_info)),
+                                    MemoryValue::Basic(Box::new(account.info.clone())),
                                 ));
                             }
                         }
@@ -503,13 +521,11 @@ impl<'a, S: Storage> Vm<'a, S> {
                     }
                 }
 
-                // A non-existent explicit write hasn't taken the option.
-                if let Some(gas_payment) = gas_payment {
-                    write_set.push((
-                        self.beneficiary_location_hash,
-                        MemoryValue::LazyBalanceAddition(gas_payment),
-                    ));
-                }
+                self.apply_rewards(
+                    &mut write_set,
+                    tx,
+                    U256::from(result_and_state.result.gas_used()),
+                );
 
                 let next_validation_idx =
                     // Don't need to validate the first transaction
