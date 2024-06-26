@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy_chains::Chain;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
@@ -348,8 +348,11 @@ fn preprocess_dependencies(
     let mut transactions_dependencies =
         TransactionsDependenciesNum::with_hasher(BuildIdentityHasher::default());
 
-    // Marking transactions from the same sender as dependencies to avoid fatal nonce errors.
+    // Marking transactions from a sender as dependent of the closest transaction that
+    // shares the same sender and the closest that sends to this sender to avoid fatal
+    // nonce & balance too low errors.
     let mut last_tx_idx_by_sender = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
+    let mut last_tx_idx_by_recipient = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
 
     for (tx_idx, tx) in txs.iter().enumerate() {
         let mut register_dependency = |dependency_idxs: Vec<usize>| {
@@ -377,9 +380,20 @@ fn preprocess_dependencies(
                     .unwrap_or(0);
                 register_dependency((start_idx..tx_idx).collect());
             }
-            // Otherwise, build dependencies across the same sender
-            else if let Some(prev_idx) = last_tx_idx_by_sender.get(&tx.caller) {
-                register_dependency(vec![*prev_idx]);
+            // Otherwise, build dependencies for the sender to avoid fatal errors
+            else {
+                let mut dependencies = Vec::new();
+                if let Some(prev_idx) = last_tx_idx_by_sender.get(&tx.caller) {
+                    dependencies.push(*prev_idx);
+                }
+                if let Some(prev_idx) = last_tx_idx_by_recipient.get(&tx.caller) {
+                    if !dependencies.contains(prev_idx) {
+                        dependencies.push(*prev_idx);
+                    }
+                }
+                if !dependencies.is_empty() {
+                    register_dependency(dependencies);
+                }
             }
         }
 
@@ -389,6 +403,11 @@ fn preprocess_dependencies(
         }
 
         last_tx_idx_by_sender.insert(tx.caller, tx_idx);
+        if tx.value > U256::ZERO {
+            if let TransactTo::Call(to_address) = tx.transact_to {
+                last_tx_idx_by_recipient.insert(to_address, tx_idx);
+            }
+        }
     }
 
     let min_concurrency_level = NonZeroUsize::new(2).unwrap();

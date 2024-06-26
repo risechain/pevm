@@ -6,7 +6,8 @@ use alloy_rpc_types::Receipt;
 use defer_drop::DeferDrop;
 use revm::{
     primitives::{
-        AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, ResultAndState,
+        AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
+        ResultAndState,
         SpecId::{self, LONDON},
         TransactTo, TxEnv, B256, U256,
     },
@@ -256,7 +257,13 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                     info.balance += balance_addition;
                     Some(info)
                 }
-                Ok(None) => None,
+                Ok(None) => {
+                    if balance_addition > U256::ZERO {
+                        Some(AccountInfo::from_balance(balance_addition))
+                    } else {
+                        None
+                    }
+                }
                 Err(err) => return Err(ReadError::StorageError(format!("{err:?}"))),
             };
         }
@@ -511,9 +518,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                     }
                     // Validate from this transaction if it reads something outside of its
                     // sender and to infos.
-                    // Or if this one is lazy updated. We can remove the [is_maybe_lazy]
-                    // check once we have lazy updates for raw transfer senders.
-                    else if !db.only_read_from_and_to || is_maybe_lazy {
+                    else if !db.only_read_from_and_to {
                         Some(tx_idx)
                     }
                     // Validate from the next transaction if doesn't read externally but
@@ -547,7 +552,26 @@ impl<'a, S: Storage> Vm<'a, S> {
             Err(EVMError::Database(ReadError::BlockingIndex(blocking_tx_idx))) => {
                 VmExecutionResult::ReadError { blocking_tx_idx }
             }
-            Err(err) => VmExecutionResult::ExecutionError(err),
+            Err(err) => {
+                // Optimistically retry in case some previous internal transactions send
+                // more fund to the sender but hasn't been executed yet.
+                // TODO: Let users define this behaviour through a mode enum or something.
+                // Since this retry is safe for syncing canonical blocks but can deadlock
+                // on new or faulty blocks. We can skip the transaction for new blocks and
+                // error out after a number of tries for the latter.
+                if tx_idx > 0
+                    && matches!(
+                        err,
+                        EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee { .. })
+                    )
+                {
+                    VmExecutionResult::ReadError {
+                        blocking_tx_idx: tx_idx - 1,
+                    }
+                } else {
+                    VmExecutionResult::ExecutionError(err)
+                }
+            }
         }
     }
 }
