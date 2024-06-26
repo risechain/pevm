@@ -400,7 +400,7 @@ impl<'a, S: Storage> Vm<'a, S> {
     }
 
     fn apply_rewards(&self, write_set: &mut WriteSet, tx: &TxEnv, gas_used: U256) {
-        match self.reward_policy {
+        let rewards: Vec<(MemoryLocationHash, U256)> = match self.reward_policy {
             RewardPolicy::Ethereum => {
                 let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
                     std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
@@ -410,24 +410,19 @@ impl<'a, S: Storage> Vm<'a, S> {
                 if self.spec_id.is_enabled_in(SpecId::LONDON) {
                     gas_price = gas_price.saturating_sub(self.block_env.basefee);
                 }
+                vec![(self.beneficiary_location_hash, gas_price * gas_used)]
+            }
+        };
 
-                let gas_payment = gas_price * gas_used;
-
-                if let Some((_, value)) = write_set
-                    .iter_mut()
-                    .find(|entry| entry.0 == self.beneficiary_location_hash)
-                {
-                    match value {
-                        MemoryValue::Basic(account_info) => account_info.balance += gas_payment,
-                        MemoryValue::LazyBalanceAddition(addition) => *addition += gas_payment,
-                        MemoryValue::Storage(_) => unreachable!(),
-                    }
-                } else {
-                    write_set.push((
-                        self.beneficiary_location_hash,
-                        MemoryValue::LazyBalanceAddition(gas_payment),
-                    ));
+        for (recipient, amount) in rewards {
+            if let Some((_, value)) = write_set.iter_mut().find(|entry| entry.0 == recipient) {
+                match value {
+                    MemoryValue::Basic(account_info) => account_info.balance += amount,
+                    MemoryValue::LazyBalanceAddition(addition) => *addition += amount,
+                    MemoryValue::Storage(_) => unreachable!(),
                 }
+            } else {
+                write_set.push((recipient, MemoryValue::LazyBalanceAddition(amount)));
             }
         }
     }
