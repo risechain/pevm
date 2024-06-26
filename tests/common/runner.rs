@@ -132,9 +132,8 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
             tx_results
                 .iter()
                 .last()
-                .unwrap()
-                .receipt
-                .cumulative_gas_used
+                .map(|result| result.receipt.cumulative_gas_used)
+                .unwrap_or_default()
         );
     }
 }
