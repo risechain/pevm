@@ -21,7 +21,7 @@ use crate::{
     primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
-    vm::{execute_tx, ExecutionError, PevmTxExecutionResult, RewardPolicy, Vm, VmExecutionResult},
+    vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
     AccountBasic, BuildAddressHasher, BuildIdentityHasher, EvmAccount, IncarnationStatus,
     MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependenciesNum,
     TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion,
@@ -115,7 +115,6 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     let block_size = txs.len();
     let hasher = ahash::RandomState::new();
     let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(beneficiary_address));
-    let reward_policy = RewardPolicy::Ethereum;
     // TODO: Estimate more locations based on sender, to, etc.
     let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
     estimated_locations.insert(
@@ -142,14 +141,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
     let mv_memory = DeferDrop::new(MvMemory::new(block_size, estimated_locations));
     let vm = Vm::new(
-        &hasher,
-        &storage,
-        &mv_memory,
-        chain,
-        spec_id,
-        block_env,
-        &reward_policy,
-        txs,
+        &hasher, &storage, &mv_memory, chain, spec_id, block_env, txs,
     );
 
     let mut execution_error = OnceLock::new();

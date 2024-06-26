@@ -367,7 +367,6 @@ pub(crate) struct Vm<'a, S: Storage> {
 }
 
 impl<'a, S: Storage> Vm<'a, S> {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         hasher: &'a ahash::RandomState,
         storage: &'a S,
@@ -375,7 +374,6 @@ impl<'a, S: Storage> Vm<'a, S> {
         chain: Chain,
         spec_id: SpecId,
         block_env: BlockEnv,
-        reward_policy: &'a RewardPolicy,
         txs: Vec<TxEnv>,
     ) -> Self {
         Self {
@@ -386,7 +384,7 @@ impl<'a, S: Storage> Vm<'a, S> {
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             block_env,
-            reward_policy,
+            reward_policy: &RewardPolicy::Ethereum, // derived from chain
             txs: DeferDrop::new(txs),
         }
     }
@@ -396,34 +394,6 @@ impl<'a, S: Storage> Vm<'a, S> {
             self.beneficiary_location_hash
         } else {
             self.hasher.hash_one(MemoryLocation::Basic(*address))
-        }
-    }
-
-    fn apply_rewards(&self, write_set: &mut WriteSet, tx: &TxEnv, gas_used: U256) {
-        let rewards: Vec<(MemoryLocationHash, U256)> = match self.reward_policy {
-            RewardPolicy::Ethereum => {
-                let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
-                    std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
-                } else {
-                    tx.gas_price
-                };
-                if self.spec_id.is_enabled_in(SpecId::LONDON) {
-                    gas_price = gas_price.saturating_sub(self.block_env.basefee);
-                }
-                vec![(self.beneficiary_location_hash, gas_price * gas_used)]
-            }
-        };
-
-        for (recipient, amount) in rewards {
-            if let Some((_, value)) = write_set.iter_mut().find(|entry| entry.0 == recipient) {
-                match value {
-                    MemoryValue::Basic(account_info) => account_info.balance += amount,
-                    MemoryValue::LazyBalanceAddition(addition) => *addition += amount,
-                    MemoryValue::Storage(_) => unreachable!(),
-                }
-            } else {
-                write_set.push((recipient, MemoryValue::LazyBalanceAddition(amount)));
-            }
         }
     }
 
@@ -582,6 +552,35 @@ impl<'a, S: Storage> Vm<'a, S> {
                 } else {
                     VmExecutionResult::ExecutionError(err)
                 }
+            }
+        }
+    }
+
+    // Apply rewards (balance increments) based on self.reward_policy
+    fn apply_rewards(&self, write_set: &mut WriteSet, tx: &TxEnv, gas_used: U256) {
+        let rewards: Vec<(MemoryLocationHash, U256)> = match self.reward_policy {
+            RewardPolicy::Ethereum => {
+                let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
+                    std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
+                } else {
+                    tx.gas_price
+                };
+                if self.spec_id.is_enabled_in(SpecId::LONDON) {
+                    gas_price = gas_price.saturating_sub(self.block_env.basefee);
+                }
+                vec![(self.beneficiary_location_hash, gas_price * gas_used)]
+            }
+        };
+
+        for (recipient, amount) in rewards {
+            if let Some((_, value)) = write_set.iter_mut().find(|entry| entry.0 == recipient) {
+                match value {
+                    MemoryValue::Basic(account_info) => account_info.balance += amount,
+                    MemoryValue::LazyBalanceAddition(addition) => *addition += amount,
+                    MemoryValue::Storage(_) => unreachable!(),
+                }
+            } else {
+                write_set.push((recipient, MemoryValue::LazyBalanceAddition(amount)));
             }
         }
     }
