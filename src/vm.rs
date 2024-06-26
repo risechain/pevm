@@ -24,7 +24,10 @@ pub type ExecutionError = EVMError<ReadError>;
 /// If the value is [Some(new_state)], it indicates that the account has become [new_state].
 type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
 
-pub(crate) enum RewardPolicy {
+// Different chains may have varying reward policies.
+// This enum specifies which policy to follow, with optional
+// pre-calculated data to assist in reward calculations.
+enum RewardPolicy {
     Ethereum,
 }
 
@@ -359,7 +362,7 @@ pub(crate) struct Vm<'a, S: Storage> {
     spec_id: SpecId,
     block_env: BlockEnv,
     beneficiary_location_hash: MemoryLocationHash,
-    reward_policy: &'a RewardPolicy,
+    reward_policy: RewardPolicy,
     // TODO: Make REVM [Evm] or at least [Handle] thread safe to consume
     // the [TxEnv] into them here, to avoid heavy re-initialization when
     // re-executing a transaction.
@@ -384,7 +387,7 @@ impl<'a, S: Storage> Vm<'a, S> {
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             block_env,
-            reward_policy: &RewardPolicy::Ethereum, // derived from chain
+            reward_policy: RewardPolicy::Ethereum, // TODO: Derive from [chain]
             txs: DeferDrop::new(txs),
         }
     }
@@ -556,7 +559,7 @@ impl<'a, S: Storage> Vm<'a, S> {
         }
     }
 
-    // Apply rewards (balance increments) based on self.reward_policy
+    // Apply rewards (balance increments) to beneficiary accounts, etc.
     fn apply_rewards(&self, write_set: &mut WriteSet, tx: &TxEnv, gas_used: U256) {
         let rewards: Vec<(MemoryLocationHash, U256)> = match self.reward_policy {
             RewardPolicy::Ethereum => {
@@ -573,11 +576,14 @@ impl<'a, S: Storage> Vm<'a, S> {
         };
 
         for (recipient, amount) in rewards {
-            if let Some((_, value)) = write_set.iter_mut().find(|entry| entry.0 == recipient) {
+            if let Some((_, value)) = write_set
+                .iter_mut()
+                .find(|(location, _)| location == &recipient)
+            {
                 match value {
-                    MemoryValue::Basic(account_info) => account_info.balance += amount,
+                    MemoryValue::Basic(info) => info.balance += amount,
                     MemoryValue::LazyBalanceAddition(addition) => *addition += amount,
-                    MemoryValue::Storage(_) => unreachable!(),
+                    MemoryValue::Storage(_) => unreachable!(), // TODO: Better error handling
                 }
             } else {
                 write_set.push((recipient, MemoryValue::LazyBalanceAddition(amount)));
