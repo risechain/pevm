@@ -440,6 +440,7 @@ fn try_execute<S: Storage>(
 ) -> Option<Task> {
     loop {
         return match vm.execute(tx_version.tx_idx) {
+            VmExecutionResult::Retry => continue,
             VmExecutionResult::ReadError { blocking_tx_idx } => {
                 if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx) {
                     // Retry the execution immediately if the blocking transaction was

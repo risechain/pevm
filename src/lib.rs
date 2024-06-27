@@ -175,6 +175,10 @@ pub enum ReadError {
     NotFound,
     /// This memory location has been written by a lower transaction.
     BlockingIndex(TxIdx),
+    /// There has been an inconsistent read like reading the same
+    /// location from storage in the first call but from [VmMemory] in
+    /// the next.
+    InconsistentRead,
     /// The stored memory value type doesn't match its location type.
     /// TODO: Handle this at the type level?
     InvalidMemoryLocationType,
