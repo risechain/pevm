@@ -352,6 +352,7 @@ fn preprocess_dependencies(
     // nonce & balance too low errors.
     let mut last_tx_idx_by_sender = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
     let mut last_tx_idx_by_recipient = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
+    let mut have_dependencies_tx_num = 0;
 
     for (tx_idx, tx) in txs.iter().enumerate() {
         let mut register_dependency = |dependency_idxs: Vec<usize>| {
@@ -360,6 +361,7 @@ fn preprocess_dependencies(
             unsafe {
                 transactions_status.get_unchecked_mut(tx_idx).status = IncarnationStatus::Aborting;
                 transactions_dependencies_num.insert(tx_idx, dependency_idxs.len());
+                have_dependencies_tx_num += 1;
                 for dependency_idx in dependency_idxs {
                     transactions_dependents
                         .get_unchecked_mut(dependency_idx)
@@ -397,7 +399,7 @@ fn preprocess_dependencies(
         }
 
         // TODO: Continue to fine tune this ratio.
-        if transactions_dependencies_num.len() as f64 / block_size as f64 > 0.85 {
+        if have_dependencies_tx_num as f64 / block_size as f64 > 0.85 {
             return None;
         }
 
@@ -414,7 +416,7 @@ fn preprocess_dependencies(
         // Diving the number of ready transactions by 2 means a thread must
         // complete ~4 tasks to justify its overheads.
         // TODO: Further fine tune given the dependency data above.
-        NonZeroUsize::new((block_size - transactions_dependencies_num.len()) / 2)
+        NonZeroUsize::new((block_size - have_dependencies_tx_num) / 2)
             .unwrap_or(min_concurrency_level)
             .max(min_concurrency_level);
 
