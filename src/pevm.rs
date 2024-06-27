@@ -260,7 +260,7 @@ pub fn execute_revm_sequential<S: Storage>(
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
 ) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
-    let mut db = CacheDB::new(StorageWrapper(storage));
+    let mut db = CacheDB::new(StorageWrapper(&storage));
     let mut results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
     for tx in txs {

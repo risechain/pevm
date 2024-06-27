@@ -190,9 +190,9 @@ where
 /// A Storage wrapper that implements REVM's [DatabaseRef], mainly used to
 /// provide data for REVM's [CachedDB] for sequential fallback or via RPC.
 #[derive(Debug)]
-pub struct StorageWrapper<S: Storage>(pub S);
+pub struct StorageWrapper<'a, S: Storage>(pub &'a S);
 
-impl<S: Storage> DatabaseRef for StorageWrapper<S> {
+impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
     type Error = S::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
