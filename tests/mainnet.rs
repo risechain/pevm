@@ -50,12 +50,9 @@ fn mainnet_blocks_from_rpc() {
             .unwrap()
             .unwrap();
         let spec_id = pevm::get_block_spec(&block.header).unwrap();
-        let rpc_storage = StorageWrapper(RpcStorage::new(
-            provider,
-            spec_id,
-            BlockId::number(block_number - 1),
-        ));
-        let db = CacheDB::new(&rpc_storage);
+        let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
+        let wrapped_storage = StorageWrapper(&rpc_storage);
+        let db = CacheDB::new(&wrapped_storage);
         common::test_execute_alloy(db.clone(), Chain::mainnet(), block.clone(), true);
 
         // Snapshot blocks (for benchmark)
@@ -70,13 +67,13 @@ fn mainnet_blocks_from_rpc() {
             // TODO: Snapshot with consistent ordering for ease of diffing.
             // Currently [EvmStorage]'s storage ordering isn't consistent.
             let accounts: BTreeMap<Address, EvmAccount> =
-                rpc_storage.0.get_cache_accounts().into_iter().collect();
+                rpc_storage.get_cache_accounts().into_iter().collect();
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
             serde_json::to_writer(file_state, &accounts).unwrap();
 
             // We convert to [BTreeMap] for consistent ordering & diffs between snapshots
             let block_hashes: BTreeMap<U256, B256> =
-                rpc_storage.0.get_cache_block_hashes().into_iter().collect();
+                rpc_storage.get_cache_block_hashes().into_iter().collect();
             if !block_hashes.is_empty() {
                 let file = File::create(format!("{dir}/block_hashes.json")).unwrap();
                 serde_json::to_writer(file, &block_hashes).unwrap();
