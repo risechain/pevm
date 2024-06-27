@@ -71,6 +71,7 @@ impl PevmTxExecutionResult {
 }
 
 pub(crate) enum VmExecutionResult {
+    Retry,
     ReadError {
         blocking_tx_idx: TxIdx,
     },
@@ -184,10 +185,11 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 
         let location_hash = self.get_address_hash(&address);
         let read_origins = self.read_set.locations.entry(location_hash).or_default();
-        // For some reasons REVM may call to the same location several time!
-        // We can return caches here but early benchmarks show it's not worth
-        // it. Clearing the origins for now.
-        read_origins.clear();
+        let has_prev_origins = !read_origins.is_empty();
+        // We accumulate new origins to either:
+        // - match with the previous origins to check consistency
+        // - register origins on the first read
+        let mut new_origins = Vec::new();
 
         let mut final_account = None;
         let mut balance_addition = U256::ZERO;
@@ -220,10 +222,23 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                             if need_consecutive_idxs && closest_idx != &(current_idx - 1) {
                                 return reschedule;
                             }
-                            read_origins.push(ReadOrigin::MvMemory(TxVersion {
+                            // About to push a new origin
+                            // Inconsistent: new origin will be longer than the previous!
+                            if has_prev_origins && read_origins.len() == new_origins.len() {
+                                return Err(ReadError::InconsistentRead);
+                            }
+                            let origin = ReadOrigin::MvMemory(TxVersion {
                                 tx_idx: *closest_idx,
                                 tx_incarnation: *tx_incarnation,
-                            }));
+                            });
+                            // Inconsistent: new origin is different from the previous!
+                            if has_prev_origins
+                                && unsafe { read_origins.get_unchecked(new_origins.len()) }
+                                    != &origin
+                            {
+                                return Err(ReadError::InconsistentRead);
+                            }
+                            new_origins.push(origin);
                             match value {
                                 MemoryValue::Basic(account) => {
                                     let mut info = *account.clone();
@@ -253,7 +268,17 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 
         // Fall back to storage
         if final_account.is_none() {
-            read_origins.push(ReadOrigin::Storage);
+            // Populate [Storage] on the first read
+            if !has_prev_origins {
+                new_origins.push(ReadOrigin::Storage);
+            }
+            // Inconsistent: previous origin is longer or didn't read
+            // from storage for the last origin.
+            else if read_origins.len() != new_origins.len() + 1
+                || read_origins.last() != Some(&ReadOrigin::Storage)
+            {
+                return Err(ReadError::InconsistentRead);
+            }
             final_account = match self.vm.storage.basic(&address) {
                 Ok(Some(account)) => {
                     let mut info = AccountInfo::from(account);
@@ -269,6 +294,12 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                 }
                 Err(err) => return Err(ReadError::StorageError(format!("{err:?}"))),
             };
+        }
+
+        // Populate read origins on the first read.
+        // Otherwise [read_origins] matches [new_origins] already.
+        if !has_prev_origins {
+            *read_origins = new_origins;
         }
 
         // Register read accounts to check if they have changed (been written to)
@@ -310,10 +341,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             .hash_one(MemoryLocation::Storage(address, index));
 
         let read_origins = self.read_set.locations.entry(location_hash).or_default();
-        // For some reasons REVM may call to the same location several time!
-        // We can return caches here but early benchmarks show it's not worth
-        // it. Clearing the origins for now.
-        read_origins.clear();
+        let prev_origin = read_origins.last();
 
         // Try reading from multi-verion data
         if self.tx_idx > &0 {
@@ -323,10 +351,17 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                 {
                     match entry {
                         MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
-                            read_origins.push(ReadOrigin::MvMemory(TxVersion {
+                            let origin = ReadOrigin::MvMemory(TxVersion {
                                 tx_idx: *closest_idx,
                                 tx_incarnation: *tx_incarnation,
-                            }));
+                            });
+                            if let Some(prev_origin) = prev_origin {
+                                if prev_origin != &origin {
+                                    return Err(ReadError::InconsistentRead);
+                                }
+                            } else {
+                                read_origins.push(origin);
+                            }
                             return Ok(*value);
                         }
                         MemoryEntry::Estimate => {
@@ -339,7 +374,13 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         }
 
         // Fall back to storage
-        read_origins.push(ReadOrigin::Storage);
+        if let Some(prev_origin) = prev_origin {
+            if prev_origin != &ReadOrigin::Storage {
+                return Err(ReadError::InconsistentRead);
+            }
+        } else {
+            read_origins.push(ReadOrigin::Storage);
+        }
         self.vm
             .storage
             .storage(&address, &index)
@@ -533,6 +574,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                     next_validation_idx,
                 }
             }
+            Err(EVMError::Database(ReadError::InconsistentRead)) => VmExecutionResult::Retry,
             Err(EVMError::Database(ReadError::BlockingIndex(blocking_tx_idx))) => {
                 VmExecutionResult::ReadError { blocking_tx_idx }
             }
