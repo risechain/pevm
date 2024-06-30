@@ -235,10 +235,11 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             // There is an explicit write -- only overwrite the account info in case there
             // are storage changes.
             if let Some(account) = beneficiary_result {
-                // Only balance can differ for now.
+                // TODO: Can the code change mid-block?
                 // TODO: Make the execution results tighter so that explicit writes don't
                 // need post-processing.
                 account.basic.balance = beneficiary_account.balance;
+                account.basic.nonce = beneficiary_account.nonce;
             }
             // Implicit write -- can make storage update empty.
             else {
