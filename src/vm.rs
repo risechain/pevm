@@ -165,12 +165,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         // We return a mock for a non-contract recipient to avoid unncessarily
         // evaluating its balance here. Also skip transactions with the same from
         // & to until we have lazy updates for the sender nonce & balance.
-        if self.is_maybe_lazy
-            && Some(&address) == self.to
-            // TODO: Live check (i.e., from [MvMemory] not [Storage]) for a
-            // contract deployed then used in the same block with non-data!!
-            && !self.vm.storage.is_contract(&address).unwrap()
-        {
+        if self.is_maybe_lazy && Some(&address) == self.to {
             return Ok(Some(AccountInfo {
                 // We need this hack to not flag this an empty account for
                 // destruction. TODO: A cleaner solution here.
@@ -468,8 +463,10 @@ impl<'a, S: Storage> Vm<'a, S> {
             }
             TransactTo::Create => (true, None, None),
         };
-        // TODO: The perfect condition is if the recipient is contract.
-        let is_maybe_lazy = tx.data.is_empty() && Some(from) != to;
+        // TODO: Live check is-contract (i.e., from [MvMemory] not [Storage]) for
+        // contracts deployed then used in the same block with non-data!!
+        let is_maybe_lazy =
+            Some(from) != to && to.is_some_and(|to| !self.storage.is_contract(to).unwrap());
 
         // Execute
         let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash, is_maybe_lazy);

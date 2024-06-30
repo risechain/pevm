@@ -124,12 +124,11 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     let lazy_to_addresses: HashSet<Address, BuildAddressHasher> = txs
         .iter()
         .filter_map(|tx| {
-            // TODO: Unifiy this condition with [Vm::execute]
-            if tx.data.is_empty() {
-                if let TransactTo::Call(to_address) = tx.transact_to {
-                    if to_address != tx.caller {
-                        return Some(to_address);
-                    }
+            if let TransactTo::Call(to_address) = tx.transact_to {
+                // TODO: Unifiy this condition with [Vm::execute]
+                // TODO: Better error handling
+                if to_address != tx.caller && !storage.is_contract(&to_address).unwrap() {
+                    return Some(to_address);
                 }
             }
             None
