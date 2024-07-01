@@ -239,7 +239,8 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                     account.basic.balance = current_account.balance;
                     account.basic.nonce = current_account.nonce;
                 } else {
-                    // Implicit write: e.g. gas payments to the beneficiary account, which doesn't have explicit writes in [result.state]
+                    // Implicit write: e.g. gas payments to the beneficiary account,
+                    // which doesn't have explicit writes in [tx_result.state]
                     *account = Some(EvmAccount {
                         basic: current_account.clone(),
                         storage: AHashMap::default(),
