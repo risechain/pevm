@@ -1,11 +1,13 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Debug,
+    iter::once,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
     thread,
 };
 
+use ahash::AHashMap;
 use alloy_chains::Chain;
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, BlockTransactions};
@@ -191,39 +193,59 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
     let mut fully_evaluated_results = Vec::with_capacity(block_size);
     let mut cumulative_gas_used: u128 = 0;
-    for mutex in execution_results.into_iter() {
+    for mutex in execution_results {
         let mut execution_result = mutex.into_inner().unwrap().unwrap();
         cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
         execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
         fully_evaluated_results.push(execution_result);
     }
 
-    canonize_account(
-        &mut fully_evaluated_results,
-        beneficiary_address,
-        match storage.basic(&beneficiary_address) {
-            Ok(Some(account)) => account,
-            _ => AccountBasic::default(),
-        },
-        mv_memory
-            .consume_location(&beneficiary_location_hash)
-            .unwrap(),
-    );
+    // We fully evaluate (the balance and nonce of) the beneficiary account
+    // and raw transfer recipients that may have been atomically updated.
+    for address in lazy_to_addresses
+        .into_iter()
+        .chain(once(beneficiary_address))
+    {
+        let location_hash = hasher.hash_one(MemoryLocation::Basic(address));
+        if let Some(write_history) = mv_memory.consume_location(&location_hash) {
+            // TODO: We don't need to read from storage if the first entry is a fully evaluated account.
+            let mut current_account = match storage.basic(&address) {
+                Ok(Some(account)) => account,
+                _ => AccountBasic::default(),
+            };
 
-    // Fully evaluate recipient balances
-    for to in lazy_to_addresses {
-        let location_hash = hasher.hash_one(MemoryLocation::Basic(to));
-        if let Some(writes) = mv_memory.consume_location(&location_hash) {
-            canonize_account(
-                &mut fully_evaluated_results,
-                to,
-                // TODO: We don't need to read from storage if the first entry is a fully evaluated account.
-                match storage.basic(&to) {
-                    Ok(Some(account)) => account,
-                    _ => AccountBasic::default(),
-                },
-                writes,
-            );
+            for (tx_idx, memory_entry) in write_history {
+                match memory_entry {
+                    MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
+                        // TODO: Can code be changed mid-block?
+                        current_account.balance = info.balance;
+                        current_account.nonce = info.nonce;
+                    }
+                    MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
+                        current_account.balance += addition;
+                    }
+                    // TODO: Better error handling
+                    _ => unreachable!(),
+                }
+
+                // SAFETY: The multi-version data structure should not leak an index over block size.
+                let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(tx_idx) };
+                let account = tx_result.state.entry(address).or_default();
+                if current_account.is_empty() {
+                    *account = None;
+                } else if let Some(account) = account {
+                    // Explicit write: only overwrite the account info in case there are storage changes
+                    // TODO: Can code be changed mid-block?
+                    account.basic.balance = current_account.balance;
+                    account.basic.nonce = current_account.nonce;
+                } else {
+                    // Implicit write: e.g. gas payments to the beneficiary account, which doesn't have explicit writes in [result.state]
+                    *account = Some(EvmAccount {
+                        basic: current_account.clone(),
+                        storage: AHashMap::default(),
+                    });
+                }
+            }
         }
     }
 
@@ -260,54 +282,6 @@ pub fn execute_revm_sequential<S: Storage>(
         }
     }
     Ok(results)
-}
-
-fn canonize_account(
-    results: &mut [PevmTxExecutionResult],
-    address: Address,
-    initial_account_basic: AccountBasic,
-    write_history: BTreeMap<TxIdx, MemoryEntry>,
-) {
-    let mut current_account = initial_account_basic;
-
-    for (tx_idx, memory_entry) in write_history {
-        match memory_entry {
-            MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                current_account.balance = info.balance;
-                current_account.nonce = info.nonce;
-            }
-            MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
-                current_account.balance += addition;
-            }
-            _ => unreachable!(),
-        }
-
-        let result = unsafe { results.get_unchecked_mut(tx_idx) };
-        match result.state.entry(address) {
-            std::collections::hash_map::Entry::Occupied(occupied) => {
-                let account = occupied.into_mut();
-                if current_account.is_empty() {
-                    *account = None;
-                } else if let Some(account) = account {
-                    account.basic.balance = current_account.balance;
-                    account.basic.nonce = current_account.nonce;
-                } else {
-                    // for beneficiary only
-                    *account = Some(EvmAccount {
-                        basic: current_account.clone(),
-                        storage: Default::default(),
-                    });
-                }
-            }
-            std::collections::hash_map::Entry::Vacant(vacant) => {
-                // for beneficiary only
-                vacant.insert((!current_account.is_empty()).then(|| EvmAccount {
-                    basic: current_account.clone(),
-                    storage: Default::default(),
-                }));
-            }
-        }
-    }
 }
 
 // Return `None` to signal falling back to sequential execution as we detected too many
