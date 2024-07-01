@@ -106,8 +106,8 @@ impl Storage for RpcStorage {
             let basic = AccountBasic {
                 balance,
                 nonce,
-                code_hash: Some(code.hash_slow()),
-                code: Some(code.into()),
+                code_hash: (!code.is_empty()).then(|| code.hash_slow()),
+                code: (!code.is_empty()).then(|| code.into()),
             };
             self.cache_accounts
                 .lock()
