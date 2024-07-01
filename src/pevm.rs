@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
@@ -189,107 +189,41 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return Err(PevmError::ExecutionError(format!("{err:?}")));
     }
 
-    // We fully evaluate the final beneficiary account's and raw transfer recpipients'
-    // balance that may have been atomically updated to avoid dependencies.
-    let mut beneficiary_account = match storage.basic(&beneficiary_address) {
-        Ok(Some(account)) => account,
-        _ => AccountBasic::default(),
-    };
-    // TODO: Assert that there are exactly a beneficiary value for each transaction.
-    let beneficiary_values = mv_memory
-        .consume_location(&beneficiary_location_hash)
-        .unwrap();
-
     let mut fully_evaluated_results = Vec::with_capacity(block_size);
     let mut cumulative_gas_used: u128 = 0;
-    for (mutex, (_, beneficiary_value)) in execution_results.into_iter().zip(beneficiary_values) {
+    for mutex in execution_results.into_iter() {
         let mut execution_result = mutex.into_inner().unwrap().unwrap();
-
-        // Cumulative gas
         cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
         execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
-
-        // Fully evaluate beneficiary account
-        match beneficiary_value {
-            MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                // TODO: Can beneficiary change code mid-block??
-                beneficiary_account.balance = info.balance;
-                beneficiary_account.nonce = info.nonce;
-            }
-            MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
-                beneficiary_account.balance += addition;
-            }
-            // TODO: Better error handling
-            _ => unreachable!(),
-        }
-        // Ad-hoc condition to pass Ethereum state tests. Realistically the beneficiary
-        // account should not be empty.
-        if beneficiary_account.is_empty() {
-            execution_result.state.insert(beneficiary_address, None);
-        } else {
-            let beneficiary_result = execution_result
-                .state
-                .entry(beneficiary_address)
-                .or_default();
-            // There is an explicit write -- only overwrite the account info in case there
-            // are storage changes.
-            if let Some(account) = beneficiary_result {
-                // TODO: Can the code change mid-block?
-                // TODO: Make the execution results tighter so that explicit writes don't
-                // need post-processing.
-                account.basic.balance = beneficiary_account.balance;
-                account.basic.nonce = beneficiary_account.nonce;
-            }
-            // Implicit write -- can make storage update empty.
-            else {
-                *beneficiary_result = Some(EvmAccount {
-                    basic: beneficiary_account.clone(),
-                    storage: Default::default(),
-                });
-            }
-        }
-
         fully_evaluated_results.push(execution_result);
     }
+
+    canonize_account(
+        &mut fully_evaluated_results,
+        beneficiary_address,
+        match storage.basic(&beneficiary_address) {
+            Ok(Some(account)) => account,
+            _ => AccountBasic::default(),
+        },
+        mv_memory
+            .consume_location(&beneficiary_location_hash)
+            .unwrap(),
+    );
 
     // Fully evaluate recipient balances
     for to in lazy_to_addresses {
         let location_hash = hasher.hash_one(MemoryLocation::Basic(to));
         if let Some(writes) = mv_memory.consume_location(&location_hash) {
-            // TODO: We don't need to read from storage if the first entry is a fully
-            // evaluated account.
-            let mut current_account = match storage.basic(&to) {
-                Ok(Some(account)) => account,
-                _ => AccountBasic::default(),
-            };
-
-            for (tx_idx, value) in writes {
-                match value {
-                    MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                        // TODO: Can the code change mid-block?
-                        current_account.balance = info.balance;
-                        current_account.nonce = info.nonce;
-                    }
-                    MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
-                        current_account.balance += addition;
-                    }
-                    // TODO: Better error handling
-                    _ => unreachable!(),
-                }
-
-                // SAFETY: The multi-version data structure should not leak an index
-                // over block size.
-                let tx_state =
-                    unsafe { &mut fully_evaluated_results.get_unchecked_mut(tx_idx).state };
-                if let Some(account) = tx_state.get_mut(&to) {
-                    if current_account.is_empty() {
-                        *account = None;
-                    } else if let Some(account) = account {
-                        account.basic.balance = current_account.balance;
-                        account.basic.nonce = current_account.nonce;
-                    }
-                }
-            }
+            canonize_account(
+                &mut fully_evaluated_results,
+                to,
+                // TODO: We don't need to read from storage if the first entry is a fully evaluated account.
+                match storage.basic(&to) {
+                    Ok(Some(account)) => account,
+                    _ => AccountBasic::default(),
+                },
+                writes,
+            );
         }
     }
 
@@ -326,6 +260,54 @@ pub fn execute_revm_sequential<S: Storage>(
         }
     }
     Ok(results)
+}
+
+fn canonize_account(
+    results: &mut [PevmTxExecutionResult],
+    address: Address,
+    initial_account_basic: AccountBasic,
+    write_history: BTreeMap<TxIdx, MemoryEntry>,
+) {
+    let mut current_account = initial_account_basic;
+
+    for (tx_idx, memory_entry) in write_history {
+        match memory_entry {
+            MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
+                current_account.balance = info.balance;
+                current_account.nonce = info.nonce;
+            }
+            MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
+                current_account.balance += addition;
+            }
+            _ => unreachable!(),
+        }
+
+        let result = unsafe { results.get_unchecked_mut(tx_idx) };
+        match result.state.entry(address) {
+            std::collections::hash_map::Entry::Occupied(occupied) => {
+                let account = occupied.into_mut();
+                if current_account.is_empty() {
+                    *account = None;
+                } else if let Some(account) = account {
+                    account.basic.balance = current_account.balance;
+                    account.basic.nonce = current_account.nonce;
+                } else {
+                    // for beneficiary only
+                    *account = Some(EvmAccount {
+                        basic: current_account.clone(),
+                        storage: Default::default(),
+                    });
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                // for beneficiary only
+                vacant.insert((!current_account.is_empty()).then(|| EvmAccount {
+                    basic: current_account.clone(),
+                    storage: Default::default(),
+                }));
+            }
+        }
+    }
 }
 
 // Return `None` to signal falling back to sequential execution as we detected too many
