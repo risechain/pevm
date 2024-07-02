@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
-use revm::primitives::{AccountInfo, Address, U256};
+use revm::primitives::{Address, Bytecode, U256};
 
 // We take the last 8 bytes of an address as its hash. This
 // seems fine as the addresses themselves are hash suffixes,
@@ -32,6 +32,7 @@ type BuildAddressHasher = BuildHasherDefault<AddressHasher>;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum MemoryLocation {
     Basic(Address),
+    Code(Address),
     Storage(Address, U256),
 }
 
@@ -66,7 +67,8 @@ type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 // matches & potentially dangerous mismatch mistakes.
 #[derive(Debug, Clone)]
 enum MemoryValue {
-    Basic(Box<AccountInfo>),
+    Basic(Box<AccountBasic>),
+    Code(Option<Box<Bytecode>>),
     // We lazily update the beneficiary balance to avoid continuous
     // dependencies as all transactions read and write to it. We also
     // lazy update the recipient balance of raw transfers, which is also
@@ -154,17 +156,13 @@ enum ReadOrigin {
 
 // For validation: a list of read origins (previous transaction versions)
 // for each read memory location.
-type ReadLocations = HashMap<MemoryLocationHash, Vec<ReadOrigin>, BuildIdentityHasher>;
+type ReadSet = HashMap<MemoryLocationHash, Vec<ReadOrigin>, BuildIdentityHasher>;
 
-// The memory locations needed to execute an incarnation.
-// TODO: Implement a [Default] that pre-allocate two slots for each
-// container, which are the [from] and [to] accounts of the transaction.
-#[derive(Default)]
-struct ReadSet {
-    locations: ReadLocations,
-    // Execution cache to determine if an account was changed.
-    accounts: HashMap<MemoryLocationHash, AccountInfo, BuildIdentityHasher>,
-}
+// The updates made by this transaction incarnation, which is applied
+// to the multi-version data structure at the end of execution.
+type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
+
+type NewLazyAddresses = Vec<Address>;
 
 /// Errors when reading a memory location.
 #[derive(Debug, Clone, PartialEq)]
@@ -183,10 +181,6 @@ pub enum ReadError {
     /// TODO: Handle this at the type level?
     InvalidMemoryLocationType,
 }
-
-// The updates made by this transaction incarnation, which is applied
-// to the multi-version data structure at the end of execution.
-type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
 
 // A scheduled worker task
 // TODO: Add more useful work when there are idle workers like near

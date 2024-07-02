@@ -111,10 +111,9 @@ pub fn generate_cluster(
     ]);
 
     for person in people_addresses.iter() {
-        state.insert(
-            *person,
-            EvmAccount::with_balance(uint!(4_567_000_000_000_000_000_000_U256)),
-        );
+        let mut account = EvmAccount::default();
+        account.basic.balance = uint!(4_567_000_000_000_000_000_000_U256);
+        state.insert(*person, account);
     }
 
     let mut txs = Vec::new();

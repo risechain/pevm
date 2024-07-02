@@ -1,7 +1,6 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::Debug,
-    iter::once,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
     thread,
@@ -19,7 +18,7 @@ use revm::{
 };
 
 use crate::{
-    mv_memory::MvMemory,
+    mv_memory::{LazyAddresses, MvMemory},
     primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
@@ -30,7 +29,7 @@ use crate::{
 };
 
 /// Errors when executing a block with PEVM.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum PevmError {
     /// Cannot derive the chain spec from the block header.
     UnknownBlockSpec,
@@ -123,24 +122,17 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         beneficiary_location_hash,
         (0..block_size).collect::<Vec<TxIdx>>(),
     );
-    let lazy_to_addresses: HashSet<Address, BuildAddressHasher> = txs
-        .iter()
-        .filter_map(|tx| {
-            if let TransactTo::Call(to_address) = tx.transact_to {
-                // TODO: Unify this condition with [Vm::execute]
-                // TODO: Better error handling
-                if to_address != tx.caller && !storage.is_contract(&to_address).unwrap() {
-                    return Some(to_address);
-                }
-            }
-            None
-        })
-        .collect();
+    let mut lazy_addresses = LazyAddresses::default();
+    lazy_addresses.0.insert(beneficiary_address);
 
     // Initialize the remaining core components
     // TODO: Provide more explicit garbage collecting configs for users over random background
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
-    let mv_memory = DeferDrop::new(MvMemory::new(block_size, estimated_locations));
+    let mv_memory = DeferDrop::new(MvMemory::new(
+        block_size,
+        estimated_locations,
+        lazy_addresses,
+    ));
     let vm = Vm::new(
         &hasher, &storage, &mv_memory, chain, spec_id, block_env, txs,
     );
@@ -202,16 +194,20 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
     // We fully evaluate (the balance and nonce of) the beneficiary account
     // and raw transfer recipients that may have been atomically updated.
-    for address in lazy_to_addresses
-        .into_iter()
-        .chain(once(beneficiary_address))
-    {
+    for address in mv_memory.consume_lazy_addresses() {
         let location_hash = hasher.hash_one(MemoryLocation::Basic(address));
         if let Some(write_history) = mv_memory.consume_location(&location_hash) {
             // TODO: We don't need to read from storage if the first entry is a fully evaluated account.
             let mut current_account = match storage.basic(&address) {
                 Ok(Some(account)) => account,
                 _ => AccountBasic::default(),
+            };
+            // Accounts that take implicit writes like the beneficiary account can be contract!
+            let code = if current_account.code_hash.is_some() {
+                // TODO: Better error handling
+                storage.code_by_address(&address).unwrap()
+            } else {
+                None
             };
 
             for (tx_idx, memory_entry) in write_history {
@@ -243,6 +239,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                     // which doesn't have explicit writes in [tx_result.state]
                     *account = Some(EvmAccount {
                         basic: current_account.clone(),
+                        code: code.clone(),
                         storage: AHashMap::default(),
                     });
                 }
@@ -302,8 +299,7 @@ fn preprocess_dependencies(
         })
         .collect();
     let mut transactions_dependents: TransactionsDependents = vec![vec![]; block_size];
-    let mut transactions_dependencies =
-        TransactionsDependenciesNum::with_hasher(BuildIdentityHasher::default());
+    let mut transactions_dependencies = TransactionsDependenciesNum::default();
 
     // Marking transactions from a sender as dependent of the closest transaction that
     // shares the same sender and the closest that sends to this sender to avoid fatal
@@ -413,12 +409,14 @@ fn try_execute<S: Storage>(
             }
             VmExecutionResult::Ok {
                 execution_result,
-                read_locations,
+                read_set,
                 write_set,
+                lazy_addresses,
                 next_validation_idx,
             } => {
                 *index_mutex!(execution_results, tx_version.tx_idx) = Some(execution_result);
-                let wrote_new_location = mv_memory.record(&tx_version, read_locations, write_set);
+                let wrote_new_location =
+                    mv_memory.record(&tx_version, read_set, write_set, lazy_addresses);
                 scheduler.finish_execution(tx_version, wrote_new_location, next_validation_idx)
             }
         };

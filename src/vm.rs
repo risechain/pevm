@@ -1,18 +1,20 @@
-use ahash::AHashMap;
+use ahash::{AHashMap, HashMapExt};
 use alloy_chains::Chain;
 use alloy_rpc_types::Receipt;
 use defer_drop::DeferDrop;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
-        ResultAndState, SpecId, TransactTo, TxEnv, B256, U256,
+        ResultAndState, SpecId, TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
     },
     Context, Database, Evm, EvmContext, Handler,
 };
+use std::collections::HashMap;
 
 use crate::{
-    mv_memory::MvMemory, EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue,
-    ReadError, ReadLocations, ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
+    mv_memory::MvMemory, AccountBasic, BuildIdentityHasher, EvmAccount, MemoryEntry,
+    MemoryLocation, MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError, ReadOrigin,
+    ReadSet, Storage, TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -78,8 +80,9 @@ pub(crate) enum VmExecutionResult {
     ExecutionError(ExecutionError),
     Ok {
         execution_result: PevmTxExecutionResult,
-        read_locations: ReadLocations,
+        read_set: ReadSet,
         write_set: WriteSet,
+        lazy_addresses: NewLazyAddresses,
         // From which transaction index do we need to validate from after
         // this execution. This is [None] when no validation is required.
         // For instance, for transactions that only read and write to the
@@ -105,11 +108,12 @@ struct VmDb<'a, S: Storage> {
     from_hash: MemoryLocationHash,
     to: Option<&'a Address>,
     to_hash: Option<MemoryLocationHash>,
-    is_maybe_lazy: bool,
     read_set: ReadSet,
+    read_accounts: HashMap<MemoryLocationHash, AccountBasic, BuildIdentityHasher>,
     // Check if this transaction has read anything other than its sender
     // and to accounts. We must validate from this transaction if it has.
     only_read_from_and_to: bool,
+    is_lazy: bool,
 }
 
 impl<'a, S: Storage> VmDb<'a, S> {
@@ -120,7 +124,6 @@ impl<'a, S: Storage> VmDb<'a, S> {
         from_hash: MemoryLocationHash,
         to: Option<&'a Address>,
         to_hash: Option<MemoryLocationHash>,
-        is_maybe_lazy: bool,
     ) -> Self {
         Self {
             vm,
@@ -129,9 +132,10 @@ impl<'a, S: Storage> VmDb<'a, S> {
             from_hash,
             to,
             to_hash,
-            is_maybe_lazy,
             only_read_from_and_to: true,
-            read_set: ReadSet::default(),
+            is_lazy: false,
+            read_set: ReadSet::with_capacity(2),
+            read_accounts: HashMap::default(),
         }
     }
 
@@ -143,6 +147,48 @@ impl<'a, S: Storage> VmDb<'a, S> {
         } else {
             self.vm.get_address_hash(address)
         }
+    }
+
+    fn get_code(&mut self, address: Address) -> Result<Option<Bytecode>, ReadError> {
+        let location_hash = self.vm.hasher.hash_one(MemoryLocation::Code(address));
+        let read_origins = self.read_set.entry(location_hash).or_default();
+        let prev_origin = read_origins.last();
+
+        // Try to read the latest code in [MvMemory]
+        // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
+        // contention in [MvMemory]
+        if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
+            if let Some((tx_idx, MemoryEntry::Data(tx_incarnation, MemoryValue::Code(code)))) =
+                written_transactions.range(..self.tx_idx).next_back()
+            {
+                let origin = ReadOrigin::MvMemory(TxVersion {
+                    tx_idx: *tx_idx,
+                    tx_incarnation: *tx_incarnation,
+                });
+                if let Some(prev_origin) = prev_origin {
+                    if prev_origin != &origin {
+                        return Err(ReadError::InconsistentRead);
+                    }
+                } else {
+                    read_origins.push(origin);
+                }
+                return Ok(code.as_ref().map(|code| (**code).clone()));
+            }
+        };
+
+        // Fallback to storage
+        if let Some(prev_origin) = prev_origin {
+            if prev_origin != &ReadOrigin::Storage {
+                return Err(ReadError::InconsistentRead);
+            }
+        } else {
+            read_origins.push(ReadOrigin::Storage);
+        }
+        self.vm
+            .storage
+            .code_by_address(&address)
+            .map(|code| code.map(Bytecode::from))
+            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 }
 
@@ -162,16 +208,15 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             return Ok(None);
         }
 
-        // We return a mock for a non-contract recipient to avoid unnecessarily
+        // Pre-fetch code to decide if we're going to lazy update or not
+        let code = self.get_code(address)?;
+
+        // We return a mock for a non-contract recipient to avoid unncessarily
         // evaluating its balance here. Also skip transactions with the same from
         // & to until we have lazy updates for the sender nonce & balance.
-        if self.is_maybe_lazy && Some(&address) == self.to {
-            return Ok(Some(AccountInfo {
-                // We need this hack to not flag this an empty account for
-                // destruction. TODO: A cleaner solution here.
-                nonce: 1,
-                ..AccountInfo::default()
-            }));
+        if code.is_none() && Some(&address) == self.to && Some(self.from) != self.to {
+            self.is_lazy = true;
+            return Ok(None);
         }
 
         if &address != self.from && Some(&address) != self.to {
@@ -179,7 +224,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         }
 
         let location_hash = self.get_address_hash(&address);
-        let read_origins = self.read_set.locations.entry(location_hash).or_default();
+        let read_origins = self.read_set.entry(location_hash).or_default();
         let has_prev_origins = !read_origins.is_empty();
         // We accumulate new origins to either:
         // - match with the previous origins to check consistency
@@ -236,9 +281,9 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                             new_origins.push(origin);
                             match value {
                                 MemoryValue::Basic(account) => {
-                                    let mut info = *account.clone();
-                                    info.balance += balance_addition;
-                                    final_account = Some(info);
+                                    let mut basic = (**account).clone();
+                                    basic.balance += balance_addition;
+                                    final_account = Some(basic);
                                     break;
                                 }
                                 MemoryValue::LazyBalanceAddition(addition) => {
@@ -275,14 +320,17 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                 return Err(ReadError::InconsistentRead);
             }
             final_account = match self.vm.storage.basic(&address) {
-                Ok(Some(account)) => {
-                    let mut info = AccountInfo::from(account);
-                    info.balance += balance_addition;
-                    Some(info)
+                Ok(Some(mut basic)) => {
+                    basic.balance += balance_addition;
+                    Some(basic)
                 }
                 Ok(None) => {
                     if balance_addition > U256::ZERO {
-                        Some(AccountInfo::from_balance(balance_addition))
+                        Some(AccountBasic {
+                            balance: balance_addition,
+                            nonce: 0,
+                            code_hash: None,
+                        })
                     } else {
                         None
                     }
@@ -298,18 +346,17 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         }
 
         // Register read accounts to check if they have changed (been written to)
-        if let Some(account) = &final_account {
-            self.read_set.accounts.insert(
-                location_hash,
-                AccountInfo {
-                    // Avoid cloning the code as we can compare its hash
-                    code: None,
-                    ..*account
-                },
-            );
+        if let Some(account) = final_account {
+            self.read_accounts.insert(location_hash, account.clone());
+            return Ok(Some(AccountInfo {
+                balance: account.balance,
+                nonce: account.nonce,
+                code_hash: account.code_hash.unwrap_or(KECCAK_EMPTY),
+                code,
+            }));
         }
 
-        Ok(final_account)
+        Ok(None)
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
@@ -335,7 +382,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             .hasher
             .hash_one(MemoryLocation::Storage(address, index));
 
-        let read_origins = self.read_set.locations.entry(location_hash).or_default();
+        let read_origins = self.read_set.entry(location_hash).or_default();
         let prev_origin = read_origins.last();
 
         // Try reading from multi-version data
@@ -463,13 +510,9 @@ impl<'a, S: Storage> Vm<'a, S> {
             }
             TransactTo::Create => (true, None, None),
         };
-        // TODO: Live check is-contract (i.e., from [MvMemory] not [Storage]) for
-        // contracts deployed then used in the same block with non-data!!
-        let is_maybe_lazy =
-            Some(from) != to && to.is_some_and(|to| !self.storage.is_contract(to).unwrap());
 
         // Execute
-        let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash, is_maybe_lazy);
+        let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash);
         match execute_tx(
             &mut db,
             self.chain,
@@ -483,37 +526,65 @@ impl<'a, S: Storage> Vm<'a, S> {
                 // the recipient, and the beneficiary accounts.
                 // TODO: Allocate up to [result_and_state.state.len()] anyway?
                 let mut write_set = WriteSet::with_capacity(3);
+                let mut lazy_addresses = NewLazyAddresses::new();
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
                         write_set.push((
                             self.get_address_hash(address),
                             MemoryValue::Basic(Box::default()),
                         ));
+                        write_set.push((
+                            self.hasher.hash_one(MemoryLocation::Code(*address)),
+                            MemoryValue::Code(None),
+                        ));
                         continue;
                     }
 
                     if account.is_touched() {
                         let account_location_hash = self.get_address_hash(address);
-                        if db.read_set.accounts.get(&account_location_hash) != Some(&account.info) {
+                        let read_account = db.read_accounts.get(&account_location_hash);
+
+                        let has_code = !account.info.is_empty_code_hash();
+                        let is_new_code =
+                            has_code && read_account.map_or(true, |prev| prev.code_hash.is_none());
+
+                        // Write new account changes
+                        if is_new_code
+                            || read_account.is_none()
+                            || read_account.is_some_and(|prev| {
+                                prev.nonce != account.info.nonce
+                                    || prev.balance != account.info.balance
+                            })
+                        {
                             // Skip transactions with the same from & to until we have lazy updates
                             // for the sender nonce & balance.
-                            if is_maybe_lazy
-                                && Some(address) == to
-                                && account.info.is_empty_code_hash()
-                            {
+                            if db.is_lazy && Some(address) == to {
                                 write_set.push((
                                     account_location_hash,
                                     MemoryValue::LazyBalanceAddition(tx.value),
                                 ));
+                                lazy_addresses.push(*address);
                             } else {
                                 // TODO: More granularity here to ensure we only notify new
                                 // memory writes, for instance, only an account's balance instead
                                 // of the whole account.
                                 write_set.push((
                                     account_location_hash,
-                                    MemoryValue::Basic(Box::new(account.info.clone())),
+                                    MemoryValue::Basic(Box::new(AccountBasic {
+                                        balance: account.info.balance,
+                                        nonce: account.info.nonce,
+                                        code_hash: has_code.then_some(account.info.code_hash),
+                                    })),
                                 ));
                             }
+                        }
+
+                        // Write new contract
+                        if is_new_code {
+                            write_set.push((
+                                self.hasher.hash_one(MemoryLocation::Code(*address)),
+                                MemoryValue::Code(account.info.code.clone().map(Box::new)),
+                            ));
                         }
                     }
 
@@ -566,8 +637,9 @@ impl<'a, S: Storage> Vm<'a, S> {
                         self.spec_id,
                         result_and_state,
                     ),
-                    read_locations: db.read_set.locations,
+                    read_set: db.read_set,
                     write_set,
+                    lazy_addresses,
                     next_validation_idx,
                 }
             }
@@ -622,7 +694,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                 match value {
                     MemoryValue::Basic(info) => info.balance += amount,
                     MemoryValue::LazyBalanceAddition(addition) => *addition += amount,
-                    MemoryValue::Storage(_) => unreachable!(), // TODO: Better error handling
+                    _ => unreachable!(), // TODO: Better error handling
                 }
             } else {
                 write_set.push((recipient, MemoryValue::LazyBalanceAddition(amount)));

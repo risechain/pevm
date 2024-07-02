@@ -8,7 +8,6 @@ use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
 use pevm::{EvmAccount, InMemoryStorage};
-use revm::{db::PlainAccount, primitives::KECCAK_EMPTY};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
@@ -60,7 +59,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         .unwrap();
 
         // Parse state
-        let mut accounts: HashMap<Address, PlainAccount> = serde_json::from_reader(BufReader::new(
+        let accounts: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
             File::open(format!("blocks/{block_number}/pre_state.json")).unwrap(),
         ))
         .unwrap();
@@ -76,14 +75,6 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
                 })
                 .unwrap_or_default();
 
-        for (_, account) in accounts.iter_mut() {
-            if let Some(code) = account.info.code.clone() {
-                let code_hash = code.hash_slow();
-                account.info.code_hash = code_hash;
-            } else {
-                account.info.code_hash = KECCAK_EMPTY;
-            }
-        }
         handler(block, InMemoryStorage::new(accounts, block_hashes));
     }
 }
