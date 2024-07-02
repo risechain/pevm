@@ -10,13 +10,13 @@
 
 use ahash::AHashMap;
 use alloy_chains::Chain;
-use pevm::{InMemoryStorage, PevmError, PevmTxExecutionResult};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use pevm::{AccountBasic, EvmAccount, InMemoryStorage, PevmError, PevmTxExecutionResult};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
     calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, TransactTo,
-    TxEnv, U256,
+    TxEnv, KECCAK_EMPTY, U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -100,16 +100,16 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv,
     })
 }
 
-fn run_test_unit(path: &Path, unit: &TestUnit) {
-    unit.post.par_iter().for_each(|(spec_name, tests)| {
+fn run_test_unit(path: &Path, unit: TestUnit) {
+    unit.post.into_par_iter().for_each(|(spec_name, tests)| {
         // Constantinople was immediately extended by Petersburg.
         // There was technically never a Constantinople transaction on mainnet
         // so REVM undestandably doesn't support it (without Petersburg).
-        if *spec_name == SpecName::Constantinople {
+        if spec_name == SpecName::Constantinople {
             return;
         }
 
-        tests.par_iter().for_each(|test| {
+        tests.into_par_iter().for_each(|test| {
             let tx_env = build_tx_env(&unit.transaction, &test.indexes);
             if test.expect_exception.as_deref() == Some("TR_RLP_WRONGVALUE") && tx_env.is_err() {
                 return;
@@ -118,13 +118,16 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
             let mut chain_state = AHashMap::new();
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
-                let info =
-                    AccountInfo::new(raw_info.balance, raw_info.nonce, code.hash_slow(), code);
                 chain_state.insert(
                     *address,
-                    PlainAccount {
-                        info: info.clone(),
-                        storage: raw_info.storage.clone(),
+                    EvmAccount {
+                        basic: AccountBasic {
+                            balance: raw_info.balance,
+                            nonce: raw_info.nonce,
+                            code_hash: (!code.is_empty()).then(|| code.hash_slow()),
+                        },
+                        code: (!code.is_empty()).then(|| code.into()),
+                        storage: raw_info.storage.clone().into_iter().collect(),
                     },
                 );
             }
@@ -148,7 +151,7 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     // Extracting such account is unjustified complexity so let's live with this for now.
                     assert!(exec_results[0].state.values().all(|account| {
                         match account {
-                            Some(account) => account.basic.code.is_none(),
+                            Some(account) => account.basic.code_hash.is_none(),
                             None => true,
                         }
                     }));
@@ -200,14 +203,27 @@ fn run_test_unit(path: &Path, unit: &TestUnit) {
                     for (address, account) in state {
                         if let Some(account) = account {
                             let chain_state_account = chain_state.entry(address).or_default();
-                            chain_state_account.info = account.basic.into();
-                            chain_state_account.storage.extend(account.storage.iter());
+                            chain_state_account.basic = account.basic;
+                            chain_state_account.code = account.code;
+                            chain_state_account.storage.extend(account.storage.into_iter());
                         } else {
                             chain_state.remove(&address);
                         }
                     }
+                    // TODO: Implement our own state root calculation function to remove
+                    // this conversion to [PlainAccount]
+                    let plain_chain_state = chain_state.into_iter().map(|(address, account)| {
+                        (address, PlainAccount {
+                            info: AccountInfo {
+                                balance: account.basic.balance,
+                                nonce: account.basic.nonce,
+                                code_hash: account.basic.code_hash.unwrap_or(KECCAK_EMPTY),
+                                code: account.code.map(Bytecode::from),
+                            },
+                            storage: account.storage.into_iter().collect(),
+                        })}).collect::<Vec<_>>();
                     let state_root =
-                        state_merkle_trie_root(chain_state.iter().map(|(k, v)| (*k, v)));
+                        state_merkle_trie_root(plain_chain_state.iter().map(|(address, account)| (*address, account)));
                     assert_eq!(state_root, test.hash, "Mismatched state root for {path:?}");
                 }
                 _ => {
@@ -238,7 +254,7 @@ fn ethereum_state_tests() {
             let TestSuite(suite) = serde_json::from_str(&raw_content)
                 .unwrap_or_else(|e| panic!("Cannot parse suite {path:?}: {e:?}"));
             suite
-                .par_iter()
+                .into_par_iter()
                 .for_each(|(_, unit)| run_test_unit(path, unit));
         });
 }

@@ -107,14 +107,27 @@ impl Storage for RpcStorage {
                 balance,
                 nonce,
                 code_hash: (!code.is_empty()).then(|| code.hash_slow()),
-                code: (!code.is_empty()).then(|| code.into()),
             };
-            self.cache_accounts
-                .lock()
-                .unwrap()
-                .insert(*address, basic.clone().into());
+            self.cache_accounts.lock().unwrap().insert(
+                *address,
+                EvmAccount {
+                    basic: basic.clone(),
+                    code: (!code.is_empty()).then(|| code.into()),
+                    storage: AHashMap::default(),
+                },
+            );
             Ok(Some(basic))
         })
+    }
+
+    fn code_by_address(&self, address: &Address) -> Result<Option<EvmCode>, Self::Error> {
+        self.basic(address)?;
+        Ok(self
+            .cache_accounts
+            .lock()
+            .unwrap()
+            .get(address)
+            .and_then(|account| account.code.clone()))
     }
 
     fn code_by_hash(&self, _code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
@@ -138,17 +151,16 @@ impl Storage for RpcStorage {
                 .block_id(self.block_id)
                 .into_future(),
         )?;
-        match self.cache_accounts.lock().unwrap().entry(*address) {
-            std::collections::hash_map::Entry::Occupied(mut account) => {
-                account.get_mut().storage.insert(*index, value);
-            }
-            std::collections::hash_map::Entry::Vacant(vacant) => {
-                vacant.insert(EvmAccount {
-                    basic: self.basic(address)?.unwrap_or_default(),
-                    storage: [(*index, value)].into_iter().collect(),
-                });
-            }
-        };
+
+        // We only cache if the pre-state account is non-empty. Else this
+        // could be a false alarm that results in the default 0. Caching
+        // that would make this account non-empty and may fail a tx that
+        // deploys a contract here (EIP-7610).
+        self.basic(address)?;
+        if let Some(account) = self.cache_accounts.lock().unwrap().get_mut(address) {
+            account.storage.insert(*index, value);
+        }
+
         Ok(value)
     }
 

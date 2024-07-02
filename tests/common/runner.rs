@@ -11,12 +11,11 @@ use std::{collections::BTreeMap, num::NonZeroUsize, thread};
 // Useful for mock iterations.
 pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
     let address = Address::from(U160::from(idx));
-    (
-        address,
-        // Filling half full accounts to have enough tokens for tests without worrying about
-        // the corner case of balance not going beyond `U256::MAX`.
-        EvmAccount::with_balance(U256::MAX.div_ceil(U256::from(2))),
-    )
+    let mut account = EvmAccount::default();
+    // Filling half full accounts to have enough tokens for tests without worrying about
+    // the corner case of balance not going beyond `U256::MAX`.
+    account.basic.balance = U256::MAX.div_ceil(U256::from(2));
+    (address, account)
 }
 
 pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: &PevmResult) {

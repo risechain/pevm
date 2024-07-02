@@ -1,20 +1,26 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
-use dashmap::{
-    mapref::{entry::Entry, one::Ref},
-    DashMap,
-};
+use ahash::AHashSet;
+use alloy_primitives::Address;
+use dashmap::{mapref::one::Ref, DashMap};
 
 use crate::{
-    BuildIdentityHasher, MemoryEntry, MemoryLocationHash, ReadLocations, ReadOrigin, TxIdx,
-    TxVersion, WriteSet,
+    BuildAddressHasher, BuildIdentityHasher, MemoryEntry, MemoryLocationHash, NewLazyAddresses,
+    ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
 };
 
 #[derive(Default)]
 struct LastLocations {
-    read: ReadLocations,
+    read: ReadSet,
     // Consider [SmallVec] since most transactions explicitly write to 2 locations!
     write: Vec<MemoryLocationHash>,
+}
+
+pub(crate) struct LazyAddresses(pub(crate) AHashSet<Address, BuildAddressHasher>);
+impl Default for LazyAddresses {
+    fn default() -> Self {
+        LazyAddresses(AHashSet::with_hasher(BuildAddressHasher::default()))
+    }
 }
 
 // The MvMemory contains shared memory in a form of a multi-version data
@@ -28,12 +34,14 @@ pub(crate) struct MvMemory {
     // Nevertheless, the compiler should be good enough to optimize these cases anyway.
     data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
     last_locations: Vec<Mutex<LastLocations>>,
+    lazy_addresses: Mutex<LazyAddresses>,
 }
 
 impl MvMemory {
     pub(crate) fn new(
         block_size: usize,
         estimated_locations: impl IntoIterator<Item = (MemoryLocationHash, Vec<TxIdx>)>,
+        lazy_addresses: LazyAddresses,
     ) -> Self {
         let data = DashMap::default();
         // We preallocate estimated locations to avoid restructuring trees at runtime
@@ -52,6 +60,7 @@ impl MvMemory {
         Self {
             data,
             last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
+            lazy_addresses: Mutex::new(lazy_addresses),
         }
     }
 
@@ -62,27 +71,18 @@ impl MvMemory {
     pub(crate) fn record(
         &self,
         tx_version: &TxVersion,
-        read_locations: ReadLocations,
+        read_set: ReadSet,
         write_set: WriteSet,
+        new_lazy_addresses: NewLazyAddresses,
     ) -> bool {
         // Update the multi-version as fast as possible for higher transactions to
         // read from.
         let new_locations: Vec<MemoryLocationHash> = write_set.iter().map(|(l, _)| *l).collect();
-        for (location, value) in write_set.into_iter() {
-            let entry = MemoryEntry::Data(tx_version.tx_incarnation, value);
-            // We must not use [get_mut] here, else there's a race condition where
-            // two threads get [None] first, then the latter's [insert] overwrote
-            // the former's.
-            match self.data.entry(location) {
-                Entry::Occupied(mut written_transactions) => {
-                    written_transactions
-                        .get_mut()
-                        .insert(tx_version.tx_idx, entry);
-                }
-                Entry::Vacant(vacant) => {
-                    vacant.insert(BTreeMap::from([(tx_version.tx_idx, entry)]));
-                }
-            }
+        for (location, value) in write_set {
+            self.data.entry(location).or_default().insert(
+                tx_version.tx_idx,
+                MemoryEntry::Data(tx_version.tx_incarnation, value),
+            );
         }
         // TODO: Faster "difference" function when there are many locations
         let mut last_locations = index_mutex!(self.last_locations, tx_version.tx_idx);
@@ -94,8 +94,16 @@ impl MvMemory {
             }
         }
 
+        // Update lazy addresses
+        if !new_lazy_addresses.is_empty() {
+            let mut lazy_addresses = self.lazy_addresses.lock().unwrap();
+            for address in new_lazy_addresses {
+                lazy_addresses.0.insert(address);
+            }
+        }
+
         // Update this transaction's read & write set for the next validation.
-        last_locations.read = read_locations;
+        last_locations.read = read_set;
         for new_location in new_locations.iter() {
             if !last_locations.write.contains(new_location) {
                 // We update right before returning to avoid an early clone.
@@ -175,6 +183,12 @@ impl MvMemory {
         location: &MemoryLocationHash,
     ) -> Option<Ref<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>>> {
         self.data.get(location)
+    }
+
+    pub(crate) fn consume_lazy_addresses(&self) -> impl IntoIterator<Item = Address> {
+        std::mem::take(&mut *self.lazy_addresses.lock().unwrap())
+            .0
+            .into_iter()
     }
 
     pub(crate) fn consume_location(

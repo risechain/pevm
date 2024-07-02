@@ -16,14 +16,11 @@ pub struct InMemoryStorage {
 impl InMemoryStorage {
     /// Construct a new [InMemoryStorage]
     pub fn new(
-        accounts: impl IntoIterator<Item = (Address, impl Into<EvmAccount>)>,
+        accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
         block_hashes: impl IntoIterator<Item = (U256, B256)>,
     ) -> Self {
         InMemoryStorage {
-            accounts: accounts
-                .into_iter()
-                .map(|(addr, acc)| (addr, acc.into()))
-                .collect(),
+            accounts: accounts.into_iter().collect(),
             block_hashes: block_hashes.into_iter().collect(),
         }
     }
@@ -40,11 +37,11 @@ impl Storage for InMemoryStorage {
             .map(|account| account.basic.clone()))
     }
 
-    fn is_contract(&self, address: &Address) -> Result<bool, Self::Error> {
+    fn code_by_address(&self, address: &Address) -> Result<Option<EvmCode>, Self::Error> {
         Ok(self
             .accounts
             .get(address)
-            .is_some_and(|account| account.basic.code.is_some()))
+            .and_then(|account| account.code.clone()))
     }
 
     // TODO: Map [B256] to [EvmCode] for much faster search
@@ -56,7 +53,7 @@ impl Storage for InMemoryStorage {
                 .code_hash
                 .is_some_and(|hash| &hash == code_hash)
             {
-                return Ok(account.basic.code.clone());
+                return Ok(account.code.clone());
             }
         }
         Ok(None)

@@ -10,9 +10,9 @@ use alloy_chains::Chain;
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
-use pevm::{RpcStorage, StorageWrapper};
+use pevm::{EvmAccount, RpcStorage, StorageWrapper};
 use reqwest::Url;
-use revm::db::{CacheDB, PlainAccount};
+use revm::db::CacheDB;
 use tokio::runtime::Runtime;
 
 pub mod common;
@@ -68,17 +68,13 @@ fn mainnet_blocks_from_rpc() {
             serde_json::to_writer(file_block, &block).unwrap();
 
             // TODO: Snapshot with consistent ordering for ease of diffing.
-            // Currently PlainAccount's storage ordering isn't consistent.
-            let accounts: BTreeMap<Address, PlainAccount> = rpc_storage
-                .0
-                .get_cache_accounts()
-                .into_iter()
-                .map(|(address, evm_account)| (address, evm_account.into()))
-                .collect();
+            // Currently [EvmStorage]'s storage ordering isn't consistent.
+            let accounts: BTreeMap<Address, EvmAccount> =
+                rpc_storage.0.get_cache_accounts().into_iter().collect();
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
             serde_json::to_writer(file_state, &accounts).unwrap();
 
-            // We convert to `BTreeMap`s for consistent ordering & diffs between snapshots
+            // We convert to [BTreeMap] for consistent ordering & diffs between snapshots
             let block_hashes: BTreeMap<U256, B256> =
                 rpc_storage.0.get_cache_block_hashes().into_iter().collect();
             if !block_hashes.is_empty() {

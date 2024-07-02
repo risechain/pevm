@@ -4,86 +4,55 @@ use ahash::AHashMap;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use bitvec::vec::BitVec;
 use revm::{
-    db::PlainAccount,
     interpreter::analysis::to_analysed,
-    primitives::{Account, AccountInfo, Bytecode, JumpTable},
+    primitives::{Account, AccountInfo, Bytecode, JumpTable, KECCAK_EMPTY},
     DatabaseRef,
 };
+use serde::{Deserialize, Serialize};
 
 /// An EVM account.
 // TODO: Flatten [AccountBasic] or more ideally, replace this with an Alloy type.
 // [AccountBasic] works for now as we're tightly tied to REVM types, hence
 // conversions between [AccountBasic] & [AccountInfo] are very convenient.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EvmAccount {
     /// The account's basic information.
     pub basic: AccountBasic,
+    /// The account's optional code
+    // TODO: Box this to reduce [EvmAccount]'s stack size?
+    pub code: Option<EvmCode>,
     /// The account's storage.
     pub storage: AHashMap<U256, U256>,
 }
 
-impl EvmAccount {
-    /// Create a new `EvmAccount` with a given balance.
-    pub fn with_balance(balance: U256) -> Self {
-        AccountBasic {
-            balance,
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
-impl From<EvmAccount> for PlainAccount {
-    fn from(account: EvmAccount) -> Self {
-        PlainAccount {
-            info: account.basic.into(),
-            storage: account.storage.into_iter().collect(),
-        }
-    }
-}
-
-impl From<PlainAccount> for EvmAccount {
-    fn from(account: PlainAccount) -> Self {
-        EvmAccount {
-            basic: account.info.into(),
-            storage: account.storage.into_iter().collect(),
-        }
-    }
-}
-
 impl From<Account> for EvmAccount {
     fn from(account: Account) -> Self {
+        let has_code = !account.info.is_empty_code_hash();
         Self {
-            basic: account.info.into(),
+            code: has_code.then(|| account.info.code.unwrap().into()),
+            basic: AccountBasic {
+                balance: account.info.balance,
+                nonce: account.info.nonce,
+                code_hash: has_code.then_some(account.info.code_hash),
+            },
             storage: account
                 .storage
-                .iter()
-                .map(|(k, v)| (*k, v.present_value))
+                .into_iter()
+                .map(|(k, v)| (k, v.present_value))
                 .collect(),
-        }
-    }
-}
-
-impl From<AccountBasic> for EvmAccount {
-    fn from(basic: AccountBasic) -> Self {
-        EvmAccount {
-            basic,
-            storage: AHashMap::default(),
         }
     }
 }
 
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AccountBasic {
     /// The balance of the account.
     pub balance: U256,
     /// The nonce of the account.
     pub nonce: u64,
-    /// The code of the account.
-    pub code: Option<EvmCode>,
-    /// The optional code hash to avoid rehashing during execution
+    /// The optional code hash of the account.
     pub code_hash: Option<B256>,
 }
 
@@ -91,44 +60,23 @@ impl AccountBasic {
     /// Check if an account is empty for removal per EIP-161
     // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
     pub fn is_empty(&self) -> bool {
-        self.balance == U256::ZERO && self.nonce == 0 && self.code.is_none()
+        self.nonce == 0 && self.balance == U256::ZERO && self.code_hash.is_none()
     }
 }
 
-impl From<AccountBasic> for AccountInfo {
-    fn from(account: AccountBasic) -> Self {
-        let code = account.code.map(Bytecode::from).unwrap_or_default();
-        AccountInfo::new(
-            account.balance,
-            account.nonce,
-            account.code_hash.unwrap_or_else(|| code.hash_slow()),
-            code,
-        )
-    }
-}
-
-impl From<AccountInfo> for AccountBasic {
-    fn from(account: AccountInfo) -> Self {
-        let code = account.code.and_then(|code| {
-            if code.is_empty() {
-                None
-            } else {
-                Some(code.into())
-            }
-        });
-        AccountBasic {
-            balance: account.balance,
-            nonce: account.nonce,
-            // Currently trust the account info instead of rehashing.
-            code_hash: code.as_ref().map(|_| account.code_hash),
-            code,
+impl Default for AccountBasic {
+    fn default() -> Self {
+        Self {
+            balance: U256::ZERO,
+            nonce: 0,
+            code_hash: None,
         }
     }
 }
 
 /// EVM Code, currently mapping to REVM's [ByteCode::LegacyAnalyzed].
 // TODO: Support raw legacy & EOF
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct EvmCode {
     /// Bytecode with 32 zero bytes padding
     bytecode: Bytes,
@@ -175,14 +123,8 @@ pub trait Storage {
     /// Get basic account information.
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error>;
 
-    /// Check if an address is a contract.
-    /// This default implementation is slow as it clones the account basic via
-    /// the [basic] call. Performant storages should re-implement it with an
-    /// internal reference check.
-    fn is_contract(&self, address: &Address) -> Result<bool, Self::Error> {
-        self.basic(address)
-            .map(|account| account.is_some_and(|account| account.code.is_some()))
-    }
+    /// Get the code of an account.
+    fn code_by_address(&self, address: &Address) -> Result<Option<EvmCode>, Self::Error>;
 
     /// Get account code by its hash.
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error>;
@@ -208,11 +150,22 @@ where
     type Error = D::Error;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
-        D::basic_ref(self, *address).map(|a| a.map(|a| a.into()))
+        self.basic_ref(*address).map(|a| {
+            a.map(|info| AccountBasic {
+                balance: info.balance,
+                nonce: info.nonce,
+                code_hash: (!info.is_empty_code_hash()).then_some(info.code_hash),
+            })
+        })
+    }
+
+    fn code_by_address(&self, address: &Address) -> Result<Option<EvmCode>, Self::Error> {
+        self.basic_ref(*address)
+            .map(|a| a.and_then(|a| a.code.map(EvmCode::from)))
     }
 
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
-        D::code_by_hash_ref(self, *code_hash).map(|bytecode| {
+        self.code_by_hash_ref(*code_hash).map(|bytecode| {
             if bytecode.is_empty() {
                 None
             } else {
@@ -222,15 +175,15 @@ where
     }
 
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
-        D::has_storage_ref(self, *address)
+        self.has_storage_ref(*address)
     }
 
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
-        D::storage_ref(self, *address, *index)
+        self.storage_ref(*address, *index)
     }
 
     fn block_hash(&self, number: &U256) -> Result<B256, Self::Error> {
-        D::block_hash_ref(self, *number)
+        self.block_hash_ref(*number)
     }
 }
 
@@ -243,24 +196,39 @@ impl<S: Storage> DatabaseRef for StorageWrapper<S> {
     type Error = S::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        S::basic(&self.0, &address).map(|account| account.map(AccountBasic::into))
+        Ok(if let Some(basic) = self.0.basic(&address)? {
+            let code = if basic.code_hash.is_some() {
+                self.0.code_by_address(&address)?.map(Bytecode::from)
+            } else {
+                None
+            };
+            Some(AccountInfo {
+                balance: basic.balance,
+                nonce: basic.nonce,
+                code_hash: basic.code_hash.unwrap_or(KECCAK_EMPTY),
+                code,
+            })
+        } else {
+            None
+        })
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        S::code_by_hash(&self.0, &code_hash)
+        self.0
+            .code_by_hash(&code_hash)
             .map(|code| code.map(Bytecode::from).unwrap_or_default())
     }
 
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
-        S::has_storage(&self.0, &address)
+        self.0.has_storage(&address)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        S::storage(&self.0, &address, &index)
+        self.0.storage(&address, &index)
     }
 
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        S::block_hash(&self.0, &number)
+        self.0.block_hash(&number)
     }
 }
 
