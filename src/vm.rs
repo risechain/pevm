@@ -85,7 +85,7 @@ pub(crate) enum VmExecutionResult {
         // For instance, for transactions that only read and write to the
         // from and to addresses, which preprocessing & lazy evaluation has
         // already covered. Note that this is used to set the min validation
-        // index in the scheduler, meaing a `None` here will still be validated
+        // index in the scheduler, meaning a `None` here will still be validated
         // if there was a lower transaction that has broken the preprocessed
         // dependency chain and returned [Some].
         // TODO: Better name & doc
@@ -162,7 +162,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             return Ok(None);
         }
 
-        // We return a mock for a non-contract recipient to avoid unncessarily
+        // We return a mock for a non-contract recipient to avoid unnecessarily
         // evaluating its balance here. Also skip transactions with the same from
         // & to until we have lazy updates for the sender nonce & balance.
         if self.is_maybe_lazy && Some(&address) == self.to {
@@ -189,7 +189,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         let mut final_account = None;
         let mut balance_addition = U256::ZERO;
 
-        // Try reading from multi-verion data
+        // Try reading from multi-version data
         if self.tx_idx > &0 {
             // We enforce consecutive indexes for locations that all transactions write to like
             // the beneficiary balance. The goal is to not wastefully evaluate when we know
@@ -248,7 +248,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                                 _ => return Err(ReadError::InvalidMemoryLocationType),
                             }
                         }
-                        _ => {
+                        None => {
                             if need_consecutive_idxs && current_idx > &0 {
                                 return reschedule;
                             }
@@ -338,7 +338,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         let read_origins = self.read_set.locations.entry(location_hash).or_default();
         let prev_origin = read_origins.last();
 
-        // Try reading from multi-verion data
+        // Try reading from multi-version data
         if self.tx_idx > &0 {
             if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
                 if let Some((closest_idx, entry)) =
@@ -453,7 +453,7 @@ impl<'a, S: Storage> Vm<'a, S> {
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
     pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
-        // SATEFY: A correct scheduler would guarantee this index to be inbound.
+        // SAFETY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_idx) };
         let from = &tx.caller;
         let from_hash = self.get_address_hash(from);
