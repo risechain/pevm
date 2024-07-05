@@ -19,7 +19,10 @@ use revm::{
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
+    primitives::{
+        get_block_env, get_block_spec, get_tx_env, BlockSpecDerivationError,
+        TransactionParsingError,
+    },
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
@@ -32,7 +35,7 @@ use crate::{
 #[derive(Debug, PartialEq, Clone)]
 pub enum PevmError {
     /// Cannot derive the chain spec from the block header.
-    UnknownBlockSpec,
+    UnknownBlockSpec(BlockSpecDerivationError),
     /// Block header lacks information for execution.
     MissingHeaderData,
     /// Transactions lack information for execution.
@@ -59,9 +62,7 @@ pub fn execute<S: Storage + Send + Sync>(
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
 ) -> PevmResult {
-    let Some(spec_id) = get_block_spec(&block.header) else {
-        return Err(PevmError::UnknownBlockSpec);
-    };
+    let spec_id = get_block_spec(chain, &block.header).map_err(PevmError::UnknownBlockSpec)?;
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
