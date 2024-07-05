@@ -1,6 +1,6 @@
 use alloy_chains::Chain;
 use alloy_consensus::{ReceiptEnvelope, TxType};
-use alloy_primitives::{Bloom, B256};
+use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
 use pevm::{EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
@@ -45,35 +45,35 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<
     );
 }
 
+fn encode_receipt_2718(tx_type: u8, tx_result: &PevmTxExecutionResult) -> Bytes {
+    let tx_type = TxType::try_from(tx_type).unwrap();
+    let receipt_with_bloom = tx_result.receipt.clone().with_bloom();
+    let receipt_envelope = match tx_type {
+        TxType::Legacy => ReceiptEnvelope::Legacy(receipt_with_bloom),
+        TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt_with_bloom),
+        TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt_with_bloom),
+        TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt_with_bloom),
+    };
+
+    let mut buffer = Vec::new();
+    receipt_envelope.encode_2718(&mut buffer);
+    Bytes::from(buffer)
+}
+
 // Refer to section 4.3.2. Holistic Validity in the Ethereum Yellow Paper.
 // https://github.com/ethereum/go-ethereum/blob/master/cmd/era/main.go#L289
 fn calculate_receipt_root(
     txs: &BlockTransactions<Transaction>,
     tx_results: &[PevmTxExecutionResult],
 ) -> B256 {
-    // 1. Create an iterator of ReceiptEnvelope
-    let tx_type_iter = txs
+    let trie_entries: BTreeMap<_, _> = txs
         .txns()
-        .map(|tx| TxType::try_from(tx.transaction_type.unwrap_or_default()).unwrap());
-
-    let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone().with_bloom());
-
-    let receipt_envelope_iter =
-        Iterator::zip(tx_type_iter, receipt_iter).map(|(tx_type, receipt)| match tx_type {
-            TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
-            TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
-            TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
-            TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
-        });
-
-    // 2. Create a trie then calculate the root hash
-    // We use BTreeMap because the keys must be sorted in ascending order.
-    let trie_entries: BTreeMap<_, _> = receipt_envelope_iter
+        .map(|tx| tx.transaction_type.unwrap_or_default())
+        .zip(tx_results)
         .enumerate()
-        .map(|(index, receipt)| {
-            let key_buffer = alloy_rlp::encode_fixed_size(&index);
-            let mut value_buffer = Vec::new();
-            receipt.encode_2718(&mut value_buffer);
+        .map(|(index, (tx_type, tx_result))| {
+            let key_buffer = alloy_rlp::encode_fixed_size(&index).to_vec();
+            let value_buffer = encode_receipt_2718(tx_type, tx_result);
             (key_buffer, value_buffer)
         })
         .collect();
