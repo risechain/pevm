@@ -211,15 +211,18 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         // Pre-fetch code to decide if we're going to lazy update or not
         let code = self.get_code(address)?;
 
+        let location_hash = self.get_address_hash(&address);
+
         // We return a mock for a non-contract recipient to avoid unncessarily
         // evaluating its balance here. Also skip transactions with the same from
         // & to until we have lazy updates for the sender nonce & balance.
-        if code.is_none() && Some(&address) == self.to && Some(self.from) != self.to {
+        if code.is_none()
+            && Some(location_hash) == self.to_hash
+            && Some(self.from_hash) != self.to_hash
+        {
             self.is_lazy = true;
             return Ok(None);
         }
-
-        let location_hash = self.get_address_hash(&address);
 
         if location_hash != self.from_hash && Some(location_hash) != self.to_hash {
             self.only_read_from_and_to = false;
@@ -559,7 +562,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                         {
                             // Skip transactions with the same from & to until we have lazy updates
                             // for the sender nonce & balance.
-                            if db.is_lazy && Some(address) == to {
+                            if db.is_lazy && Some(account_location_hash) == to_hash {
                                 write_set.push((
                                     account_location_hash,
                                     MemoryValue::LazyBalanceAddition(tx.value),
