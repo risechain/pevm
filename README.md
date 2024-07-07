@@ -32,25 +32,24 @@ Finally, while Aptos and Polygon embed their PEVM implementation directly into t
 $ cargo build
 ```
 
-### Alpha Done
+### V1 Done
 
 - Build a Block-STM foundation to improve on.
-- Preprocess dependencies among transactions with the same sender or explicitly interacting with the beneficiary account.
 - Atomically update gas payments to the beneficiary account as implicit reads & writes.
-- Atomically update raw transfer recipients' balance as implicit reads & writes.
+- Atomically update raw transfer senders & recipients as implicit reads & writes.
 - Improve scheduler design & aggressively find tasks to save scheduling cycles.
 - Complete the first test & benchmark suites.
 
-### Alpha TODO
+### V1 TODO
 
 - Complete a vital test suite.
-- More granular memory locations (like breaking `AccountInfo` down into `balance`, `nonce`, and `code`) to avoid false positive dependencies.
+- More granular memory locations (like breaking `AccountInfo` down into `balance`, `nonce`, and `code_hash`) to avoid false positive dependencies.
 - More low-hanging fruit optimizations.
 - Robust error handling.
 - Better types and API for integration.
 - Benchmark a [Reth](https://github.com/paradigmxyz/reth) integration for syncing and building Ethereum and RISE blocks.
 
-### Beta TODO
+### V2 TODO
 
 - Optimize concurrent data structures to maximize CPU cache and stack memory.
 - Optimize the scheduler, worker threads, and synchronization based on common block scenarios.

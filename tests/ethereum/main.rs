@@ -226,8 +226,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                         state_merkle_trie_root(plain_chain_state.iter().map(|(address, account)| (*address, account)));
                     assert_eq!(state_root, test.hash, "Mismatched state root for {path:?}");
                 }
-                _ => {
-                    panic!("PEVM doesn't match the test's expectation for {path:?}")
+                unexpected_res => {
+                    panic!("PEVM doesn't match the test's expectation for {path:?}: {unexpected_res:?}")
                 }
             }
         });

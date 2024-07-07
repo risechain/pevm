@@ -8,12 +8,12 @@ use std::{
 
 use ahash::AHashMap;
 use alloy_chains::Chain;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::U256;
 use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
     db::CacheDB,
-    primitives::{BlockEnv, SpecId, TransactTo, TxEnv},
+    primitives::{BlockEnv, SpecId, TxEnv},
     DatabaseCommit,
 };
 
@@ -23,9 +23,8 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    AccountBasic, BuildAddressHasher, BuildIdentityHasher, EvmAccount, IncarnationStatus,
-    MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependenciesNum,
-    TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion,
+    AccountBasic, BuildIdentityHasher, EvmAccount, MemoryEntry, MemoryLocation, MemoryValue,
+    Storage, Task, TxIdx, TxVersion,
 };
 
 /// Errors when executing a block with PEVM.
@@ -74,7 +73,7 @@ pub fn execute<S: Storage + Send + Sync>(
         _ => return Err(PevmError::MissingTransactionData),
     };
     // TODO: Continue to fine tune this condition.
-    if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
+    if force_sequential || tx_envs.len() < 4 || block.header.gas_used < 2_000_000 {
         execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
     } else {
         execute_revm(
@@ -103,19 +102,11 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         return Ok(Vec::new());
     }
 
-    // Preprocess dependencies and fall back to sequential if there are too many
-    let beneficiary_address = block_env.coinbase;
-    let Some((scheduler, max_concurrency_level)) =
-        preprocess_dependencies(&beneficiary_address, &txs)
-    else {
-        return execute_revm_sequential(storage, chain, spec_id, block_env, txs);
-    };
-
     // Preprocess locations
     // TODO: Move to a dedicated preprocessing module with preprocessing deps
     let block_size = txs.len();
     let hasher = ahash::RandomState::new();
-    let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(beneficiary_address));
+    let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
     // TODO: Estimate more locations based on sender, to, etc.
     let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
     estimated_locations.insert(
@@ -123,7 +114,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         (0..block_size).collect::<Vec<TxIdx>>(),
     );
     let mut lazy_addresses = LazyAddresses::default();
-    lazy_addresses.0.insert(beneficiary_address);
+    lazy_addresses.0.insert(block_env.coinbase);
 
     // Initialize the remaining core components
     // TODO: Provide more explicit garbage collecting configs for users over random background
@@ -134,15 +125,16 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         lazy_addresses,
     ));
     let vm = Vm::new(
-        &hasher, &storage, &mv_memory, chain, spec_id, block_env, txs,
+        &hasher, &storage, &mv_memory, &txs, chain, spec_id, block_env,
     );
+    let scheduler = DeferDrop::new(Scheduler::new(block_size));
 
     let mut execution_error = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
 
     // TODO: Better thread handling
     thread::scope(|scope| {
-        for _ in 0..concurrency_level.min(max_concurrency_level).into() {
+        for _ in 0..concurrency_level.into() {
             scope.spawn(|| {
                 let mut task = scheduler.next_task();
                 while task.is_some() {
@@ -213,12 +205,40 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             for (tx_idx, memory_entry) in write_history {
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                        // TODO: Can code be changed mid-block?
+                        // TODO: Can code (hash) be changed mid-block?
                         current_account.balance = info.balance;
                         current_account.nonce = info.nonce;
                     }
-                    MemoryEntry::Data(_, MemoryValue::LazyBalanceAddition(addition)) => {
+                    MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
                         current_account.balance += addition;
+                    }
+                    MemoryEntry::Data(_, MemoryValue::LazySender(addition)) => {
+                        // We must re-do extra sender balance checks as we mock
+                        // the max value in [Vm] during execution. Ideally we
+                        // can turn off these redundant checks in revm.
+                        if current_account.code_hash.is_some() {
+                            return Err(PevmError::ExecutionError(
+                                "Transaction(RejectCallerWithCode)".to_string(),
+                            ));
+                        }
+
+                        // TODO: Guard against overflows & underflows
+                        // Ideally we would share these calculations with revm
+                        // (using their utility functions).
+                        let tx = &unsafe { txs.get_unchecked(tx_idx) };
+                        let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
+                        if let Some(blob_fee) = tx.max_fee_per_blob_gas {
+                            max_fee += U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee);
+                        }
+                        if current_account.balance < max_fee {
+                            return Err(PevmError::ExecutionError(
+                                "Transaction(LackOfFundForMaxFee)".to_string(),
+                            ));
+                        }
+                        current_account.balance -= addition;
+                        // End of overflow TODO
+
+                        current_account.nonce += 1;
                     }
                     // TODO: Better error handling
                     _ => unreachable!(),
@@ -282,107 +302,6 @@ pub fn execute_revm_sequential<S: Storage>(
         }
     }
     Ok(results)
-}
-
-// Return `None` to signal falling back to sequential execution as we detected too many
-// dependencies. Otherwise return a tuned scheduler and the max concurrency level.
-// TODO: Clearer interface & make this as fast as possible.
-// For instance, to use an enum return type.
-fn preprocess_dependencies(
-    beneficiary_address: &Address,
-    txs: &[TxEnv],
-) -> Option<(DeferDrop<Scheduler>, NonZeroUsize)> {
-    let block_size = txs.len();
-
-    let mut transactions_status: TransactionsStatus = (0..block_size)
-        .map(|_| TxStatus {
-            incarnation: 0,
-            status: IncarnationStatus::ReadyToExecute,
-        })
-        .collect();
-    let mut transactions_dependents: TransactionsDependents = vec![vec![]; block_size];
-    let mut transactions_dependencies = TransactionsDependenciesNum::default();
-
-    // Marking transactions from a sender as dependent of the closest transaction that
-    // shares the same sender and the closest that sends to this sender to avoid fatal
-    // nonce & balance too low errors.
-    let mut last_tx_idx_by_sender = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
-    let mut last_tx_idx_by_recipient = HashMap::<Address, TxIdx, BuildAddressHasher>::default();
-
-    for (tx_idx, tx) in txs.iter().enumerate() {
-        let mut register_dependency = |dependency_idxs: Vec<usize>| {
-            // SAFETY: The dependency index is guaranteed to be smaller than the block
-            // size in this scope.
-            unsafe {
-                transactions_status.get_unchecked_mut(tx_idx).status = IncarnationStatus::Aborting;
-                transactions_dependencies.insert(tx_idx, dependency_idxs.len());
-                for dependency_idx in dependency_idxs {
-                    transactions_dependents
-                        .get_unchecked_mut(dependency_idx)
-                        .push(tx_idx);
-                }
-            }
-        };
-
-        if tx_idx > 0 {
-            // Beneficiary account: depends on all transactions from the last beneficiary tx.
-            if &tx.caller == beneficiary_address
-                || tx.transact_to == TransactTo::Call(*beneficiary_address)
-            {
-                let start_idx = last_tx_idx_by_sender
-                    .get(beneficiary_address)
-                    .cloned()
-                    .unwrap_or(0);
-                register_dependency((start_idx..tx_idx).collect());
-            }
-            // Otherwise, build dependencies for the sender to avoid fatal errors
-            else {
-                let mut dependencies = Vec::new();
-                if let Some(prev_idx) = last_tx_idx_by_sender.get(&tx.caller) {
-                    dependencies.push(*prev_idx);
-                }
-                if let Some(prev_idx) = last_tx_idx_by_recipient.get(&tx.caller) {
-                    if !dependencies.contains(prev_idx) {
-                        dependencies.push(*prev_idx);
-                    }
-                }
-                if !dependencies.is_empty() {
-                    register_dependency(dependencies);
-                }
-            }
-        }
-
-        // TODO: Continue to fine tune this ratio.
-        if transactions_dependencies.len() as f64 / block_size as f64 > 0.85 {
-            return None;
-        }
-
-        last_tx_idx_by_sender.insert(tx.caller, tx_idx);
-        if tx.value > U256::ZERO {
-            if let TransactTo::Call(to_address) = tx.transact_to {
-                last_tx_idx_by_recipient.insert(to_address, tx_idx);
-            }
-        }
-    }
-
-    let min_concurrency_level = NonZeroUsize::new(2).unwrap();
-    let max_concurrency_level =
-        // Diving the number of ready transactions by 2 means a thread must
-        // complete ~4 tasks to justify its overheads.
-        // TODO: Further fine tune given the dependency data above.
-        NonZeroUsize::new((block_size - transactions_dependencies.len()) / 2)
-            .unwrap_or(min_concurrency_level)
-            .max(min_concurrency_level);
-
-    Some((
-        DeferDrop::new(Scheduler::new(
-            block_size,
-            transactions_status,
-            transactions_dependents,
-            transactions_dependencies,
-        )),
-        max_concurrency_level,
-    ))
 }
 
 fn try_execute<S: Storage>(
