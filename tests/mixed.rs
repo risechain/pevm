@@ -1,7 +1,6 @@
 // Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
 
 use ahash::AHashMap;
-use alloy_primitives::U160;
 use pevm::{EvmAccount, InMemoryStorage};
 use rand::random;
 use revm::primitives::{env::TxEnv, Address, TransactTo, U256};
@@ -31,7 +30,7 @@ fn mixed_block() {
                     final_state.insert(address, account);
                     final_txs.push(TxEnv {
                         caller: address,
-                        transact_to: TransactTo::Call(Address::from(U160::from(small_random()))),
+                        transact_to: TransactTo::Call(address), // TODO: Randomize for tighter test
                         value: U256::from(1),
                         gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
                         gas_price: U256::from(1),

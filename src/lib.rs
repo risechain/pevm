@@ -69,14 +69,17 @@ type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 enum MemoryValue {
     Basic(Box<AccountBasic>),
     Code(Option<Box<Bytecode>>),
+    Storage(U256),
     // We lazily update the beneficiary balance to avoid continuous
     // dependencies as all transactions read and write to it. We also
-    // lazy update the recipient balance of raw transfers, which is also
-    // common (popular CEX addresses, etc).
+    // lazy update the senders & recipients of raw transfers, which are
+    // also common (popular CEX addresses, airdrops, etc).
     // We fully evaluate these account states at the end of the block or
     // when there is an explicit read.
-    LazyBalanceAddition(U256),
-    Storage(U256),
+    // Explicit balance addition.
+    LazyRecipient(U256),
+    // Explicit balance subtraction & implicit nonce increment.
+    LazySender(U256),
 }
 
 enum MemoryEntry {
@@ -126,12 +129,6 @@ struct TxStatus {
     status: IncarnationStatus,
 }
 
-// TODO: Clearer doc. See `Scheduler` in `scheduler.rs` for now.
-type TransactionsStatus = Vec<TxStatus>;
-// TODO: Consider using [SmallVec] for these `[DepsList]`
-type TransactionsDependents = Vec<Vec<TxIdx>>;
-type TransactionsDependenciesNum = HashMap<TxIdx, usize, BuildIdentityHasher>;
-
 // We maintain an in-memory multi-version data structure that stores for
 // each memory location the latest value written per transaction, along
 // with the associated transaction incarnation. When a transaction reads
@@ -177,6 +174,10 @@ pub enum ReadError {
     /// location from storage in the first call but from [VmMemory] in
     /// the next.
     InconsistentRead,
+    /// Found an invalid nonce, like the first transaction of a sender
+    /// not having a (+1) nonce from storage.
+    /// TODO: Add the address and tx index to the error.
+    InvalidNonce,
     /// The stored memory value type doesn't match its location type.
     /// TODO: Handle this at the type level?
     InvalidMemoryLocationType,
