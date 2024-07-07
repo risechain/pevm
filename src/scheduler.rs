@@ -125,23 +125,6 @@ impl Scheduler {
         None
     }
 
-    fn try_validate(&self) -> Option<TxVersion> {
-        let tx_idx = self.validation_idx.fetch_add(1, Ordering::Release);
-        if tx_idx < self.block_size {
-            let tx = index_mutex!(self.transactions_status, tx_idx);
-            if matches!(
-                tx.status,
-                IncarnationStatus::Executed | IncarnationStatus::Validated
-            ) {
-                return Some(TxVersion {
-                    tx_idx,
-                    tx_incarnation: tx.incarnation,
-                });
-            }
-        }
-        None
-    }
-
     pub(crate) fn next_task(&self) -> Option<Task> {
         loop {
             let execution_idx = self.execution_idx.load(Ordering::Acquire);
@@ -155,11 +138,43 @@ impl Scheduler {
                 continue;
             }
 
+            // Prioritize a validation task to minimize re-execution
             if validation_idx < execution_idx {
-                if let Some(tx_version) = self.try_validate() {
-                    return Some(Task::Validation(tx_version));
+                let tx_idx = self.validation_idx.fetch_add(1, Ordering::Release);
+                if tx_idx < self.block_size {
+                    let mut tx = index_mutex!(self.transactions_status, tx_idx);
+                    // "Steal" execution job while holding the lock
+                    if tx.status == IncarnationStatus::ReadyToExecute {
+                        tx.status = IncarnationStatus::Executing;
+                        return Some(Task::Execution(TxVersion {
+                            tx_idx,
+                            tx_incarnation: tx.incarnation,
+                        }));
+                    }
+                    // Start a typical validation task
+                    if matches!(
+                        tx.status,
+                        IncarnationStatus::Executed | IncarnationStatus::Validated
+                    ) {
+                        return Some(Task::Validation(TxVersion {
+                            tx_idx,
+                            tx_incarnation: tx.incarnation,
+                        }));
+                    }
+                    // Validation index is still catching up so continue a
+                    // new loop iteration to refetch the latest indices
+                    // before deciding again.
+                    if tx.status == IncarnationStatus::Aborting {
+                        continue;
+                    }
+                    // Fall back to execution job as this executing tx will
+                    // decide if validation is needed when it's done. If it
+                    // does, all validation tasks here would be redone anyway.
                 }
-            } else if let Some(tx_version) =
+            }
+
+            // Prioritize execution task
+            if let Some(tx_version) =
                 self.try_execute(self.execution_idx.fetch_add(1, Ordering::Release))
             {
                 return Some(Task::Execution(tx_version));
