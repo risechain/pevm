@@ -146,13 +146,13 @@ impl<'a, S: Storage> VmDb<'a, S> {
         db
     }
 
-    fn get_address_hash(&self, address: &Address) -> MemoryLocationHash {
+    fn hash_basic(&self, address: &Address) -> MemoryLocationHash {
         if address == self.from {
             self.from_hash
         } else if Some(address) == self.to {
             self.to_hash.unwrap()
         } else {
-            self.vm.get_address_hash(address)
+            self.vm.hash_basic(address)
         }
     }
 
@@ -217,7 +217,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             return Ok(None);
         }
 
-        let location_hash = self.get_address_hash(&address);
+        let location_hash = self.hash_basic(&address);
 
         // We return a mock for non-contract addresses (for lazy updates) to avoid
         // unncessarily evaluating its balance here.
@@ -521,12 +521,9 @@ impl<'a, S: Storage> Vm<'a, S> {
         }
     }
 
-    fn get_address_hash(&self, address: &Address) -> MemoryLocationHash {
-        if address == &self.block_env.coinbase {
-            self.beneficiary_location_hash
-        } else {
-            self.hasher.hash_one(MemoryLocation::Basic(*address))
-        }
+    #[inline(always)]
+    fn hash_basic(&self, address: &Address) -> MemoryLocationHash {
+        self.hasher.hash_one(MemoryLocation::Basic(*address))
     }
 
     // Execute a transaction. This can read from memory but cannot modify any state.
@@ -549,9 +546,9 @@ impl<'a, S: Storage> Vm<'a, S> {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_idx) };
         let from = &tx.caller;
-        let from_hash = self.get_address_hash(from);
+        let from_hash = self.hash_basic(from);
         let (to, to_hash) = match &tx.transact_to {
-            TransactTo::Call(address) => (Some(address), Some(self.get_address_hash(address))),
+            TransactTo::Call(address) => (Some(address), Some(self.hash_basic(address))),
             TransactTo::Create => (None, None),
         };
 
@@ -582,10 +579,8 @@ impl<'a, S: Storage> Vm<'a, S> {
                 let mut lazy_addresses = NewLazyAddresses::new();
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
-                        write_set.push((
-                            self.get_address_hash(address),
-                            MemoryValue::Basic(Box::default()),
-                        ));
+                        write_set
+                            .push((self.hash_basic(address), MemoryValue::Basic(Box::default())));
                         write_set.push((
                             self.hasher.hash_one(MemoryLocation::Code(*address)),
                             MemoryValue::Code(None),
@@ -594,7 +589,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                     }
 
                     if account.is_touched() {
-                        let account_location_hash = self.get_address_hash(address);
+                        let account_location_hash = self.hash_basic(address);
                         let read_account = evm.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
