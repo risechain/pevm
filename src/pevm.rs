@@ -22,7 +22,7 @@ use crate::{
     primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
-    vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
+    vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
     AccountBasic, BuildAddressHasher, BuildIdentityHasher, EvmAccount, IncarnationStatus,
     MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependenciesNum,
     TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion,
@@ -264,8 +264,10 @@ pub fn execute_revm_sequential<S: Storage>(
     let mut results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
     for tx in txs {
-        match execute_tx(&mut db, chain, spec_id, block_env.clone(), tx, true) {
+        let mut evm = build_evm(&mut db, chain, spec_id, block_env.clone(), tx, true);
+        match evm.transact() {
             Ok(result_and_state) => {
+                drop(evm); // release db
                 db.commit(result_and_state.state.clone());
 
                 let mut execution_result =
