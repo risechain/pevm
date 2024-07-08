@@ -517,14 +517,15 @@ impl<'a, S: Storage> Vm<'a, S> {
 
         // Execute
         let mut db = VmDb::new(self, &tx_idx, from, from_hash, to, to_hash);
-        match execute_tx(
+        let mut evm = build_evm(
             &mut db,
             self.chain,
             self.spec_id,
             self.block_env.clone(),
             tx.clone(),
             false,
-        ) {
+        );
+        match evm.transact() {
             Ok(result_and_state) => {
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
@@ -546,7 +547,7 @@ impl<'a, S: Storage> Vm<'a, S> {
 
                     if account.is_touched() {
                         let account_location_hash = self.get_address_hash(address);
-                        let read_account = db.read_accounts.get(&account_location_hash);
+                        let read_account = evm.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
                         let is_new_code =
@@ -562,7 +563,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                         {
                             // Skip transactions with the same from & to until we have lazy updates
                             // for the sender nonce & balance.
-                            if db.is_lazy && Some(account_location_hash) == to_hash {
+                            if evm.db().is_lazy && Some(account_location_hash) == to_hash {
                                 write_set.push((
                                     account_location_hash,
                                     MemoryValue::LazyBalanceAddition(tx.value),
@@ -615,7 +616,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                     }
                     // Validate from this transaction if it reads something outside of its
                     // sender and to infos.
-                    else if !db.only_read_from_and_to {
+                    else if !evm.db().only_read_from_and_to {
                         Some(tx_idx)
                     }
                     // Validate from the next transaction if doesn't read externally but
@@ -635,6 +636,8 @@ impl<'a, S: Storage> Vm<'a, S> {
                     else {
                         None
                     };
+
+                drop(evm); // release db
 
                 VmExecutionResult::Ok {
                     execution_result: PevmTxExecutionResult::from_revm(
@@ -707,14 +710,14 @@ impl<'a, S: Storage> Vm<'a, S> {
     }
 }
 
-pub(crate) fn execute_tx<DB: Database>(
+pub(crate) fn build_evm<'a, DB: Database>(
     db: DB,
     chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
     tx: TxEnv,
     with_reward_beneficiary: bool,
-) -> Result<ResultAndState, EVMError<DB::Error>> {
+) -> Evm<'a, (), DB> {
     // This is much uglier than the builder interface but can be up to 50% faster!!
     let context = Context {
         evm: EvmContext::new_with_env(
@@ -725,5 +728,5 @@ pub(crate) fn execute_tx<DB: Database>(
     };
     // TODO: Support OP handlers
     let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
-    Evm::new(context, handler).transact()
+    Evm::new(context, handler)
 }
