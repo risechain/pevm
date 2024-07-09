@@ -103,7 +103,6 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     }
 
     // Preprocess locations
-    // TODO: Move to a dedicated preprocessing module with preprocessing deps
     let block_size = txs.len();
     let hasher = ahash::RandomState::new();
     let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
@@ -124,6 +123,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         estimated_locations,
         lazy_addresses,
     ));
+    let txs = DeferDrop::new(txs);
     let vm = Vm::new(
         &hasher, &storage, &mv_memory, &txs, chain, spec_id, block_env,
     );
