@@ -6,8 +6,6 @@ use std::{
     },
 };
 
-use crossbeam::utils::CachePadded;
-
 use crate::{IncarnationStatus, Task, TxIdx, TxStatus, TxVersion};
 
 // The Pevm collaborative scheduler coordinates execution & validation
@@ -35,58 +33,45 @@ use crate::{IncarnationStatus, Task, TxIdx, TxStatus, TxVersion};
 // transactions. Threads that perform these tasks can already detect validation
 // failure due to the ESTIMATE markers on memory locations, instead of waiting
 // for a subsequent incarnation to finish.
-//
-// To fight false-sharing, instead of blindly padding everything, we run
-// $ CARGO_PROFILE_BENCH_DEBUG=true cargo bench --bench mainnet
-// $ perf record -e cache-misses target/release/deps/mainnet-??? --bench
-// $ perf report
-// To identify then pad atomics with the highest overheads.
-// Current tops:
-// - `execution_idx`
-// - `validation_idx`
-// - The ones inside `transactions_status` `Mutex`es
-// We also align the struct and each field up to `transactions_status`
-// to start at a new 64-or-128-bytes cache line.
-#[repr(align(128))]
 pub(crate) struct Scheduler {
-    // The next transaction to try and execute.
-    execution_idx: CachePadded<AtomicUsize>,
-    // The next transaction to try and validate.
-    validation_idx: CachePadded<AtomicUsize>,
+    // The number of transactions in this block.
+    block_size: usize,
     // The most up-to-date incarnation number (initially 0) and
     // the status of this incarnation.
     // TODO: Consider packing [TxStatus]s into atomics instead of
     // [Mutex] given how small they are.
-    transactions_status: Vec<CachePadded<Mutex<TxStatus>>>,
-    // The number of transactions in this block.
-    block_size: usize,
+    transactions_status: Vec<Mutex<TxStatus>>,
+    // The list of dependent transactions to resume when the
+    // key transaction is re-executed.
+    transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
+    // The next transaction to try and execute.
+    execution_idx: AtomicUsize,
+    // The next transaction to try and validate.
+    validation_idx: AtomicUsize,
     // We won't validate until we find the first transaction that
     // reads or writes outside of its preprocessed dependencies.
     min_validation_idx: AtomicUsize,
     // The number of validated transactions
     num_validated: AtomicUsize,
-    // The list of dependent transactions to resume when the
-    // key transaction is re-executed.
-    transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
 }
 
 impl Scheduler {
     pub(crate) fn new(block_size: usize) -> Self {
         Self {
             block_size,
-            execution_idx: CachePadded::new(AtomicUsize::new(0)),
+            execution_idx: AtomicUsize::new(0),
             transactions_status: (0..block_size)
                 .map(|_| {
-                    CachePadded::new(Mutex::new(TxStatus {
+                    Mutex::new(TxStatus {
                         incarnation: 0,
                         status: IncarnationStatus::ReadyToExecute,
-                    }))
+                    })
                 })
                 .collect(),
             transactions_dependents: (0..block_size).map(|_| Mutex::default()).collect(),
             // We won't validate until we find the first transaction that
             // reads or writes outside of its preprocessed dependencies.
-            validation_idx: CachePadded::new(AtomicUsize::new(block_size)),
+            validation_idx: AtomicUsize::new(block_size),
             min_validation_idx: AtomicUsize::new(block_size),
             num_validated: AtomicUsize::new(0),
         }
