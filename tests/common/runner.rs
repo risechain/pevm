@@ -15,6 +15,7 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
     // Filling half full accounts to have enough tokens for tests without worrying about
     // the corner case of balance not going beyond `U256::MAX`.
     account.basic.balance = U256::MAX.div_ceil(U256::from(2));
+    account.basic.nonce = 1;
     (address, account)
 }
 

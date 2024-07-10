@@ -202,6 +202,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 None
             };
 
+            // TODO: Assert that the evaluated nonce matches the tx's.
             for (tx_idx, memory_entry) in write_history {
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
