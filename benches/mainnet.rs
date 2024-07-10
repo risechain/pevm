@@ -14,7 +14,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 pub mod common;
 
 #[global_allocator]
-static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let chain = Chain::mainnet();
