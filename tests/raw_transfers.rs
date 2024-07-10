@@ -49,11 +49,10 @@ fn raw_transfers_same_sender_multiple_txs() {
                 // Insert a "parallel" transaction every ~256 transactions
                 // after the first ~30 guaranteed from the same sender.
                 let (address, nonce) = if i > 30 && random::<u8>() == 0 {
-                    (Address::from(U160::from(i)), 0)
+                    (Address::from(U160::from(i)), 1)
                 } else {
-                    let nonce = same_sender_nonce;
                     same_sender_nonce += 1;
-                    (same_sender_address, nonce)
+                    (same_sender_address, same_sender_nonce)
                 };
                 TxEnv {
                     caller: address,

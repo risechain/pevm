@@ -139,10 +139,16 @@ impl<'a, S: Storage> VmDb<'a, S> {
             read_set: ReadSet::with_capacity(2),
             read_accounts: HashMap::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
         };
+        // We only lazy update raw transfers that already have the sender
+        // or recipient in [MvMemory] since sequentially evaluating memory
+        // locations with only one entry is much costlier than fully
+        // evaluating it concurrently.
         // TODO: Better error handling
         // TODO: Only lazy update in block syncing mode, not for block
         // building.
-        db.is_lazy = to.is_some_and(|to| db.get_code(*to).unwrap().is_none());
+        db.is_lazy = (vm.mv_memory.have_location(&from_hash)
+            || to_hash.is_some_and(|to_hash| vm.mv_memory.have_location(&to_hash)))
+            && to.is_some_and(|to| db.get_code(*to).unwrap().is_none());
         db
     }
 

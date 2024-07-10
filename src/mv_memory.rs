@@ -185,6 +185,10 @@ impl MvMemory {
         self.data.get(location)
     }
 
+    pub(crate) fn have_location(&self, location: &MemoryLocationHash) -> bool {
+        self.data.contains_key(location)
+    }
+
     pub(crate) fn consume_lazy_addresses(&self) -> impl IntoIterator<Item = Address> {
         std::mem::take(&mut *self.lazy_addresses.lock().unwrap())
             .0
