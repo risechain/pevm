@@ -4,6 +4,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
     },
+    thread,
 };
 
 use crate::{IncarnationStatus, Task, TxIdx, TxStatus, TxVersion};
@@ -101,6 +102,7 @@ impl Scheduler {
                 {
                     break;
                 }
+                thread::yield_now();
                 continue;
             }
 
