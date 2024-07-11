@@ -38,7 +38,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
     group.bench_function("Sequential", |b| {
         b.iter(|| {
             execute_revm_sequential(
-                black_box(storage.clone()),
+                black_box(&storage),
                 black_box(chain),
                 black_box(spec_id),
                 black_box(block_env.clone()),
@@ -49,7 +49,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
     group.bench_function("Parallel", |b| {
         b.iter(|| {
             execute_revm(
-                black_box(storage.clone()),
+                black_box(&storage),
                 black_box(chain),
                 black_box(spec_id),
                 black_box(block_env.clone()),
