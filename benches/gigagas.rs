@@ -26,7 +26,7 @@ pub mod uniswap;
 const GIGA_GAS: u64 = 1_000_000_000;
 
 #[global_allocator]
-static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
 pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
