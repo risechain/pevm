@@ -29,14 +29,14 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result(
         &pevm::execute_revm_sequential(
-            storage.clone(),
+            &storage,
             Chain::mainnet(),
             SpecId::LATEST,
             BlockEnv::default(),
             txs.clone(),
         ),
         &pevm::execute_revm(
-            storage,
+            &storage,
             Chain::mainnet(),
             SpecId::LATEST,
             BlockEnv::default(),
@@ -95,14 +95,8 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let sequential_result = pevm::execute(
-        storage.clone(),
-        chain,
-        block.clone(),
-        concurrency_level,
-        true,
-    );
-    let parallel_result = pevm::execute(storage, chain, block.clone(), concurrency_level, false);
+    let sequential_result = pevm::execute(&storage, chain, block.clone(), concurrency_level, true);
+    let parallel_result = pevm::execute(&storage, chain, block.clone(), concurrency_level, false);
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {

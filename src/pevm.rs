@@ -52,7 +52,7 @@ pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
 pub fn execute<S: Storage + Send + Sync>(
-    storage: S,
+    storage: &S,
     chain: Chain,
     block: Block,
     concurrency_level: NonZeroUsize,
@@ -91,7 +91,7 @@ pub fn execute<S: Storage + Send + Sync>(
 // Ideally everyone would go through the [Alloy] interface. This one is currently
 // useful for testing, and for users that are heavily tied to Revm like Reth.
 pub fn execute_revm<S: Storage + Send + Sync>(
-    storage: S,
+    storage: &S,
     chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -125,7 +125,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     ));
     let txs = DeferDrop::new(txs);
     let vm = Vm::new(
-        &hasher, &storage, &mv_memory, &txs, chain, spec_id, block_env,
+        &hasher, storage, &mv_memory, &txs, chain, spec_id, block_env,
     );
     let scheduler = DeferDrop::new(Scheduler::new(block_size));
 
@@ -275,13 +275,13 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 // Useful for falling back for (small) blocks with many dependencies.
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
 pub fn execute_revm_sequential<S: Storage>(
-    storage: S,
+    storage: &S,
     chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
 ) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
-    let mut db = CacheDB::new(StorageWrapper(&storage));
+    let mut db = CacheDB::new(StorageWrapper(storage));
     let mut results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
     for tx in txs {

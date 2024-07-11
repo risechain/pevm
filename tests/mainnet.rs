@@ -53,7 +53,7 @@ fn mainnet_blocks_from_rpc() {
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let wrapped_storage = StorageWrapper(&rpc_storage);
         let db = CacheDB::new(&wrapped_storage);
-        common::test_execute_alloy(db.clone(), Chain::mainnet(), block.clone(), true);
+        common::test_execute_alloy(db, Chain::mainnet(), block.clone(), true);
 
         // Snapshot blocks (for benchmark)
         // TODO: Port to a dedicated CLI instead?
