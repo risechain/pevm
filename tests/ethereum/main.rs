@@ -82,21 +82,12 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv,
             .access_lists
             .get(indexes.data)
             .and_then(Option::as_deref)
-            .unwrap_or_default()
-            .iter()
-            .map(|item| {
-                (
-                    item.address,
-                    item.storage_keys
-                        .iter()
-                        .map(|key| U256::from_be_bytes(key.0))
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect(),
+            .cloned()
+            .unwrap_or_default(),
         gas_priority_fee: tx.max_priority_fee_per_gas,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+        authorization_list: None, // TODO: Support in the upcoming hardfork
     })
 }
 
@@ -184,7 +175,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                         "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => error[..24].to_string() == "Transaction(TooManyBlobs",
                         "TR_TipGtFeeCap" => error == "Transaction(PriorityFeeGreaterThanMaxFee)",
                         "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == "Transaction(BlobVersionNotSupported)",
-                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(MaxFeePerBlobGasNotSupported)",
+                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(BlobVersionedHashesNotSupported)",
                         "TransactionException.TYPE_3_TX_PRE_FORK" => error == "Transaction(BlobVersionedHashesNotSupported)",
                         "TR_InitCodeLimitExceeded" => error == "Transaction(CreateInitCodeSizeLimit)",
                         _ => panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}")

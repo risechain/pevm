@@ -10,14 +10,14 @@ use crate::{AccountBasic, BuildAddressHasher, EvmAccount, Storage};
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage {
     accounts: HashMap<Address, EvmAccount, BuildAddressHasher>,
-    block_hashes: AHashMap<U256, B256>,
+    block_hashes: AHashMap<u64, B256>,
 }
 
 impl InMemoryStorage {
     /// Construct a new [InMemoryStorage]
     pub fn new(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
-        block_hashes: impl IntoIterator<Item = (U256, B256)>,
+        block_hashes: impl IntoIterator<Item = (u64, B256)>,
     ) -> Self {
         InMemoryStorage {
             accounts: accounts.into_iter().collect(),
@@ -75,7 +75,7 @@ impl Storage for InMemoryStorage {
             .unwrap_or_default())
     }
 
-    fn block_hash(&self, number: &U256) -> Result<B256, Self::Error> {
+    fn block_hash(&self, number: &u64) -> Result<B256, Self::Error> {
         Ok(self
             .block_hashes
             .get(number)
