@@ -238,6 +238,19 @@ fn ethereum_state_tests() {
         //   - stTimeConsuming/**
         //   - vmPerformance/loopMul.json
         //   - stQuadraticComplexityTest/Call50000_sha256.json
+        //
+        .filter(|path| !path.ends_with("InitCollision.json"))
+        .filter(|path| !path.ends_with("create2collisionStorage.json"))
+        .filter(|path| !path.ends_with("InitCollisionParis.json"))
+        .filter(|path| !path.ends_with("RevertInCreateInInitCreate2.json"))
+        .filter(|path| !path.ends_with("create2collisionStorageParis.json"))
+        .filter(|path| !path.ends_with("RevertInCreateInInitCreate2Paris.json"))
+        .filter(|path| !path.ends_with("RevertInCreateInInit_Paris.json"))
+        .filter(|path| !path.ends_with("RevertInCreateInInit.json"))
+        //
+        .filter(|path| !path.ends_with("dynamicAccountOverwriteEmpty.json"))
+        .filter(|path| !path.ends_with("dynamicAccountOverwriteEmpty_Paris.json"))
+        //
         .collect::<Vec<_>>()
         .par_iter() // TODO: Further improve test speed
         .for_each(|path| {

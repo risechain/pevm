@@ -61,13 +61,6 @@ impl Storage for InMemoryStorage {
         Ok(self.bytecodes.get(code_hash).cloned())
     }
 
-    fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
-        Ok(self
-            .accounts
-            .get(address)
-            .is_some_and(|account| !account.storage.is_empty()))
-    }
-
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
         Ok(self
             .accounts
