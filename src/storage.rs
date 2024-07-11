@@ -136,7 +136,7 @@ pub trait Storage {
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error>;
 
     /// Get block hash by block number.
-    fn block_hash(&self, number: &U256) -> Result<B256, Self::Error>;
+    fn block_hash(&self, number: &u64) -> Result<B256, Self::Error>;
 }
 
 // We can use any REVM database as storage provider. Convenient for
@@ -182,7 +182,7 @@ where
         self.storage_ref(*address, *index)
     }
 
-    fn block_hash(&self, number: &U256) -> Result<B256, Self::Error> {
+    fn block_hash(&self, number: &u64) -> Result<B256, Self::Error> {
         self.block_hash_ref(*number)
     }
 }
@@ -227,7 +227,7 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
         self.0.storage(&address, &index)
     }
 
-    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         self.0.block_hash(&number)
     }
 }

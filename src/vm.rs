@@ -212,17 +212,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 
     // TODO: More granularity here to ensure we only record dependencies for,
     // say, only an account's balance instead of the whole account info.
-    fn basic(
-        &mut self,
-        address: Address,
-        // TODO: Better way for REVM to notify explicit reads
-        is_preload: bool,
-    ) -> Result<Option<AccountInfo>, Self::Error> {
-        // We only return full accounts on explicit usage.
-        if is_preload {
-            return Ok(None);
-        }
-
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let location_hash = self.hash_basic(&address);
 
         // We return a mock for non-contract addresses (for lazy updates) to avoid
@@ -481,7 +471,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             .map_err(|err| ReadError::StorageError(format!("{err:?}")))
     }
 
-    fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         self.vm
             .storage
             .block_hash(&number)

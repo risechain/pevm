@@ -35,7 +35,7 @@ pub struct RpcStorage {
     // Using a [Mutex] so we don't propagate mutability requirements back
     // to our [Storage] trait and meet [Send]/[Sync] requirements for Pevm.
     cache_accounts: Mutex<AHashMap<Address, EvmAccount>>,
-    cache_block_hashes: Mutex<AHashMap<U256, B256>>,
+    cache_block_hashes: Mutex<AHashMap<u64, B256>>,
     // TODO: Better async handling.
     runtime: Runtime,
 }
@@ -60,7 +60,7 @@ impl RpcStorage {
     }
 
     /// Get a snapshot of block hashes
-    pub fn get_cache_block_hashes(&self) -> AHashMap<U256, B256> {
+    pub fn get_cache_block_hashes(&self) -> AHashMap<u64, B256> {
         self.cache_block_hashes.lock().unwrap().clone()
     }
 }
@@ -164,7 +164,7 @@ impl Storage for RpcStorage {
         Ok(value)
     }
 
-    fn block_hash(&self, number: &U256) -> Result<B256, Self::Error> {
+    fn block_hash(&self, number: &u64) -> Result<B256, Self::Error> {
         if let Some(&block_hash) = self.cache_block_hashes.lock().unwrap().get(number) {
             return Ok(block_hash);
         }
@@ -173,7 +173,7 @@ impl Storage for RpcStorage {
             .runtime
             .block_on(
                 self.provider
-                    .get_block_by_number(BlockNumberOrTag::Number(number.to::<u64>()), false)
+                    .get_block_by_number(BlockNumberOrTag::Number(*number), false)
                     .into_future(),
             )
             .map(|block| block.unwrap().header.hash.unwrap())?;

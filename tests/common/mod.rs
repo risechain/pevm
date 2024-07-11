@@ -14,7 +14,7 @@ pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, EvmAccount>;
-pub type BlockHashes = AHashMap<U256, B256>;
+pub type BlockHashes = AHashMap<u64, B256>;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     // Minimal requirements for execution
@@ -68,7 +68,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         let block_hashes: BlockHashes =
             File::open(format!("blocks/{block_number}/block_hashes.json"))
                 .map(|file| {
-                    type SerializedFormat = HashMap<U256, B256, ahash::RandomState>;
+                    type SerializedFormat = HashMap<u64, B256, ahash::RandomState>;
                     serde_json::from_reader::<_, SerializedFormat>(BufReader::new(file))
                         .unwrap()
                         .into()

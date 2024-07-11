@@ -98,22 +98,9 @@ pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingErr
         data: tx.input,
         nonce: Some(tx.nonce),
         chain_id: tx.chain_id,
-        access_list: tx
-            .access_list
-            .unwrap_or_default()
-            .iter()
-            .map(|access| {
-                (
-                    access.address,
-                    access
-                        .storage_keys
-                        .iter()
-                        .map(|&k| U256::from_be_bytes(*k))
-                        .collect(),
-                )
-            })
-            .collect(),
+        access_list: tx.access_list.unwrap_or_default().0,
         blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
+        authorization_list: None, // TODO: Support in the upcoming hardfork
     })
 }

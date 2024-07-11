@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy_chains::Chain;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use pevm::{EvmAccount, RpcStorage, StorageWrapper};
@@ -72,7 +72,7 @@ fn mainnet_blocks_from_rpc() {
             serde_json::to_writer(file_state, &accounts).unwrap();
 
             // We convert to [BTreeMap] for consistent ordering & diffs between snapshots
-            let block_hashes: BTreeMap<U256, B256> =
+            let block_hashes: BTreeMap<u64, B256> =
                 rpc_storage.get_cache_block_hashes().into_iter().collect();
             if !block_hashes.is_empty() {
                 let file = File::create(format!("{dir}/block_hashes.json")).unwrap();
