@@ -24,14 +24,6 @@ Finally, while Aptos and Polygon embed their PEVM implementation directly into t
 - Complete a robust version for syncing and building blocks for Ethereum, RISE, Optimism, and more EVM chains.
 - Get integrated into Ethereum clients and ZK provers like [Reth](https://github.com/paradigmxyz/reth), [Helios](https://github.com/a16z/helios), and [Zeth](https://github.com/risc0/zeth) to help make the Ethereum ecosystem blazingly fast.
 
-## Development
-
-- Install [cmake](https://cmake.org) for building `snmalloc` (highly performant memory allocator).
-
-```sh
-$ cargo build
-```
-
 ### V1 Done
 
 - Build a Block-STM foundation to improve on.
@@ -55,7 +47,7 @@ $ cargo build
 - Optimize the scheduler, worker threads, and synchronization based on common block scenarios.
 - Add pre-provided metadata from a statically analysed mempool or upstream nodes.
 - Better memory management:
-  - Custom memory allocators for the whole execution phase and the multi-version data structure. Early experiments with `jemalloc`, `mimalloc`, and `snmalloc` show potential up to 50% improvements.
+  - Custom memory allocators for the whole execution phase and the multi-version data structure.
   - Dedicated thread (pool) for cleaning up memory between blocks' execution.
 - Track read checkpoints to re-execute from instead of re-executing the whole transaction upon conflicts.
 - Support multiple EVM executors (REVM, JIT & AOT compilers, etc.).

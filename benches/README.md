@@ -2,7 +2,7 @@
 
 Current benchmarks are run on a Linux machine with an Intel i9-12900K (24 CPUs @5.20 GHz) and 32 GB RAM. Future benchmarks will be run on more standard cloud services on which operators tend to run nodes.
 
-We use [criterion.rs](https://github.com/bheisler/criterion.rs) to benchmark 100 samples for each sequential and parallel execution of a block. All state needed is loaded into memory before execution. We pick `snmalloc` as the global memory allocator for Gigagas blocks and `rpmalloc` for Ethereum blocks.
+We use [criterion.rs](https://github.com/bheisler/criterion.rs) to benchmark 100 samples for each sequential and parallel execution of a block. All state needed is loaded into memory before execution. We pick `rpmalloc` as the global memory allocator; it has beaten `jemalloc`, `mimalloc`, and `snmalloc` in these benchmarks.
 
 ## Gigagas Blocks
 
@@ -12,11 +12,11 @@ This benchmark includes mocked 1-Gigagas blocks to see how PEVM aids in building
 $ cargo bench --bench gigagas
 ```
 
-|                 | No. Transactions | Gas Used      | Sequential (ms) | Parallel (ms) | Speedup    |
-| --------------- | ---------------- | ------------- | --------------- | ------------- | ---------- |
-| Raw Transfers   | 47,620           | 1,000,020,000 | 122.90          | 39.388        | 🟢3.12     |
-| ERC20 Transfers | 37,123           | 1,000,019,374 | 168.95          | 37.983        | 🟢4.45     |
-| Uniswap Swaps   | 6,413            | 1,000,004,742 | 381.33          | 39.785        | 🟢**9.58** |
+|                 | No. Transactions | Gas Used      | Sequential (ms) | Parallel (ms) | Speedup     |
+| --------------- | ---------------- | ------------- | --------------- | ------------- | ----------- |
+| Raw Transfers   | 47,620           | 1,000,020,000 | 101.02          | 39.237        | 🟢2.57      |
+| ERC20 Transfers | 37,123           | 1,000,019,374 | 145.74          | 34.388        | 🟢4.24      |
+| Uniswap Swaps   | 6,413            | 1,000,004,742 | 363.59          | 27.685        | 🟢**13.13** |
 
 ## Ethereum Mainnet Blocks
 
