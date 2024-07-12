@@ -38,6 +38,9 @@ pub enum PevmError {
     MissingTransactionData,
     /// Invalid input transaction.
     InvalidTransaction(TransactionParsingError),
+    /// Storage error.
+    // TODO: More concrete types than just an arbitrary string.
+    StorageError(String),
     /// EVM execution error.
     // TODO: More concrete types than just an arbitrary string.
     ExecutionError(String),
@@ -196,8 +199,10 @@ pub fn execute_revm<S: Storage + Send + Sync>(
             };
             // Accounts that take implicit writes like the beneficiary account can be contract!
             let code = if current_account.code_hash.is_some() {
-                // TODO: Better error handling
-                storage.code_by_address(&address).unwrap()
+                match storage.code_by_address(&address) {
+                    Ok(code) => code,
+                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
+                }
             } else {
                 None
             };
@@ -299,7 +304,7 @@ pub fn execute_revm_sequential<S: Storage>(
 
                 results.push(execution_result);
             }
-            Err(err) => return Err(PevmError::ExecutionError(format!("{err:?}"))),
+            Err(err) => return Err(PevmError::ExecutionError(err.to_string())),
         }
     }
     Ok(results)

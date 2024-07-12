@@ -1,4 +1,4 @@
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Display, sync::Arc};
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -118,7 +118,7 @@ impl From<Bytecode> for EvmCode {
 /// TODO: Better API for third-party integration.
 pub trait Storage {
     /// Errors when querying data from storage.
-    type Error: Debug;
+    type Error: Display;
 
     /// Get basic account information.
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error>;
@@ -145,7 +145,7 @@ pub trait Storage {
 // TODO: Do something equivalent to [CachedDB] ourselves and remove this.
 impl<D: DatabaseRef> Storage for D
 where
-    D::Error: Debug,
+    D::Error: Display,
 {
     type Error = D::Error;
 

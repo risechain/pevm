@@ -28,7 +28,7 @@ impl InMemoryStorage {
 
 impl Storage for InMemoryStorage {
     // TODO: More proper error handling
-    type Error = ();
+    type Error = u8;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
         Ok(self

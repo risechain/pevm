@@ -203,7 +203,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
             .storage
             .code_by_address(&address)
             .map(|code| code.map(Bytecode::from))
-            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
+            .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 }
 
@@ -356,7 +356,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                         None
                     }
                 }
-                Err(err) => return Err(ReadError::StorageError(format!("{err:?}"))),
+                Err(err) => return Err(ReadError::StorageError(err.to_string())),
             };
         }
 
@@ -408,14 +408,14 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             .storage
             .code_by_hash(&code_hash)
             .map(|code| code.map(Bytecode::from).unwrap_or_default())
-            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
+            .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
         self.vm
             .storage
             .has_storage(&address)
-            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
+            .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
@@ -468,14 +468,14 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         self.vm
             .storage
             .storage(&address, &index)
-            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
+            .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         self.vm
             .storage
             .block_hash(&number)
-            .map_err(|err| ReadError::StorageError(format!("{err:?}")))
+            .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 }
 
