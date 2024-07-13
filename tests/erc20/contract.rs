@@ -88,8 +88,8 @@ impl ERC20Token {
             basic: AccountBasic {
                 balance: U256::ZERO,
                 nonce: 1u64,
-                code_hash: Some(bytecode.hash_slow()),
             },
+            code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
         }

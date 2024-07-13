@@ -56,6 +56,9 @@ pub enum PevmError {
 /// Execution result of a block
 pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 
+// TODO: Add a [Pevm] struct for long-lasting use to minimize
+// (de)allocations between runs.
+
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
 pub fn execute<S: Storage + Send + Sync>(
@@ -202,8 +205,12 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 _ => AccountBasic::default(),
             };
             // Accounts that take implicit writes like the beneficiary account can be contract!
-            let code = if current_account.code_hash.is_some() {
-                match storage.code_by_address(&address) {
+            let code_hash = match storage.code_hash(&address) {
+                Ok(code_hash) => code_hash,
+                Err(err) => return Err(PevmError::StorageError(err.to_string())),
+            };
+            let code = if let Some(code_hash) = &code_hash {
+                match storage.code_by_hash(code_hash) {
                     Ok(code) => code,
                     Err(err) => return Err(PevmError::StorageError(err.to_string())),
                 }
@@ -216,11 +223,13 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 let mut self_destructed = false;
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                        if let Some(info) = *info {
-                            // TODO: Can code (hash) be changed mid-block?
+                        if let Some(info) = info {
                             current_account.balance = info.balance;
                             current_account.nonce = info.nonce;
                         } else {
+                            // TODO: Be careful of contracts re-deployed in the same block
+                            // that it is self-destructed, especially if there is an inbetween
+                            // transaction that funds it (to trigger lazy evaluation).
                             self_destructed = true;
                         }
                     }
@@ -231,12 +240,6 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                         // We must re-do extra sender balance checks as we mock
                         // the max value in [Vm] during execution. Ideally we
                         // can turn off these redundant checks in revm.
-                        if current_account.code_hash.is_some() {
-                            return Err(PevmError::ExecutionError(
-                                "Transaction(RejectCallerWithCode)".to_string(),
-                            ));
-                        }
-
                         // TODO: Guard against overflows & underflows
                         // Ideally we would share these calculations with revm
                         // (using their utility functions).
@@ -264,7 +267,10 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 let account = tx_result.state.entry(address).or_default();
                 // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
                 if self_destructed
-                    || spec_id.is_enabled_in(SPURIOUS_DRAGON) && current_account.is_empty()
+                    || spec_id.is_enabled_in(SPURIOUS_DRAGON)
+                        && code_hash.is_none()
+                        && current_account.nonce == 0
+                        && current_account.balance == U256::ZERO
                 {
                     *account = None;
                 } else if let Some(account) = account {
@@ -277,6 +283,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                     // which doesn't have explicit writes in [tx_result.state]
                     *account = Some(EvmAccount {
                         basic: current_account.clone(),
+                        code_hash,
                         code: code.clone(),
                         storage: AHashMap::default(),
                     });

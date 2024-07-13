@@ -6,21 +6,34 @@ use alloy_primitives::{keccak256, Address, B256, U256};
 use super::EvmCode;
 use crate::{AccountBasic, BuildAddressHasher, EvmAccount, Storage};
 
+type Accounts = HashMap<Address, EvmAccount, BuildAddressHasher>;
+
 /// A storage that stores chain data in memory.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage {
-    accounts: HashMap<Address, EvmAccount, BuildAddressHasher>,
+    accounts: Accounts,
+    bytecodes: AHashMap<B256, EvmCode>,
     block_hashes: AHashMap<u64, B256>,
 }
 
 impl InMemoryStorage {
     /// Construct a new [InMemoryStorage]
+    // TODO: Take in [bytecodes] instead of reading duplicates from
+    // [accounts].
     pub fn new(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
         block_hashes: impl IntoIterator<Item = (u64, B256)>,
     ) -> Self {
+        let accounts: Accounts = accounts.into_iter().collect();
+        let mut bytecodes = AHashMap::default();
+        for (_, account) in accounts.iter() {
+            if let (Some(code_hash), Some(code)) = (account.code_hash, &account.code) {
+                bytecodes.entry(code_hash).or_insert_with(|| code.clone());
+            }
+        }
         InMemoryStorage {
-            accounts: accounts.into_iter().collect(),
+            accounts,
+            bytecodes,
             block_hashes: block_hashes.into_iter().collect(),
         }
     }
@@ -37,26 +50,15 @@ impl Storage for InMemoryStorage {
             .map(|account| account.basic.clone()))
     }
 
-    fn code_by_address(&self, address: &Address) -> Result<Option<EvmCode>, Self::Error> {
+    fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error> {
         Ok(self
             .accounts
             .get(address)
-            .and_then(|account| account.code.clone()))
+            .and_then(|account| account.code_hash))
     }
 
-    // TODO: Map [B256] to [EvmCode] for much faster search
-    // Currently acceptable as this is not used during execution.
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
-        for account in self.accounts.values() {
-            if account
-                .basic
-                .code_hash
-                .is_some_and(|hash| &hash == code_hash)
-            {
-                return Ok(account.code.clone());
-            }
-        }
-        Ok(None)
+        Ok(self.bytecodes.get(code_hash).cloned())
     }
 
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {

@@ -1,6 +1,8 @@
 use ahash::{AHashMap, HashMapExt};
 use alloy_chains::Chain;
 use alloy_rpc_types::Receipt;
+use dashmap::DashMap;
+use defer_drop::DeferDrop;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
@@ -112,7 +114,8 @@ struct VmDb<'a, S: Storage> {
     // Only applied to raw transfers' senders & recipients at the moment.
     is_lazy: bool,
     read_set: ReadSet,
-    read_accounts: HashMap<MemoryLocationHash, AccountBasic, BuildIdentityHasher>,
+    // TODO: Clearer type for [AccountBasic] plus code hash
+    read_accounts: HashMap<MemoryLocationHash, (AccountBasic, Option<B256>), BuildIdentityHasher>,
 }
 
 impl<'a, S: Storage> VmDb<'a, S> {
@@ -148,7 +151,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
         // building.
         db.is_lazy = (vm.mv_memory.have_location(&from_hash)
             || to_hash.is_some_and(|to_hash| vm.mv_memory.have_location(&to_hash)))
-            && to.is_some_and(|to| db.get_code(*to).unwrap().is_none());
+            && to.is_some_and(|to| db.get_code_hash(*to).unwrap().is_none());
         db
     }
 
@@ -162,19 +165,19 @@ impl<'a, S: Storage> VmDb<'a, S> {
         }
     }
 
-    // TODO: Add a dry check version that only answers if the address has code
-    // without cloning & returning an unused code
-    fn get_code(&mut self, address: Address) -> Result<Option<Bytecode>, ReadError> {
-        let location_hash = self.vm.hasher.hash_one(MemoryLocation::Code(address));
+    fn get_code_hash(&mut self, address: Address) -> Result<Option<B256>, ReadError> {
+        let location_hash = self.vm.hasher.hash_one(MemoryLocation::CodeHash(address));
         let read_origins = self.read_set.entry(location_hash).or_default();
         let prev_origin = read_origins.last();
 
-        // Try to read the latest code in [MvMemory]
+        // Try to read the latest code hash in [MvMemory]
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
         if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
-            if let Some((tx_idx, MemoryEntry::Data(tx_incarnation, MemoryValue::Code(code)))) =
-                written_transactions.range(..self.tx_idx).next_back()
+            if let Some((
+                tx_idx,
+                MemoryEntry::Data(tx_incarnation, MemoryValue::CodeHash(code_hash)),
+            )) = written_transactions.range(..self.tx_idx).next_back()
             {
                 let origin = ReadOrigin::MvMemory(TxVersion {
                     tx_idx: *tx_idx,
@@ -187,7 +190,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
                 } else {
                     read_origins.push(origin);
                 }
-                return Ok(code.as_ref().map(|code| (**code).clone()));
+                return Ok(*code_hash);
             }
         };
 
@@ -201,8 +204,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
         }
         self.vm
             .storage
-            .code_by_address(&address)
-            .map(|code| code.map(Bytecode::from))
+            .code_hash(&address)
             .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 }
@@ -292,7 +294,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                             new_origins.push(origin);
                             match value {
                                 MemoryValue::Basic(account) => {
-                                    final_account.clone_from(&(**account));
+                                    final_account.clone_from(account);
                                     found_basic_from_mv_memory = true;
                                     break;
                                 }
@@ -352,7 +354,6 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                             balance: balance_addition,
                             // TODO: Assert [nonce_addition] to be 0
                             nonce: 0,
-                            code_hash: None,
                         })
                     } else {
                         None
@@ -388,17 +389,28 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             } else {
                 account.balance -= balance_addition;
             };
-            self.read_accounts.insert(location_hash, account.clone());
+
+            let code_hash = self.get_code_hash(address)?;
+            let code = if let Some(code_hash) = &code_hash {
+                if let Some(code) = self.vm.new_bytecodes.get(code_hash) {
+                    Some(code.clone())
+                } else {
+                    match self.vm.storage.code_by_hash(code_hash) {
+                        Ok(code) => code.map(Bytecode::from),
+                        Err(err) => return Err(ReadError::StorageError(err.to_string())),
+                    }
+                }
+            } else {
+                None
+            };
+            self.read_accounts
+                .insert(location_hash, (account.clone(), code_hash));
 
             return Ok(Some(AccountInfo {
                 balance: account.balance,
                 nonce: account.nonce,
-                code_hash: account.code_hash.unwrap_or(KECCAK_EMPTY),
-                code: if location_hash == self.from_hash {
-                    None
-                } else {
-                    self.get_code(address)?
-                },
+                code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
+                code,
             }));
         }
 
@@ -491,6 +503,7 @@ pub(crate) struct Vm<'a, S: Storage> {
     block_env: BlockEnv,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
+    new_bytecodes: DeferDrop<DashMap<B256, Bytecode>>,
 }
 
 impl<'a, S: Storage> Vm<'a, S> {
@@ -513,6 +526,9 @@ impl<'a, S: Storage> Vm<'a, S> {
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             block_env,
             reward_policy: RewardPolicy::Ethereum, // TODO: Derive from [chain]
+            // TODO: Fine-tune the number of shards, like to the next number of two from the
+            // number of worker threads.
+            new_bytecodes: DeferDrop::new(DashMap::default()),
         }
     }
 
@@ -576,11 +592,10 @@ impl<'a, S: Storage> Vm<'a, S> {
                 let mut lazy_addresses = NewLazyAddresses::new();
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
-                        write_set
-                            .push((self.hash_basic(address), MemoryValue::Basic(Box::default())));
+                        write_set.push((self.hash_basic(address), MemoryValue::Basic(None)));
                         write_set.push((
-                            self.hasher.hash_one(MemoryLocation::Code(*address)),
-                            MemoryValue::Code(None),
+                            self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
+                            MemoryValue::CodeHash(None),
                         ));
                         continue;
                     }
@@ -590,15 +605,15 @@ impl<'a, S: Storage> Vm<'a, S> {
                         let read_account = evm.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
-                        let is_new_code =
-                            has_code && read_account.map_or(true, |prev| prev.code_hash.is_none());
+                        let is_new_code = has_code
+                            && read_account.map_or(true, |(_, code_hash)| code_hash.is_none());
 
                         // Write new account changes
                         if is_new_code
                             || read_account.is_none()
-                            || read_account.is_some_and(|prev| {
-                                prev.nonce != account.info.nonce
-                                    || prev.balance != account.info.balance
+                            || read_account.is_some_and(|(basic, _)| {
+                                basic.nonce != account.info.nonce
+                                    || basic.balance != account.info.balance
                             })
                         {
                             if evm.db().is_lazy {
@@ -620,11 +635,10 @@ impl<'a, S: Storage> Vm<'a, S> {
                                 // of the whole account.
                                 write_set.push((
                                     account_location_hash,
-                                    MemoryValue::Basic(Box::new(Some(AccountBasic {
+                                    MemoryValue::Basic(Some(AccountBasic {
                                         balance: account.info.balance,
                                         nonce: account.info.nonce,
-                                        code_hash: has_code.then_some(account.info.code_hash),
-                                    }))),
+                                    })),
                                 ));
                             }
                         }
@@ -632,9 +646,12 @@ impl<'a, S: Storage> Vm<'a, S> {
                         // Write new contract
                         if is_new_code {
                             write_set.push((
-                                self.hasher.hash_one(MemoryLocation::Code(*address)),
-                                MemoryValue::Code(account.info.code.clone().map(Box::new)),
+                                self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
+                                MemoryValue::CodeHash(Some(account.info.code_hash)),
                             ));
+                            self.new_bytecodes
+                                .entry(account.info.code_hash)
+                                .or_insert_with(|| account.info.code.clone().unwrap());
                         }
                     }
 

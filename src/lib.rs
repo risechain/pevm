@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
-use revm::primitives::{Address, Bytecode, U256};
+use alloy_primitives::{Address, B256, U256};
 
 // We take the last 8 bytes of an address as its hash. This
 // seems fine as the addresses themselves are hash suffixes,
@@ -32,7 +32,7 @@ type BuildAddressHasher = BuildHasherDefault<AddressHasher>;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum MemoryLocation {
     Basic(Address),
-    Code(Address),
+    CodeHash(Address),
     Storage(Address, U256),
 }
 
@@ -67,8 +67,8 @@ type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 // matches & potentially dangerous mismatch mistakes.
 #[derive(Debug, Clone)]
 enum MemoryValue {
-    Basic(Box<Option<AccountBasic>>),
-    Code(Option<Box<Bytecode>>),
+    Basic(Option<AccountBasic>),
+    CodeHash(Option<B256>),
     Storage(U256),
     // We lazily update the beneficiary balance to avoid continuous
     // dependencies as all transactions read and write to it. We also

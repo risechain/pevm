@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 pub struct EvmAccount {
     /// The account's basic information.
     pub basic: AccountBasic,
+    /// The optional code hash of the account.
+    pub code_hash: Option<B256>,
     /// The account's optional code
     // TODO: Box this to reduce [EvmAccount]'s stack size?
     pub code: Option<EvmCode>,
@@ -29,12 +31,12 @@ impl From<Account> for EvmAccount {
     fn from(account: Account) -> Self {
         let has_code = !account.info.is_empty_code_hash();
         Self {
-            code: has_code.then(|| account.info.code.unwrap().into()),
             basic: AccountBasic {
                 balance: account.info.balance,
                 nonce: account.info.nonce,
-                code_hash: has_code.then_some(account.info.code_hash),
             },
+            code_hash: has_code.then_some(account.info.code_hash),
+            code: has_code.then(|| account.info.code.unwrap().into()),
             storage: account
                 .storage
                 .into_iter()
@@ -52,16 +54,6 @@ pub struct AccountBasic {
     pub balance: U256,
     /// The nonce of the account.
     pub nonce: u64,
-    /// The optional code hash of the account.
-    pub code_hash: Option<B256>,
-}
-
-impl AccountBasic {
-    /// Check if an account is empty for removal per EIP-161
-    // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
-    pub fn is_empty(&self) -> bool {
-        self.nonce == 0 && self.balance == U256::ZERO && self.code_hash.is_none()
-    }
 }
 
 impl Default for AccountBasic {
@@ -69,7 +61,6 @@ impl Default for AccountBasic {
         Self {
             balance: U256::ZERO,
             nonce: 0,
-            code_hash: None,
         }
     }
 }
@@ -124,7 +115,7 @@ pub trait Storage {
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error>;
 
     /// Get the code of an account.
-    fn code_by_address(&self, address: &Address) -> Result<Option<EvmCode>, Self::Error>;
+    fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error>;
 
     /// Get account code by its hash.
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error>;
@@ -154,14 +145,14 @@ where
             a.map(|info| AccountBasic {
                 balance: info.balance,
                 nonce: info.nonce,
-                code_hash: (!info.is_empty_code_hash()).then_some(info.code_hash),
             })
         })
     }
 
-    fn code_by_address(&self, address: &Address) -> Result<Option<EvmCode>, Self::Error> {
-        self.basic_ref(*address)
-            .map(|a| a.and_then(|a| a.code.map(EvmCode::from)))
+    fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error> {
+        self.basic_ref(*address).map(|info| {
+            info.and_then(|info| (!info.is_empty_code_hash()).then_some(info.code_hash))
+        })
     }
 
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
@@ -197,15 +188,16 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         Ok(if let Some(basic) = self.0.basic(&address)? {
-            let code = if basic.code_hash.is_some() {
-                self.0.code_by_address(&address)?.map(Bytecode::from)
+            let code_hash = self.0.code_hash(&address)?;
+            let code = if let Some(code_hash) = &code_hash {
+                self.0.code_by_hash(code_hash)?.map(Bytecode::from)
             } else {
                 None
             };
             Some(AccountInfo {
                 balance: basic.balance,
                 nonce: basic.nonce,
-                code_hash: basic.code_hash.unwrap_or(KECCAK_EMPTY),
+                code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
                 code,
             })
         } else {

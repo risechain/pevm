@@ -115,8 +115,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                         basic: AccountBasic {
                             balance: raw_info.balance,
                             nonce: raw_info.nonce,
-                            code_hash: (!code.is_empty()).then(|| code.hash_slow()),
                         },
+                        code_hash: (!code.is_empty()).then(|| code.hash_slow()),
                         code: (!code.is_empty()).then(|| code.into()),
                         storage: raw_info.storage.clone().into_iter().collect(),
                     },
@@ -142,7 +142,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     // Extracting such account is unjustified complexity so let's live with this for now.
                     assert!(exec_results[0].state.values().all(|account| {
                         match account {
-                            Some(account) => account.basic.code_hash.is_none(),
+                            Some(account) => account.code_hash.is_none(),
                             None => true,
                         }
                     }));
@@ -195,6 +195,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                         if let Some(account) = account {
                             let chain_state_account = chain_state.entry(address).or_default();
                             chain_state_account.basic = account.basic;
+                            chain_state_account.code_hash = account.code_hash;
                             chain_state_account.code = account.code;
                             chain_state_account.storage.extend(account.storage.into_iter());
                         } else {
@@ -208,7 +209,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                             info: AccountInfo {
                                 balance: account.basic.balance,
                                 nonce: account.basic.nonce,
-                                code_hash: account.basic.code_hash.unwrap_or(KECCAK_EMPTY),
+                                code_hash: account.code_hash.unwrap_or(KECCAK_EMPTY),
                                 code: account.code.map(Bytecode::from),
                             },
                             storage: account.storage.into_iter().collect(),
