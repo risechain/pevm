@@ -75,7 +75,7 @@ fn raw_transfers_independent_alloy() {
     let block_size = 100_000; // number of transactions
     common::test_execute_alloy(
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
-        InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
+        &InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
         Chain::mainnet(),
         Block {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),

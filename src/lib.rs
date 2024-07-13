@@ -67,7 +67,7 @@ type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 // matches & potentially dangerous mismatch mistakes.
 #[derive(Debug, Clone)]
 enum MemoryValue {
-    Basic(Box<AccountBasic>),
+    Basic(Box<Option<AccountBasic>>),
     Code(Option<Box<Bytecode>>),
     Storage(U256),
     // We lazily update the beneficiary balance to avoid continuous
