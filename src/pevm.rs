@@ -299,14 +299,14 @@ pub fn execute_revm_sequential<S: Storage>(
     txs: Vec<TxEnv>,
 ) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
     let mut db = CacheDB::new(StorageWrapper(storage));
+    let mut evm = build_evm(&mut db, chain, spec_id, block_env, true);
     let mut results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
     for tx in txs {
-        let mut evm = build_evm(&mut db, chain, spec_id, block_env.clone(), tx, true);
+        *evm.tx_mut() = tx;
         match evm.transact() {
             Ok(result_and_state) => {
-                drop(evm); // release db
-                db.commit(result_and_state.state.clone());
+                evm.db_mut().commit(result_and_state.state.clone());
 
                 let mut execution_result =
                     PevmTxExecutionResult::from_revm(spec_id, result_and_state);
