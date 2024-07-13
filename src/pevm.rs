@@ -13,7 +13,11 @@ use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
     db::CacheDB,
-    primitives::{BlockEnv, SpecId, TxEnv},
+    primitives::{
+        BlockEnv,
+        SpecId::{self, SPURIOUS_DRAGON},
+        TxEnv,
+    },
     DatabaseCommit,
 };
 
@@ -209,11 +213,16 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 
             // TODO: Assert that the evaluated nonce matches the tx's.
             for (tx_idx, memory_entry) in write_history {
+                let mut self_destructed = false;
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                        // TODO: Can code (hash) be changed mid-block?
-                        current_account.balance = info.balance;
-                        current_account.nonce = info.nonce;
+                        if let Some(info) = *info {
+                            // TODO: Can code (hash) be changed mid-block?
+                            current_account.balance = info.balance;
+                            current_account.nonce = info.nonce;
+                        } else {
+                            self_destructed = true;
+                        }
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
                         current_account.balance += addition;
@@ -253,7 +262,10 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 // SAFETY: The multi-version data structure should not leak an index over block size.
                 let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(tx_idx) };
                 let account = tx_result.state.entry(address).or_default();
-                if current_account.is_empty() {
+                // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
+                if self_destructed
+                    || spec_id.is_enabled_in(SPURIOUS_DRAGON) && current_account.is_empty()
+                {
                     *account = None;
                 } else if let Some(account) = account {
                     // Explicit write: only overwrite the account info in case there are storage changes

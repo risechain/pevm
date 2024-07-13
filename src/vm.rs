@@ -242,6 +242,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         // The sign of [balance_addition] since it can be negative for lazy senders.
         let mut positive_addition = true;
         let mut nonce_addition = 0;
+        let mut found_basic_from_mv_memory = false;
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
@@ -291,7 +292,8 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                             new_origins.push(origin);
                             match value {
                                 MemoryValue::Basic(account) => {
-                                    final_account = Some((**account).clone());
+                                    final_account.clone_from(&(**account));
+                                    found_basic_from_mv_memory = true;
                                     break;
                                 }
                                 MemoryValue::LazyRecipient(addition) => {
@@ -330,7 +332,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         }
 
         // Fall back to storage
-        if final_account.is_none() {
+        if !found_basic_from_mv_memory {
             // Populate [Storage] on the first read
             if !has_prev_origins {
                 new_origins.push(ReadOrigin::Storage);
@@ -619,11 +621,11 @@ impl<'a, S: Storage> Vm<'a, S> {
                                 // of the whole account.
                                 write_set.push((
                                     account_location_hash,
-                                    MemoryValue::Basic(Box::new(AccountBasic {
+                                    MemoryValue::Basic(Box::new(Some(AccountBasic {
                                         balance: account.info.balance,
                                         nonce: account.info.nonce,
                                         code_hash: has_code.then_some(account.info.code_hash),
-                                    })),
+                                    }))),
                                 ));
                             }
                         }
@@ -719,7 +721,9 @@ impl<'a, S: Storage> Vm<'a, S> {
                 .find(|(location, _)| location == &recipient)
             {
                 match value {
-                    MemoryValue::Basic(info) => info.balance += amount,
+                    MemoryValue::Basic(basic) => {
+                        basic.get_or_insert(AccountBasic::default()).balance += amount
+                    }
                     MemoryValue::LazySender(addition) => *addition -= amount,
                     MemoryValue::LazyRecipient(addition) => *addition += amount,
                     _ => unreachable!(), // TODO: Better error handling

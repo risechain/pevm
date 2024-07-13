@@ -89,14 +89,14 @@ fn calculate_receipt_root(
 // Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
 pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
-    storage: S,
+    storage: &S,
     chain: Chain,
     block: Block,
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let sequential_result = pevm::execute(&storage, chain, block.clone(), concurrency_level, true);
-    let parallel_result = pevm::execute(&storage, chain, block.clone(), concurrency_level, false);
+    let sequential_result = pevm::execute(storage, chain, block.clone(), concurrency_level, true);
+    let parallel_result = pevm::execute(storage, chain, block.clone(), concurrency_level, false);
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {
