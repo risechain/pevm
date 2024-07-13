@@ -686,6 +686,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                     && matches!(
                         err,
                         EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee { .. })
+                            | EVMError::Transaction(InvalidTransaction::NonceTooHigh { .. })
                     )
                 {
                     VmExecutionResult::ReadError {
