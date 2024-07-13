@@ -53,8 +53,8 @@ impl WETH9 {
             basic: AccountBasic {
                 balance: U256::ZERO,
                 nonce: 1u64,
-                code_hash: Some(bytecode.hash_slow()),
             },
+            code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
         }
@@ -133,8 +133,8 @@ impl UniswapV3Factory {
             basic: AccountBasic {
                 balance: U256::ZERO,
                 nonce: 1u64,
-                code_hash: Some(bytecode.hash_slow()),
             },
+            code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
         }
@@ -255,8 +255,8 @@ impl UniswapV3Pool {
             basic: AccountBasic {
                 balance: U256::ZERO,
                 nonce: 1u64,
-                code_hash: Some(bytecode.hash_slow()),
             },
+            code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
         }
@@ -327,8 +327,8 @@ impl SwapRouter {
             basic: AccountBasic {
                 balance: U256::ZERO,
                 nonce: 1u64,
-                code_hash: Some(bytecode.hash_slow()),
             },
+            code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
         }
@@ -373,8 +373,8 @@ impl SingleSwap {
             basic: AccountBasic {
                 balance: U256::ZERO,
                 nonce: 1u64,
-                code_hash: Some(bytecode.hash_slow()),
             },
+            code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
         }

@@ -103,15 +103,12 @@ impl Storage for RpcStorage {
                 return Ok(None);
             }
             let code = Bytecode::new_raw(code);
-            let basic = AccountBasic {
-                balance,
-                nonce,
-                code_hash: (!code.is_empty()).then(|| code.hash_slow()),
-            };
+            let basic = AccountBasic { balance, nonce };
             self.cache_accounts.lock().unwrap().insert(
                 *address,
                 EvmAccount {
                     basic: basic.clone(),
+                    code_hash: (!code.is_empty()).then(|| code.hash_slow()),
                     code: (!code.is_empty()).then(|| code.into()),
                     storage: AHashMap::default(),
                 },
@@ -120,18 +117,28 @@ impl Storage for RpcStorage {
         })
     }
 
-    fn code_by_address(&self, address: &Address) -> Result<Option<EvmCode>, Self::Error> {
+    fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error> {
         self.basic(address)?;
         Ok(self
             .cache_accounts
             .lock()
             .unwrap()
             .get(address)
-            .and_then(|account| account.code.clone()))
+            .and_then(|account| account.code_hash))
     }
 
-    fn code_by_hash(&self, _code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
-        panic!("This should not be called as the code is already loaded via account");
+    fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
+        // TODO: Cache bytecodes separately
+        for (_, account) in self.cache_accounts.lock().unwrap().iter() {
+            if account
+                .code_hash
+                .as_ref()
+                .is_some_and(|hash| hash == code_hash)
+            {
+                return Ok(account.code.clone());
+            }
+        }
+        Ok(None)
     }
 
     fn has_storage(&self, _address: &Address) -> Result<bool, Self::Error> {

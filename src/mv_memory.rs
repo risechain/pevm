@@ -43,6 +43,8 @@ impl MvMemory {
         estimated_locations: impl IntoIterator<Item = (MemoryLocationHash, Vec<TxIdx>)>,
         lazy_addresses: LazyAddresses,
     ) -> Self {
+        // TODO: Fine-tune the number of shards, like to the next number of two from the
+        // number of worker threads.
         let data = DashMap::default();
         // We preallocate estimated locations to avoid restructuring trees at runtime
         // while holding a write lock. Ideally [dashmap] would have a lock-free
