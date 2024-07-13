@@ -491,9 +491,6 @@ pub(crate) struct Vm<'a, S: Storage> {
     block_env: BlockEnv,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
-    // TODO: Make REVM [Evm] or at least [Handle] thread safe to consume
-    // the [TxEnv] into them here, to avoid heavy re-initialization when
-    // re-executing a transaction.
 }
 
 impl<'a, S: Storage> Vm<'a, S> {
@@ -560,14 +557,16 @@ impl<'a, S: Storage> Vm<'a, S> {
             to,
             to_hash,
         );
+        // TODO: Share as much Evm, Context, Handler, etc. among threads as possible
+        // as creating them is very expensive.
         let mut evm = build_evm(
             &mut db,
             self.chain,
             self.spec_id,
             self.block_env.clone(),
-            tx.clone(),
             false,
         );
+        *evm.tx_mut() = tx.clone();
         match evm.transact() {
             Ok(result_and_state) => {
                 // There are at least three locations most of the time: the sender,
@@ -740,14 +739,17 @@ pub(crate) fn build_evm<'a, DB: Database>(
     chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
-    tx: TxEnv,
     with_reward_beneficiary: bool,
 ) -> Evm<'a, (), DB> {
     // This is much uglier than the builder interface but can be up to 50% faster!!
     let context = Context {
         evm: EvmContext::new_with_env(
             db,
-            Env::boxed(CfgEnv::default().with_chain_id(chain.id()), block_env, tx),
+            Env::boxed(
+                CfgEnv::default().with_chain_id(chain.id()),
+                block_env,
+                TxEnv::default(),
+            ),
         ),
         external: (),
     };
