@@ -10,13 +10,15 @@
 
 use ahash::AHashMap;
 use alloy_chains::Chain;
-use pevm::{AccountBasic, EvmAccount, InMemoryStorage, PevmError, PevmTxExecutionResult};
+use alloy_primitives::Bytes;
+use pevm::{AccountBasic, EvmAccount, InMemoryStorage, PevmError};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, TransactTo,
-    TxEnv, KECCAK_EMPTY, U256,
+    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, ExecutionResult,
+    HaltReason, Output, ResultAndState, SpecId, SuccessReason, TransactTo, TxEnv, KECCAK_EMPTY,
+    U256,
 };
 use revme::cmd::statetest::models::{
     Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
@@ -137,18 +139,27 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 // EIP-2681
                 (Some("TR_NonceHasMaxValue"), Ok(exec_results)) => {
                     assert!(exec_results.len() == 1);
-                    assert!(exec_results[0].receipt.status.coerce_status());
-                    // This is overly strict as we only need the newly created account's code to be empty.
-                    // Extracting such account is unjustified complexity so let's live with this for now.
-                    assert!(exec_results[0].state.values().all(|account| {
-                        match account {
-                            Some(account) => account.code_hash.is_none(),
-                            None => true,
-                        }
-                    }));
+                    assert!(match exec_results[0].result.clone() {
+                        ExecutionResult::Success {
+                            output: Output::Create(b, None),
+                            ..
+                        } => b == Bytes::new(),
+                        _ => false,
+                    });
                 }
-                // Skipping special cases where REVM returns `Ok` on unsupported features.
-                (Some("TR_TypeNotSupported"), Ok(_)) => {}
+                (Some("TR_TypeNotSupported"), Ok(exec_results)) => {
+                    assert!(exec_results.len() == 1);
+                    assert!(matches!(
+                        exec_results[0].result,
+                        ExecutionResult::Halt {
+                            reason: HaltReason::NotActivated,
+                            ..
+                        } | ExecutionResult::Success {
+                            reason: SuccessReason::Stop,
+                            ..
+                        }
+                    ));
+                }
                 // Remaining tests that expect execution to fail -> match error
                 (Some(exception), Err(PevmError::ExecutionError(error))) => {
                     // TODO: Cleaner code would be nice..
@@ -184,23 +195,31 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 // Tests that exepect execution to succeed -> match post state root
                 (None, Ok(exec_results)) => {
                     assert!(exec_results.len() == 1);
-                    let PevmTxExecutionResult {receipt, state} = exec_results[0].clone();
+                    let ResultAndState { result, state } = exec_results[0].clone();
 
-                    let logs_root = log_rlp_hash(&receipt.logs);
+                    let logs_root = log_rlp_hash(result.logs());
                     assert_eq!(logs_root, test.logs, "Mismatched logs root for {path:?}");
 
                     // This is a good reference for a minimal state/DB commitment logic for
                     // PEVM/REVM to meet the Ethereum specs throughout the eras.
                     for (address, account) in state {
-                        if let Some(account) = account {
-                            let chain_state_account = chain_state.entry(address).or_default();
-                            chain_state_account.basic = account.basic;
-                            chain_state_account.code_hash = account.code_hash;
-                            chain_state_account.code = account.code;
-                            chain_state_account.storage.extend(account.storage.into_iter());
-                        } else {
-                            chain_state.remove(&address);
+                        if !account.is_touched() {
+                            continue;
                         }
+                        if account.is_selfdestructed()
+                            || (account.is_empty()
+                                && spec_name.to_spec_id().is_enabled_in(SpecId::SPURIOUS_DRAGON))
+                        {
+                            chain_state.remove(&address);
+                            continue;
+                        }
+                        let chain_state_account = chain_state.entry(address).or_default();
+                        chain_state_account.basic.balance = account.info.balance;
+                        chain_state_account.basic.nonce = account.info.nonce;
+                        chain_state_account.code_hash = (!account.info.is_empty_code_hash()).then_some(account.info.code_hash);
+                        chain_state_account
+                            .storage
+                            .extend(account.storage.iter().map(|(k, v)| (*k, v.present_value)));
                     }
                     // TODO: Implement our own state root calculation function to remove
                     // this conversion to [PlainAccount]

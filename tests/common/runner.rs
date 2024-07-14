@@ -3,7 +3,7 @@ use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
+use pevm::{get_block_spec, EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
 use std::{collections::BTreeMap, num::NonZeroUsize, thread};
 
@@ -100,7 +100,18 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {
-        let tx_results = sequential_result.unwrap();
+        let spec_id = get_block_spec(&block.header).unwrap();
+        let mut cumulative_gas_used: u128 = 0;
+        let tx_results = sequential_result
+            .unwrap()
+            .into_iter()
+            .map(|result_and_state| {
+                let mut result = PevmTxExecutionResult::from_revm(spec_id, result_and_state);
+                result.receipt.cumulative_gas_used += cumulative_gas_used;
+                cumulative_gas_used = result.receipt.cumulative_gas_used;
+                result
+            })
+            .collect::<Vec<_>>();
 
         // We can only calculate the receipts root from Byzantium.
         // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the

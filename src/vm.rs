@@ -80,7 +80,7 @@ pub(crate) enum VmExecutionResult {
     },
     ExecutionError(ExecutionError),
     Ok {
-        execution_result: PevmTxExecutionResult,
+        execution_result: ResultAndState,
         read_set: ReadSet,
         write_set: WriteSet,
         lazy_addresses: NewLazyAddresses,
@@ -667,10 +667,7 @@ impl<'a, S: Storage> Vm<'a, S> {
                 drop(evm); // release db
 
                 VmExecutionResult::Ok {
-                    execution_result: PevmTxExecutionResult::from_revm(
-                        self.spec_id,
-                        result_and_state,
-                    ),
+                    execution_result: result_and_state,
                     read_set: db.read_set,
                     write_set,
                     lazy_addresses,
