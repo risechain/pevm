@@ -8,9 +8,9 @@ use revm::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
         ResultAndState, SpecId, TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
     },
-    Context, Database, Evm, EvmContext, Handler,
+    Context, Database, DatabaseRef, Evm, EvmContext, Handler,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     mv_memory::MvMemory, AccountBasic, BuildIdentityHasher, EvmAccount, MemoryEntry,
@@ -102,8 +102,8 @@ pub(crate) enum VmExecutionResult {
 // structure & storage, and tracks the read set of the current execution.
 // TODO: Simplify this type, like grouping [from] and [to] into a
 // [preprocessed_addresses] or a [preprocessed_locations] vector.
-struct VmDb<'a, S: Storage> {
-    vm: &'a Vm<'a, S>,
+struct VmDb<'a, DB: DatabaseRef<Error: Display>> {
+    vm: &'a Vm<'a, DB>,
     tx_idx: &'a TxIdx,
     nonce: u64,
     from: &'a Address,
@@ -118,9 +118,9 @@ struct VmDb<'a, S: Storage> {
     read_accounts: HashMap<MemoryLocationHash, (AccountBasic, Option<B256>), BuildIdentityHasher>,
 }
 
-impl<'a, S: Storage> VmDb<'a, S> {
+impl<'a, DB: DatabaseRef<Error: Display>> VmDb<'a, DB> {
     fn new(
-        vm: &'a Vm<'a, S>,
+        vm: &'a Vm<'a, DB>,
         tx_idx: &'a TxIdx,
         nonce: u64,
         from: &'a Address,
@@ -203,13 +203,13 @@ impl<'a, S: Storage> VmDb<'a, S> {
             read_origins.push(ReadOrigin::Storage);
         }
         self.vm
-            .storage
+            .db
             .code_hash(&address)
             .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 }
 
-impl<'a, S: Storage> Database for VmDb<'a, S> {
+impl<'a, DB: DatabaseRef<Error: Display>> Database for VmDb<'a, DB> {
     type Error = ReadError;
 
     // TODO: More granularity here to ensure we only record dependencies for,
@@ -346,7 +346,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             {
                 return Err(ReadError::InconsistentRead);
             }
-            final_account = match self.vm.storage.basic(&address) {
+            final_account = match self.vm.db.basic(&address) {
                 Ok(Some(basic)) => Some(basic),
                 Ok(None) => {
                     if balance_addition > U256::ZERO {
@@ -395,8 +395,8 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                 if let Some(code) = self.vm.new_bytecodes.get(code_hash) {
                     Some(code.clone())
                 } else {
-                    match self.vm.storage.code_by_hash(code_hash) {
-                        Ok(code) => code.map(Bytecode::from),
+                    match self.vm.db.code_by_hash_ref(*code_hash) {
+                        Ok(code) => Some(code),
                         Err(err) => return Err(ReadError::StorageError(err.to_string())),
                     }
                 }
@@ -419,9 +419,8 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.vm
-            .storage
-            .code_by_hash(&code_hash)
-            .map(|code| code.map(Bytecode::from).unwrap_or_default())
+            .db
+            .code_by_hash_ref(code_hash)
             .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 
@@ -473,22 +472,22 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
             read_origins.push(ReadOrigin::Storage);
         }
         self.vm
-            .storage
-            .storage(&address, &index)
+            .db
+            .storage_ref(address, index)
             .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         self.vm
-            .storage
-            .block_hash(&number)
+            .db
+            .block_hash_ref(number)
             .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 }
 
-pub(crate) struct Vm<'a, S: Storage> {
+pub(crate) struct Vm<'a, DB: DatabaseRef<Error: Display>> {
     hasher: &'a ahash::RandomState,
-    storage: &'a S,
+    db: &'a DB,
     mv_memory: &'a MvMemory,
     txs: &'a [TxEnv],
     chain: Chain,
@@ -499,10 +498,10 @@ pub(crate) struct Vm<'a, S: Storage> {
     new_bytecodes: DeferDrop<DashMap<B256, Bytecode>>,
 }
 
-impl<'a, S: Storage> Vm<'a, S> {
+impl<'a, DB: DatabaseRef<Error: Display>> Vm<'a, DB> {
     pub(crate) fn new(
         hasher: &'a ahash::RandomState,
-        storage: &'a S,
+        db: &'a DB,
         mv_memory: &'a MvMemory,
         txs: &'a [TxEnv],
         chain: Chain,
@@ -511,7 +510,7 @@ impl<'a, S: Storage> Vm<'a, S> {
     ) -> Self {
         Self {
             hasher,
-            storage,
+            db,
             mv_memory,
             txs,
             chain,

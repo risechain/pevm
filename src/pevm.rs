@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::Debug,
+    fmt::{Debug, Display},
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
     thread,
@@ -13,21 +13,19 @@ use defer_drop::DeferDrop;
 use revm::{
     db::CacheDB,
     primitives::{
-        AccountStatus, BlockEnv, Bytecode, ResultAndState,
+        AccountInfo, AccountStatus, BlockEnv, ResultAndState,
         SpecId::{self},
-        TxEnv,
+        TxEnv, KECCAK_EMPTY,
     },
-    DatabaseCommit,
+    DatabaseCommit, DatabaseRef,
 };
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
     primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
-    storage::StorageWrapper,
     vm::{build_evm, ExecutionError, Vm, VmExecutionResult},
-    AccountBasic, BuildIdentityHasher, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task,
-    TxIdx, TxVersion,
+    BuildIdentityHasher, MemoryEntry, MemoryLocation, MemoryValue, Task, TxIdx, TxVersion,
 };
 
 /// Errors when executing a block with PEVM.
@@ -60,8 +58,8 @@ pub type PevmResult = Result<Vec<ResultAndState>, PevmError>;
 
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
-pub fn execute<S: Storage + Send + Sync>(
-    storage: &S,
+pub fn execute<DB: DatabaseRef<Error: Display> + Send + Sync>(
+    db: &DB,
     chain: Chain,
     block: Block,
     concurrency_level: NonZeroUsize,
@@ -83,24 +81,17 @@ pub fn execute<S: Storage + Send + Sync>(
     };
     // TODO: Continue to fine tune this condition.
     if force_sequential || tx_envs.len() < 4 || block.header.gas_used < 2_000_000 {
-        execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
+        execute_revm_sequential(db, chain, spec_id, block_env, tx_envs)
     } else {
-        execute_revm(
-            storage,
-            chain,
-            spec_id,
-            block_env,
-            tx_envs,
-            concurrency_level,
-        )
+        execute_revm(db, chain, spec_id, block_env, tx_envs, concurrency_level)
     }
 }
 
 /// Execute an REVM block.
 // Ideally everyone would go through the [Alloy] interface. This one is currently
 // useful for testing, and for users that are heavily tied to Revm like Reth.
-pub fn execute_revm<S: Storage + Send + Sync>(
-    storage: &S,
+pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
+    db: &DB,
     chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
@@ -133,9 +124,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         lazy_addresses,
     ));
     let txs = DeferDrop::new(txs);
-    let vm = Vm::new(
-        &hasher, storage, &mv_memory, &txs, chain, spec_id, block_env,
-    );
+    let vm = Vm::new(&hasher, db, &mv_memory, &txs, chain, spec_id, block_env);
     let scheduler = DeferDrop::new(Scheduler::new(block_size));
 
     let mut execution_error = OnceLock::new();
@@ -196,25 +185,12 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         if let Some(write_history) = mv_memory.consume_location(&location_hash) {
             // TODO: We don't need to read from storage if the first entry is a fully evaluated account.
             let mut is_first = false;
-            let mut current_account = match storage.basic(&address) {
+            let mut current_account = match db.basic_ref(address) {
                 Ok(Some(account)) => account,
                 _ => {
                     is_first = true;
-                    AccountBasic::default()
+                    AccountInfo::default()
                 }
-            };
-            // Accounts that take implicit writes like the beneficiary account can be contract!
-            let mut code_hash = match storage.code_hash(&address) {
-                Ok(code_hash) => code_hash,
-                Err(err) => return Err(PevmError::StorageError(err.to_string())),
-            };
-            let code = if let Some(code_hash) = &code_hash {
-                match storage.code_by_hash(code_hash) {
-                    Ok(code) => code.map(Bytecode::from),
-                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
-                }
-            } else {
-                None
             };
 
             // TODO: Assert that the evaluated nonce matches the tx's.
@@ -230,7 +206,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                             // that it is self-destructed, especially if there is an inbetween
                             // transaction that funds it (to trigger lazy evaluation).
                             self_destructed = true;
-                            code_hash = None;
+                            current_account.code_hash = KECCAK_EMPTY;
                         }
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
@@ -267,9 +243,9 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 let account = tx_result.state.entry(address).or_default();
                 account.info.balance = current_account.balance;
                 account.info.nonce = current_account.nonce;
-                if code_hash.is_some() {
-                    account.info.code_hash = code_hash.unwrap();
-                    account.info.code.clone_from(&code);
+                if !current_account.is_empty_code_hash() {
+                    account.info.code_hash = current_account.code_hash;
+                    account.info.code.clone_from(&current_account.code);
                 }
                 if is_first {
                     account.status = AccountStatus::LoadedAsNotExisting;
@@ -294,14 +270,14 @@ pub fn execute_revm<S: Storage + Send + Sync>(
 /// Execute REVM transactions sequentially.
 // Useful for falling back for (small) blocks with many dependencies.
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
-pub fn execute_revm_sequential<S: Storage>(
-    storage: &S,
+pub fn execute_revm_sequential<DB: DatabaseRef<Error: Display>>(
+    db: &DB,
     chain: Chain,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
 ) -> Result<Vec<ResultAndState>, PevmError> {
-    let mut db = CacheDB::new(StorageWrapper(storage));
+    let mut db = CacheDB::new(db);
     let mut evm = build_evm(&mut db, chain, spec_id, block_env, true);
     let mut results = Vec::with_capacity(txs.len());
     for tx in txs {
@@ -317,9 +293,9 @@ pub fn execute_revm_sequential<S: Storage>(
     Ok(results)
 }
 
-fn try_execute<S: Storage>(
+fn try_execute<DB: DatabaseRef<Error: Display>>(
     mv_memory: &MvMemory,
-    vm: &Vm<S>,
+    vm: &Vm<DB>,
     scheduler: &Scheduler,
     execution_error: &OnceLock<ExecutionError>,
     execution_results: &[Mutex<Option<ResultAndState>>],

@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use alloy_chains::Chain;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::{execute_revm, execute_revm_sequential, EvmAccount, InMemoryStorage};
+use pevm::{execute_revm, execute_revm_sequential, EvmAccount, InMemoryStorage, StorageWrapper};
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
 
 // Better project structure
@@ -34,11 +34,12 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
     let storage = InMemoryStorage::new(state, []);
+    let db = StorageWrapper(&storage);
     let mut group = c.benchmark_group(name);
     group.bench_function("Sequential", |b| {
         b.iter(|| {
             execute_revm_sequential(
-                black_box(&storage),
+                black_box(&db),
                 black_box(chain),
                 black_box(spec_id),
                 black_box(block_env.clone()),
@@ -49,7 +50,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
     group.bench_function("Parallel", |b| {
         b.iter(|| {
             execute_revm(
-                black_box(&storage),
+                black_box(&db),
                 black_box(chain),
                 black_box(spec_id),
                 black_box(block_env.clone()),

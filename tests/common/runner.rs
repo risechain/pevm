@@ -3,9 +3,12 @@ use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{get_block_spec, EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
-use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
-use std::{collections::BTreeMap, num::NonZeroUsize, thread};
+use pevm::{get_block_spec, EvmAccount, PevmResult, PevmTxExecutionResult};
+use revm::{
+    primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256},
+    DatabaseRef,
+};
+use std::{collections::BTreeMap, fmt::Display, num::NonZeroUsize, thread};
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -25,18 +28,18 @@ pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: 
 
 // Execute an REVM block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<TxEnv>) {
+pub fn test_execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(db: DB, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_execution_result(
         &pevm::execute_revm_sequential(
-            &storage,
+            &db,
             Chain::mainnet(),
             SpecId::LATEST,
             BlockEnv::default(),
             txs.clone(),
         ),
         &pevm::execute_revm(
-            &storage,
+            &db,
             Chain::mainnet(),
             SpecId::LATEST,
             BlockEnv::default(),
@@ -88,15 +91,15 @@ fn calculate_receipt_root(
 
 // Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
-    storage: &S,
+pub fn test_execute_alloy<DB: DatabaseRef<Error: Display> + Send + Sync>(
+    db: &DB,
     chain: Chain,
     block: Block,
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let sequential_result = pevm::execute(storage, chain, block.clone(), concurrency_level, true);
-    let parallel_result = pevm::execute(storage, chain, block.clone(), concurrency_level, false);
+    let sequential_result = pevm::execute(db, chain, block.clone(), concurrency_level, true);
+    let parallel_result = pevm::execute(db, chain, block.clone(), concurrency_level, false);
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {

@@ -138,6 +138,7 @@ where
     type Error = D::Error;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
+        // TODO: We need a faster get that doesn't clone the whole [AccountInfo]
         self.basic_ref(*address).map(|a| {
             a.map(|info| AccountBasic {
                 balance: info.balance,
@@ -147,6 +148,7 @@ where
     }
 
     fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error> {
+        // TODO: We need a faster get that doesn't clone the whole [AccountInfo]
         self.basic_ref(*address).map(|info| {
             info.and_then(|info| (!info.is_empty_code_hash()).then_some(info.code_hash))
         })

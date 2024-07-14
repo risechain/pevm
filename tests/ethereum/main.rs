@@ -11,7 +11,7 @@
 use ahash::AHashMap;
 use alloy_chains::Chain;
 use alloy_primitives::Bytes;
-use pevm::{AccountBasic, EvmAccount, InMemoryStorage, PevmError};
+use pevm::{AccountBasic, EvmAccount, InMemoryStorage, PevmError, StorageWrapper};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
@@ -128,7 +128,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             match (
                 test.expect_exception.as_deref(),
                 pevm::execute_revm(
-                    &InMemoryStorage::new(chain_state.clone(), []),
+                    &StorageWrapper(&InMemoryStorage::new(chain_state.clone(), [])),
                     Chain::mainnet(),
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),

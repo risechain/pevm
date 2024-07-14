@@ -1,7 +1,7 @@
 // Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
 
 use ahash::AHashMap;
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{EvmAccount, InMemoryStorage, StorageWrapper};
 use rand::random;
 use revm::primitives::{env::TxEnv, Address, TransactTo, U256};
 
@@ -55,7 +55,7 @@ fn mixed_block() {
         }
     }
     common::test_execute_revm(
-        InMemoryStorage::new(final_state, []),
+        StorageWrapper(&InMemoryStorage::new(final_state, [])),
         // TODO: Shuffle transactions to scatter dependencies around the block.
         // Note that we'll need to guarantee that the nonces are increasing.
         final_txs,
