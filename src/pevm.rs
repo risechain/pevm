@@ -86,7 +86,10 @@ pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
         _ => return Err(PevmError::MissingTransactionData),
     };
     // TODO: Continue to fine tune this condition.
-    if force_sequential || tx_envs.len() < 4 || block.header.gas_used < 2_000_000 {
+    if force_sequential
+        || tx_envs.len() < concurrency_level.into()
+        || block.header.gas_used < 4_000_000
+    {
         execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
     } else {
         execute_revm_parallel(
