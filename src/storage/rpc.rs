@@ -2,7 +2,7 @@ use std::{fmt::Debug, future::IntoFuture, sync::Mutex};
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, B256, U256};
-use alloy_provider::{Provider, RootProvider};
+use alloy_provider::{Network, Provider, RootProvider};
 use alloy_rpc_types::{BlockId, BlockNumberOrTag};
 use alloy_transport::TransportError;
 use alloy_transport_http::Http;
@@ -20,12 +20,12 @@ use super::EvmCode;
 // TODO: Support generic network & transport types.
 // TODO: Put this behind an RPC flag to not pollute the core
 // library with RPC network & transport dependencies, etc.
-type RpcProvider = RootProvider<Http<Client>>;
+type RpcProvider<N> = RootProvider<Http<Client>, N>;
 
 /// A storage that fetches state data via RPC for execution.
 #[derive(Debug)]
-pub struct RpcStorage {
-    provider: RpcProvider,
+pub struct RpcStorage<N> {
+    provider: RpcProvider<N>,
     block_id: BlockId,
     precompiles: &'static Precompiles,
     // Convenient types for persisting then reconstructing block's state
@@ -40,9 +40,9 @@ pub struct RpcStorage {
     runtime: Runtime,
 }
 
-impl RpcStorage {
+impl<N> RpcStorage<N> {
     /// Create a new RPC Storage
-    pub fn new(provider: RpcProvider, spec_id: SpecId, block_id: BlockId) -> Self {
+    pub fn new(provider: RpcProvider<N>, spec_id: SpecId, block_id: BlockId) -> Self {
         RpcStorage {
             provider,
             precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)),
@@ -65,7 +65,7 @@ impl RpcStorage {
     }
 }
 
-impl Storage for RpcStorage {
+impl<N: Network> Storage for RpcStorage<N> {
     type Error = TransportError;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
