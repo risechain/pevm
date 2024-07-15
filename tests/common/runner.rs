@@ -3,7 +3,7 @@ use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
+use pevm::{get_block_spec, EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
 use std::{collections::BTreeMap, num::NonZeroUsize, thread};
 
@@ -95,8 +95,23 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let sequential_result = pevm::execute(storage, chain, block.clone(), concurrency_level, true);
-    let parallel_result = pevm::execute(storage, chain, block.clone(), concurrency_level, false);
+    let spec_id = get_block_spec(&block.header).unwrap();
+    let sequential_result = pevm::execute(
+        storage,
+        chain,
+        spec_id,
+        block.clone(),
+        concurrency_level,
+        true,
+    );
+    let parallel_result = pevm::execute(
+        storage,
+        chain,
+        spec_id,
+        block.clone(),
+        concurrency_level,
+        false,
+    );
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {

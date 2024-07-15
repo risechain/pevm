@@ -23,7 +23,7 @@ use revm::{
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
+    primitives::{get_block_env, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
@@ -64,13 +64,11 @@ pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 pub fn execute<S: Storage + Send + Sync>(
     storage: &S,
     chain: Chain,
+    spec_id: SpecId,
     block: Block,
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
 ) -> PevmResult {
-    let Some(spec_id) = get_block_spec(&block.header) else {
-        return Err(PevmError::UnknownBlockSpec);
-    };
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
