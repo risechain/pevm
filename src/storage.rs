@@ -120,9 +120,6 @@ pub trait Storage {
     /// Get account code by its hash.
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error>;
 
-    /// Get if the account already has storage (to support EIP-7610).
-    fn has_storage(&self, address: &Address) -> Result<bool, Self::Error>;
-
     /// Get storage value of address at index.
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error>;
 
@@ -141,6 +138,7 @@ where
     type Error = D::Error;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
+        // TODO: We need a faster get that doesn't clone the whole [AccountInfo]
         self.basic_ref(*address).map(|a| {
             a.map(|info| AccountBasic {
                 balance: info.balance,
@@ -150,6 +148,7 @@ where
     }
 
     fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error> {
+        // TODO: We need a faster get that doesn't clone the whole [AccountInfo]
         self.basic_ref(*address).map(|info| {
             info.and_then(|info| (!info.is_empty_code_hash()).then_some(info.code_hash))
         })
@@ -163,10 +162,6 @@ where
                 Some(EvmCode::from(bytecode))
             }
         })
-    }
-
-    fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
-        self.has_storage_ref(*address)
     }
 
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
@@ -209,10 +204,6 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
         self.0
             .code_by_hash(&code_hash)
             .map(|code| code.map(Bytecode::from).unwrap_or_default())
-    }
-
-    fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
-        self.0.has_storage(&address)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {

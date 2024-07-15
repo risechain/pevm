@@ -8,6 +8,7 @@ use std::{num::NonZeroUsize, thread};
 
 use alloy_chains::Chain;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use pevm::StorageWrapper;
 
 // Better project structure
 #[path = "../tests/common/mod.rs"]
@@ -32,10 +33,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             block.transactions.len(),
             block.header.gas_used
         ));
+        let db = StorageWrapper(&storage);
         group.bench_function("Sequential", |b| {
             b.iter(|| {
                 pevm::execute(
-                    black_box(&storage),
+                    black_box(&db),
                     black_box(chain),
                     black_box(block.clone()),
                     black_box(concurrency_level),
@@ -46,7 +48,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Parallel", |b| {
             b.iter(|| {
                 pevm::execute(
-                    black_box(&storage),
+                    black_box(&db),
                     black_box(chain),
                     black_box(block.clone()),
                     black_box(concurrency_level),
