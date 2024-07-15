@@ -205,11 +205,11 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                 _ => AccountBasic::default(),
             };
             // Accounts that take implicit writes like the beneficiary account can be contract!
-            let code_hash = match storage.code_hash(&address) {
+            let mut code_hash = match storage.code_hash(&address) {
                 Ok(code_hash) => code_hash,
                 Err(err) => return Err(PevmError::StorageError(err.to_string())),
             };
-            let code = if let Some(code_hash) = &code_hash {
+            let mut code = if let Some(code_hash) = &code_hash {
                 match storage.code_by_hash(code_hash) {
                     Ok(code) => code,
                     Err(err) => return Err(PevmError::StorageError(err.to_string())),
@@ -231,6 +231,10 @@ pub fn execute_revm<S: Storage + Send + Sync>(
                             // that it is self-destructed, especially if there is an inbetween
                             // transaction that funds it (to trigger lazy evaluation).
                             self_destructed = true;
+                            current_account.balance = U256::ZERO;
+                            current_account.nonce = 0;
+                            code_hash = None;
+                            code = None;
                         }
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
