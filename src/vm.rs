@@ -673,8 +673,10 @@ impl<'a, DB: DatabaseRef<Error: Display>> Vm<'a, DB> {
                     read_set: db.read_set,
                     write_set,
                     lazy_addresses,
-                    next_validation_idx: if tx_idx == 0 || db.is_lazy {
+                    next_validation_idx: if db.is_lazy {
                         None
+                    } else if tx_idx == 0 {
+                        Some(tx_idx + 1)
                     } else {
                         Some(tx_idx)
                     },
