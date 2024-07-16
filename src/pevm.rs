@@ -11,13 +11,12 @@ use alloy_primitives::U256;
 use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
-    db::CacheDB,
     primitives::{
         AccountInfo, AccountStatus, BlockEnv, ResultAndState,
-        SpecId::{self},
+        SpecId::{self, SPURIOUS_DRAGON},
         TxEnv, KECCAK_EMPTY,
     },
-    DatabaseCommit, DatabaseRef,
+    DatabaseCommit, DatabaseRef, StateBuilder,
 };
 
 use crate::{
@@ -279,7 +278,13 @@ pub fn execute_revm_sequential<DB: DatabaseRef<Error: Display>>(
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
 ) -> Result<Vec<ResultAndState>, PevmError> {
-    let mut db = CacheDB::new(db);
+    // We use [State] with this specific builder instead of [CacheDB] to match Reth
+    // as close as possible.
+    let mut builder = StateBuilder::new_with_database(db);
+    if !spec_id.is_enabled_in(SPURIOUS_DRAGON) {
+        builder = builder.without_state_clear();
+    }
+    let mut db = builder.build();
     let mut evm = build_evm(&mut db, chain, spec_id, block_env, true);
     let mut results = Vec::with_capacity(txs.len());
     for tx in txs {
