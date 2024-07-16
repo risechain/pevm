@@ -352,11 +352,7 @@ impl<'a, DB: DatabaseRef<Error: Display>> Database for VmDb<'a, DB> {
                 Ok(Some(basic)) => Some(basic),
                 Ok(None) => {
                     if balance_addition > U256::ZERO {
-                        Some(AccountBasic {
-                            balance: balance_addition,
-                            // TODO: Assert [nonce_addition] to be 0
-                            nonce: 0,
-                        })
+                        Some(AccountBasic::default())
                     } else {
                         None
                     }

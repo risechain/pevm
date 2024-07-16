@@ -239,13 +239,19 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                 // SAFETY: The multi-version data structure should not leak an index over block size.
                 let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(tx_idx) };
                 let account = tx_result.state.entry(address).or_default();
-                account.info.balance = current_account.balance;
-                account.info.nonce = current_account.nonce;
-                if !current_account.is_empty_code_hash() {
-                    account.info.code_hash = current_account.code_hash;
-                    account.info.code.clone_from(&current_account.code);
+                if self_destructed {
+                    current_account.balance = U256::ZERO;
+                    current_account.nonce = 0;
+                    current_account.code_hash = KECCAK_EMPTY;
                 } else {
-                    account.info.code = None;
+                    account.info.balance = current_account.balance;
+                    account.info.nonce = current_account.nonce;
+                    if !current_account.is_empty_code_hash() {
+                        account.info.code_hash = current_account.code_hash;
+                        account.info.code.clone_from(&current_account.code);
+                    } else {
+                        account.info.code = None;
+                    }
                 }
                 if is_first {
                     account.status = AccountStatus::LoadedAsNotExisting;
@@ -263,11 +269,6 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                     account.status -= AccountStatus::LoadedAsNotExisting;
                 }
                 account.mark_touch();
-                if self_destructed {
-                    current_account.balance = U256::ZERO;
-                    current_account.nonce = 0;
-                    current_account.code_hash = KECCAK_EMPTY;
-                }
                 if self_destructed || spec_id.is_enabled_in(SPURIOUS_DRAGON) && account.is_empty() {
                     is_first = true;
                 }
