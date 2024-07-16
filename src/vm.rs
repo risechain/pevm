@@ -6,7 +6,9 @@ use defer_drop::DeferDrop;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
-        ResultAndState, SpecId, TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
+        ResultAndState,
+        SpecId::{self, SPURIOUS_DRAGON},
+        TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
     },
     Context, Database, DatabaseRef, Evm, EvmContext, Handler,
 };
@@ -583,7 +585,12 @@ impl<'a, DB: DatabaseRef<Error: Display>> Vm<'a, DB> {
                 let mut write_set = WriteSet::with_capacity(3);
                 let mut lazy_addresses = NewLazyAddresses::new();
                 for (address, account) in result_and_state.state.iter() {
-                    if account.is_selfdestructed() {
+                    if account.is_selfdestructed()
+                        || account.is_touched()
+                            && !evm.db().is_lazy
+                            && self.spec_id.is_enabled_in(SPURIOUS_DRAGON)
+                            && account.is_empty()
+                    {
                         write_set.push((self.hash_basic(address), MemoryValue::Basic(None)));
                         write_set.push((
                             self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
