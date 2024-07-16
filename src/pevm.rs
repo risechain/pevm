@@ -12,9 +12,9 @@ use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
     primitives::{
-        AccountInfo, AccountStatus, BlockEnv, ResultAndState,
+        AccountInfo, AccountStatus, BlockEnv, Bytecode, ResultAndState,
         SpecId::{self, SPURIOUS_DRAGON},
-        TxEnv, KECCAK_EMPTY,
+        TransactTo, TxEnv, KECCAK_EMPTY,
     },
     DatabaseCommit, DatabaseRef, StateBuilder,
 };
@@ -195,6 +195,7 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
             // TODO: Assert that the evaluated nonce matches the tx's.
             for (tx_idx, memory_entry) in write_history {
                 let mut self_destructed = false;
+                let tx = unsafe { txs.get_unchecked(tx_idx) };
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                         if let Some(info) = info {
@@ -217,7 +218,6 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                         // TODO: Guard against overflows & underflows
                         // Ideally we would share these calculations with revm
                         // (using their utility functions).
-                        let tx = &unsafe { txs.get_unchecked(tx_idx) };
                         let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
                         if let Some(blob_fee) = tx.max_fee_per_blob_gas {
                             max_fee += U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee);
@@ -249,8 +249,14 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                 }
                 if is_first {
                     account.status = AccountStatus::LoadedAsNotExisting;
-                    if !account.info.is_empty_code_hash() {
+                    // TODO: Tighter condition, like with also a not-sender check.
+                    if tx.transact_to == TransactTo::Create
+                        && location_hash != beneficiary_location_hash
+                    {
                         account.status |= AccountStatus::Created;
+                        if account.info.code.is_none() {
+                            account.info.code = Some(Bytecode::new());
+                        }
                     }
                     is_first = false;
                 } else {

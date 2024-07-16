@@ -99,8 +99,8 @@ pub fn test_execute_alloy<DB: DatabaseRef<Error: Display> + Send + Sync>(
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let sequential_result = pevm::execute(db, chain, block.clone(), concurrency_level, true);
-    // let parallel_result = pevm::execute(db, chain, block.clone(), concurrency_level, false);
-    // assert_execution_result(&sequential_result, &parallel_result);
+    let parallel_result = pevm::execute(db, chain, block.clone(), concurrency_level, false);
+    assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {
         let spec_id = get_block_spec(&block.header).unwrap();
