@@ -97,6 +97,40 @@ pub fn execute<S: Storage + Send + Sync>(
     }
 }
 
+/// Execute REVM transactions sequentially.
+// Useful for falling back for (small) blocks with many dependencies.
+// TODO: Use this for a long chain of sequential transactions even in parallel mode.
+pub fn execute_revm_sequential<S: Storage>(
+    storage: &S,
+    chain: Chain,
+    spec_id: SpecId,
+    block_env: BlockEnv,
+    txs: Vec<TxEnv>,
+) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
+    let mut db = CacheDB::new(StorageWrapper(storage));
+    let mut evm = build_evm(&mut db, chain, spec_id, block_env, true);
+    let mut results = Vec::with_capacity(txs.len());
+    let mut cumulative_gas_used: u128 = 0;
+    for tx in txs {
+        *evm.tx_mut() = tx;
+        match evm.transact() {
+            Ok(result_and_state) => {
+                evm.db_mut().commit(result_and_state.state.clone());
+
+                let mut execution_result =
+                    PevmTxExecutionResult::from_revm(spec_id, result_and_state);
+
+                cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
+                execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
+
+                results.push(execution_result);
+            }
+            Err(err) => return Err(PevmError::ExecutionError(err.to_string())),
+        }
+    }
+    Ok(results)
+}
+
 /// Execute an REVM block.
 // Ideally everyone would go through the [Alloy] interface. This one is currently
 // useful for testing, and for users that are heavily tied to Revm like Reth.
@@ -303,40 +337,6 @@ fn build_mv_memory(
     lazy_addresses.0.insert(block_env.coinbase);
 
     MvMemory::new(block_size, estimated_locations, lazy_addresses)
-}
-
-/// Execute REVM transactions sequentially.
-// Useful for falling back for (small) blocks with many dependencies.
-// TODO: Use this for a long chain of sequential transactions even in parallel mode.
-pub fn execute_revm_sequential<S: Storage>(
-    storage: &S,
-    chain: Chain,
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    txs: Vec<TxEnv>,
-) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
-    let mut db = CacheDB::new(StorageWrapper(storage));
-    let mut evm = build_evm(&mut db, chain, spec_id, block_env, true);
-    let mut results = Vec::with_capacity(txs.len());
-    let mut cumulative_gas_used: u128 = 0;
-    for tx in txs {
-        *evm.tx_mut() = tx;
-        match evm.transact() {
-            Ok(result_and_state) => {
-                evm.db_mut().commit(result_and_state.state.clone());
-
-                let mut execution_result =
-                    PevmTxExecutionResult::from_revm(spec_id, result_and_state);
-
-                cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
-                execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
-
-                results.push(execution_result);
-            }
-            Err(err) => return Err(PevmError::ExecutionError(err.to_string())),
-        }
-    }
-    Ok(results)
 }
 
 fn try_execute<S: Storage>(
