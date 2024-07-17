@@ -239,6 +239,21 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                 // SAFETY: The multi-version data structure should not leak an index over block size.
                 let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(tx_idx) };
                 let account = tx_result.state.entry(address).or_default();
+                if is_first {
+                    account.status = AccountStatus::LoadedAsNotExisting;
+                    if current_account.is_empty_code_hash() && !account.info.is_empty_code_hash()
+                        || tx.transact_to == TransactTo::Create
+                            && location_hash != beneficiary_location_hash
+                    {
+                        account.status |= AccountStatus::Created;
+                        if account.info.code.is_none() {
+                            account.info.code = Some(Bytecode::new());
+                        }
+                    }
+                    is_first = false;
+                } else {
+                    account.status -= AccountStatus::LoadedAsNotExisting;
+                }
                 if self_destructed {
                     current_account.balance = U256::ZERO;
                     current_account.nonce = 0;
@@ -250,21 +265,6 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                         account.info.code_hash = current_account.code_hash;
                         account.info.code.clone_from(&current_account.code);
                     }
-                }
-                if is_first {
-                    account.status = AccountStatus::LoadedAsNotExisting;
-                    // TODO: Tighter condition, like with also a not-sender check.
-                    if tx.transact_to == TransactTo::Create
-                        && location_hash != beneficiary_location_hash
-                    {
-                        account.status |= AccountStatus::Created;
-                        if account.info.code.is_none() {
-                            account.info.code = Some(Bytecode::new());
-                        }
-                    }
-                    is_first = false;
-                } else {
-                    account.status -= AccountStatus::LoadedAsNotExisting;
                 }
                 account.mark_touch();
                 if self_destructed || spec_id.is_enabled_in(SPURIOUS_DRAGON) && account.is_empty() {
