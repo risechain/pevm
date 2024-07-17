@@ -35,7 +35,7 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<
             BlockEnv::default(),
             txs.clone(),
         ),
-        &pevm::execute_revm(
+        &pevm::execute_revm_parallel(
             &storage,
             Chain::mainnet(),
             SpecId::LATEST,

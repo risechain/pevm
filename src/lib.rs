@@ -206,7 +206,7 @@ macro_rules! index_mutex {
 }
 
 mod pevm;
-pub use pevm::{execute, execute_revm, execute_revm_sequential, PevmError, PevmResult};
+pub use pevm::{execute, execute_revm_parallel, execute_revm_sequential, PevmError, PevmResult};
 mod mv_memory;
 mod primitives;
 pub use primitives::get_block_spec;
