@@ -129,6 +129,7 @@ impl<'a, DB: DatabaseRef<Error: Display>> VmDb<'a, DB> {
         from_hash: MemoryLocationHash,
         to: Option<&'a Address>,
         to_hash: Option<MemoryLocationHash>,
+        can_be_lazy: bool,
     ) -> Self {
         let mut db = Self {
             vm,
@@ -151,8 +152,9 @@ impl<'a, DB: DatabaseRef<Error: Display>> VmDb<'a, DB> {
         // TODO: Better error handling
         // TODO: Only lazy update in block syncing mode, not for block
         // building.
-        db.is_lazy = (vm.mv_memory.have_location(&from_hash)
-            || to_hash.is_some_and(|to_hash| vm.mv_memory.have_location(&to_hash)))
+        db.is_lazy = can_be_lazy
+            && (vm.mv_memory.have_location(&from_hash)
+                || to_hash.is_some_and(|to_hash| vm.mv_memory.have_location(&to_hash)))
             && to.is_some_and(|to| db.get_code_hash(*to).unwrap().is_none());
         db
     }
@@ -543,7 +545,7 @@ impl<'a, DB: DatabaseRef<Error: Display>> Vm<'a, DB> {
     // value are added to the write set, possibly replacing a pair with a prior value
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
-    pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
+    pub(crate) fn execute(&self, tx_idx: TxIdx, can_be_lazy: bool) -> VmExecutionResult {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_idx) };
         let from = &tx.caller;
@@ -562,6 +564,7 @@ impl<'a, DB: DatabaseRef<Error: Display>> Vm<'a, DB> {
             from_hash,
             to,
             to_hash,
+            can_be_lazy,
         );
         // TODO: Share as much Evm, Context, Handler, etc. among threads as possible
         // as creating them is very expensive.
@@ -575,19 +578,25 @@ impl<'a, DB: DatabaseRef<Error: Display>> Vm<'a, DB> {
         *evm.tx_mut() = tx.clone();
         match evm.transact() {
             Ok(result_and_state) => {
+                if evm.db().is_lazy && result_and_state.result.is_halt() {
+                    return self.execute(tx_idx, false);
+                }
+
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
                 // TODO: Allocate up to [result_and_state.state.len()] anyway?
                 let mut write_set = WriteSet::with_capacity(3);
                 let mut lazy_addresses = NewLazyAddresses::new();
                 for (address, account) in result_and_state.state.iter() {
+                    let account_location_hash = self.hash_basic(address);
+
                     if account.is_selfdestructed()
                         || account.is_touched()
                             && !evm.db().is_lazy
                             && self.spec_id.is_enabled_in(SPURIOUS_DRAGON)
                             && account.is_empty()
                     {
-                        write_set.push((self.hash_basic(address), MemoryValue::Basic(None)));
+                        write_set.push((account_location_hash, MemoryValue::Basic(None)));
                         write_set.push((
                             self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
                             MemoryValue::CodeHash(None),
@@ -595,8 +604,20 @@ impl<'a, DB: DatabaseRef<Error: Display>> Vm<'a, DB> {
                         continue;
                     }
 
-                    if account.is_touched() {
-                        let account_location_hash = self.hash_basic(address);
+                    if evm.db().is_lazy {
+                        if account_location_hash == from_hash {
+                            write_set.push((
+                                account_location_hash,
+                                MemoryValue::LazySender(U256::MAX - account.info.balance),
+                            ));
+                        } else if Some(account_location_hash) == to_hash {
+                            write_set.push((
+                                account_location_hash,
+                                MemoryValue::LazyRecipient(tx.value),
+                            ));
+                        }
+                        lazy_addresses.push(*address);
+                    } else if account.is_touched() {
                         let read_account = evm.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
@@ -611,31 +632,16 @@ impl<'a, DB: DatabaseRef<Error: Display>> Vm<'a, DB> {
                                     || basic.balance != account.info.balance
                             })
                         {
-                            if evm.db().is_lazy {
-                                if account_location_hash == from_hash {
-                                    write_set.push((
-                                        account_location_hash,
-                                        MemoryValue::LazySender(U256::MAX - account.info.balance),
-                                    ));
-                                } else if Some(account_location_hash) == to_hash {
-                                    write_set.push((
-                                        account_location_hash,
-                                        MemoryValue::LazyRecipient(tx.value),
-                                    ));
-                                }
-                                lazy_addresses.push(*address);
-                            } else {
-                                // TODO: More granularity here to ensure we only notify new
-                                // memory writes, for instance, only an account's balance instead
-                                // of the whole account.
-                                write_set.push((
-                                    account_location_hash,
-                                    MemoryValue::Basic(Some(AccountBasic {
-                                        balance: account.info.balance,
-                                        nonce: account.info.nonce,
-                                    })),
-                                ));
-                            }
+                            // TODO: More granularity here to ensure we only notify new
+                            // memory writes, for instance, only an account's balance instead
+                            // of the whole account.
+                            write_set.push((
+                                account_location_hash,
+                                MemoryValue::Basic(Some(AccountBasic {
+                                    balance: account.info.balance,
+                                    nonce: account.info.nonce,
+                                })),
+                            ));
                         }
 
                         // Write new contract

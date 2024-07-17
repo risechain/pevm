@@ -320,7 +320,7 @@ fn try_execute<DB: DatabaseRef<Error: Display>>(
     tx_version: TxVersion,
 ) -> Option<Task> {
     loop {
-        return match vm.execute(tx_version.tx_idx) {
+        return match vm.execute(tx_version.tx_idx, true) {
             VmExecutionResult::Retry => continue,
             VmExecutionResult::ReadError { blocking_tx_idx } => {
                 if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx) {
