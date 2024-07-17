@@ -249,8 +249,6 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                     if !current_account.is_empty_code_hash() {
                         account.info.code_hash = current_account.code_hash;
                         account.info.code.clone_from(&current_account.code);
-                    } else {
-                        account.info.code = None;
                     }
                 }
                 if is_first {
