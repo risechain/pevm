@@ -9,6 +9,7 @@ edition = "2021"
 # EVM memory locations (we do not persist these hashes).
 ahash = { version = "0.8.11", features = ["serde"] }
 alloy-chains = "0.1.23"
+alloy-consensus = "0.1.4"
 alloy-primitives = { version = "0.7.7", features = ["asm-keccak"] }
 alloy-rpc-types = "0.1.4"
 bitvec = "1.0.1"
@@ -31,7 +32,6 @@ reqwest = "0.12.5"
 tokio = { version = "1.38.0", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
-alloy-consensus = "0.1.4"
 alloy-rlp = "0.3.7"
 alloy-trie = "0.4.1"
 criterion = "0.5.1"

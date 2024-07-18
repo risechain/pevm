@@ -10,7 +10,7 @@ use alloy_chains::Chain;
 use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
-use pevm::{EvmAccount, RpcStorage, StorageWrapper};
+use pevm::{network::ethereum, EvmAccount, RpcStorage, StorageWrapper};
 use reqwest::Url;
 use revm::db::CacheDB;
 use tokio::runtime::Runtime;
@@ -49,7 +49,7 @@ fn mainnet_blocks_from_rpc() {
             )
             .unwrap()
             .unwrap();
-        let spec_id = pevm::get_block_spec(&block.header).unwrap();
+        let spec_id = ethereum::get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let wrapped_storage = StorageWrapper(&rpc_storage);
         let db = CacheDB::new(&wrapped_storage);

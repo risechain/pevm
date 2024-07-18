@@ -2,42 +2,9 @@
 // Ideally REVM & Alloy would provide all these.
 
 use alloy_rpc_types::{Header, Transaction};
-use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, SpecId, TransactTo, TxEnv, U256};
+use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, TransactTo, TxEnv, U256};
 
-/// Get the REVM spec id of an Alloy block.
-// Currently hardcoding Ethereum hardforks from these reference:
-// https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/revm/config.rs#L33-L78
-// https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/chain/spec.rs#L44-L68
-// TODO: Better error handling & properly test this.
-pub fn get_block_spec(header: &Header) -> Option<SpecId> {
-    Some(if header.timestamp >= 1710338135 {
-        SpecId::CANCUN
-    } else if header.timestamp >= 1681338455 {
-        SpecId::SHANGHAI
-    } else if header.total_difficulty?.saturating_sub(header.difficulty)
-        >= U256::from(58_750_000_000_000_000_000_000_u128)
-    {
-        SpecId::MERGE
-    } else if header.number? >= 12965000 {
-        SpecId::LONDON
-    } else if header.number? >= 12244000 {
-        SpecId::BERLIN
-    } else if header.number? >= 9069000 {
-        SpecId::ISTANBUL
-    } else if header.number? >= 7280000 {
-        SpecId::PETERSBURG
-    } else if header.number? >= 4370000 {
-        SpecId::BYZANTIUM
-    } else if header.number? >= 2675000 {
-        SpecId::SPURIOUS_DRAGON
-    } else if header.number? >= 2463000 {
-        SpecId::TANGERINE
-    } else if header.number? >= 1150000 {
-        SpecId::HOMESTEAD
-    } else {
-        SpecId::FRONTIER
-    })
-}
+use crate::network::ethereum;
 
 /// Get the REVM block env of an Alloy block.
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L23-L48
@@ -78,17 +45,7 @@ pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingErr
             .gas
             .try_into()
             .map_err(|_| TransactionParsingError::OverflowedGasLimit)?,
-        gas_price: match tx.transaction_type.unwrap() {
-            0 | 1 => U256::from(
-                tx.gas_price
-                    .ok_or(TransactionParsingError::MissingGasPrice)?,
-            ),
-            2 | 3 => U256::from(
-                tx.max_fee_per_gas
-                    .ok_or(TransactionParsingError::MissingMaxFeePerGas)?,
-            ),
-            unknown => return Err(TransactionParsingError::InvalidType(unknown)),
-        },
+        gas_price: ethereum::get_gas_price(&tx)?,
         gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
         transact_to: match tx.to {
             Some(address) => TransactTo::Call(address),
