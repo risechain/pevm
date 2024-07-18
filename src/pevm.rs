@@ -267,6 +267,7 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                     }
                 }
                 account.mark_touch();
+                account.status -= AccountStatus::Cold;
                 if self_destructed || spec_id.is_enabled_in(SPURIOUS_DRAGON) && account.is_empty() {
                     is_first = true;
                 }
