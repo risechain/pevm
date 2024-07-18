@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt::Debug,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
@@ -22,13 +21,13 @@ use revm::{
 };
 
 use crate::{
-    mv_memory::{LazyAddresses, MvMemory},
-    primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
+    mv_memory::MvMemory,
+    network::ethereum,
+    primitives::{get_block_env, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    AccountBasic, BuildIdentityHasher, EvmAccount, MemoryEntry, MemoryLocation, MemoryValue,
-    Storage, Task, TxIdx, TxVersion,
+    AccountBasic, EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
 };
 
 /// Errors when executing a block with PEVM.
@@ -68,7 +67,7 @@ pub fn execute<S: Storage + Send + Sync>(
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
 ) -> PevmResult {
-    let Some(spec_id) = get_block_spec(&block.header) else {
+    let Some(spec_id) = ethereum::get_block_spec(&block.header) else {
         return Err(PevmError::UnknownBlockSpec);
     };
     let Some(block_env) = get_block_env(&block.header) else {
@@ -152,7 +151,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
     // Initialize the remaining core components
     // TODO: Provide more explicit garbage collecting configs for users over random background
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
-    let mv_memory = DeferDrop::new(build_mv_memory(&hasher, &block_env, block_size));
+    let mv_memory = DeferDrop::new(ethereum::build_mv_memory(&hasher, &block_env, block_size));
     let txs = DeferDrop::new(txs);
     let vm = Vm::new(
         &hasher, storage, &mv_memory, &txs, chain, spec_id, block_env,
@@ -317,26 +316,6 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
     }
 
     Ok(fully_evaluated_results)
-}
-
-fn build_mv_memory(
-    hasher: &ahash::RandomState,
-    block_env: &BlockEnv,
-    block_size: usize,
-) -> MvMemory {
-    let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
-
-    // TODO: Estimate more locations based on sender, to, etc.
-    let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
-    estimated_locations.insert(
-        beneficiary_location_hash,
-        (0..block_size).collect::<Vec<TxIdx>>(),
-    );
-
-    let mut lazy_addresses = LazyAddresses::default();
-    lazy_addresses.0.insert(block_env.coinbase);
-
-    MvMemory::new(block_size, estimated_locations, lazy_addresses)
 }
 
 fn try_execute<S: Storage>(
