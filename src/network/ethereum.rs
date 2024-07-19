@@ -1,6 +1,7 @@
 //! Ethereum
 use std::collections::HashMap;
 
+use alloy_chains::NamedChain;
 use alloy_consensus::TxType;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Header, Transaction};
@@ -8,9 +9,10 @@ use revm::primitives::{BlockEnv, SpecId};
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    primitives::TransactionParsingError,
     BuildIdentityHasher, MemoryLocation, TxIdx,
 };
+
+use super::PevmChain;
 
 /// Build MvMemory
 pub(crate) fn build_mv_memory(
@@ -68,20 +70,72 @@ pub fn get_block_spec(header: &Header) -> Option<SpecId> {
     })
 }
 
-pub(crate) fn get_gas_price(tx: &Transaction) -> Result<U256, TransactionParsingError> {
-    let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
-    let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
-        return Err(TransactionParsingError::InvalidType(tx_type_raw));
-    };
+// pub(crate) fn get_gas_price(tx: &Transaction) -> Result<U256, TransactionParsingError> {
+//     let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
+//     let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
+//         return Err(TransactionParsingError::InvalidType(tx_type_raw));
+//     };
 
-    match tx_type {
-        TxType::Legacy | TxType::Eip2930 => tx
-            .gas_price
-            .map(U256::from)
-            .ok_or(TransactionParsingError::MissingGasPrice),
-        TxType::Eip1559 | TxType::Eip4844 => tx
-            .max_fee_per_gas
-            .map(U256::from)
-            .ok_or(TransactionParsingError::MissingMaxFeePerGas),
+//     match tx_type {
+//         TxType::Legacy | TxType::Eip2930 => tx
+//             .gas_price
+//             .map(U256::from)
+//             .ok_or(TransactionParsingError::MissingGasPrice),
+//         TxType::Eip1559 | TxType::Eip4844 => tx
+//             .max_fee_per_gas
+//             .map(U256::from)
+//             .ok_or(TransactionParsingError::MissingMaxFeePerGas),
+//     }
+// }
+
+/// Implementation of [PevmChain] for Ethereum
+#[derive(Debug, Clone)]
+pub struct PevmChainEthereum {
+    id: u64,
+}
+
+impl Default for PevmChainEthereum {
+    /// Ethereum Mainnet
+    fn default() -> Self {
+        Self {
+            id: NamedChain::Mainnet.into(),
+        }
+    }
+}
+
+/// Error type for [PevmEthereum::get_gas_price]
+#[derive(Debug, Clone)]
+pub enum GetGasPriceError {
+    /// [tx.type] is invalid.
+    InvalidType(u8),
+    /// [tx.gas_price] is none.
+    MissingGasPrice,
+    /// [tx.max_fee_per_gas] is none.
+    MissingMaxFeePerGas,
+}
+
+impl PevmChain for PevmChainEthereum {
+    type GetGasPriceError = GetGasPriceError;
+
+    fn id(&self) -> u64 {
+        self.id
+    }
+
+    fn get_gas_price(tx: &Transaction) -> Result<U256, Self::GetGasPriceError> {
+        let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
+        let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
+            return Err(GetGasPriceError::InvalidType(tx_type_raw));
+        };
+
+        match tx_type {
+            TxType::Legacy | TxType::Eip2930 => tx
+                .gas_price
+                .map(U256::from)
+                .ok_or(GetGasPriceError::MissingGasPrice),
+            TxType::Eip1559 | TxType::Eip4844 => tx
+                .max_fee_per_gas
+                .map(U256::from)
+                .ok_or(GetGasPriceError::MissingMaxFeePerGas),
+        }
     }
 }

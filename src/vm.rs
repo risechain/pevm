@@ -1,5 +1,4 @@
 use ahash::{AHashMap, HashMapExt};
-use alloy_chains::Chain;
 use alloy_rpc_types::Receipt;
 use dashmap::DashMap;
 use defer_drop::DeferDrop;
@@ -13,9 +12,9 @@ use revm::{
 use std::collections::HashMap;
 
 use crate::{
-    mv_memory::MvMemory, AccountBasic, BuildIdentityHasher, EvmAccount, MemoryEntry,
-    MemoryLocation, MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError, ReadOrigin,
-    ReadSet, Storage, TxIdx, TxVersion, WriteSet,
+    mv_memory::MvMemory, network::PevmChain, AccountBasic, BuildIdentityHasher, EvmAccount,
+    MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError,
+    ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -104,8 +103,8 @@ pub(crate) enum VmExecutionResult {
 // structure & storage, and tracks the read set of the current execution.
 // TODO: Simplify this type, like grouping [from] and [to] into a
 // [preprocessed_addresses] or a [preprocessed_locations] vector.
-struct VmDb<'a, S: Storage> {
-    vm: &'a Vm<'a, S>,
+struct VmDb<'a, S: Storage, C: PevmChain> {
+    vm: &'a Vm<'a, S, C>,
     tx_idx: &'a TxIdx,
     nonce: u64,
     from: &'a Address,
@@ -120,9 +119,9 @@ struct VmDb<'a, S: Storage> {
     read_accounts: HashMap<MemoryLocationHash, (AccountBasic, Option<B256>), BuildIdentityHasher>,
 }
 
-impl<'a, S: Storage> VmDb<'a, S> {
+impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
     fn new(
-        vm: &'a Vm<'a, S>,
+        vm: &'a Vm<'a, S, C>,
         tx_idx: &'a TxIdx,
         nonce: u64,
         from: &'a Address,
@@ -217,7 +216,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
     }
 }
 
-impl<'a, S: Storage> Database for VmDb<'a, S> {
+impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     type Error = ReadError;
 
     // TODO: More granularity here to ensure we only record dependencies for,
@@ -498,27 +497,27 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
     }
 }
 
-pub(crate) struct Vm<'a, S: Storage> {
+pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     hasher: &'a ahash::RandomState,
     storage: &'a S,
     mv_memory: &'a MvMemory,
     block_env: &'a BlockEnv,
     txs: &'a [TxEnv],
-    chain: Chain,
+    chain: &'a C,
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
     new_bytecodes: DeferDrop<DashMap<B256, Bytecode>>,
 }
 
-impl<'a, S: Storage> Vm<'a, S> {
+impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     pub(crate) fn new(
         hasher: &'a ahash::RandomState,
         storage: &'a S,
         mv_memory: &'a MvMemory,
         block_env: &'a BlockEnv,
         txs: &'a [TxEnv],
-        chain: Chain,
+        chain: &'a C,
         spec_id: SpecId,
     ) -> Self {
         Self {
@@ -764,9 +763,9 @@ impl<'a, S: Storage> Vm<'a, S> {
     }
 }
 
-pub(crate) fn build_evm<'a, DB: Database>(
+pub(crate) fn build_evm<'a, DB: Database, C: PevmChain>(
     db: DB,
-    chain: Chain,
+    chain: &C,
     spec_id: SpecId,
     block_env: BlockEnv,
     with_reward_beneficiary: bool,

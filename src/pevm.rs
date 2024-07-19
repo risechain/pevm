@@ -6,7 +6,6 @@ use std::{
 };
 
 use ahash::AHashMap;
-use alloy_chains::Chain;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
@@ -22,7 +21,7 @@ use revm::{
 
 use crate::{
     mv_memory::MvMemory,
-    network::ethereum,
+    network::{ethereum, PevmChain},
     primitives::{get_block_env, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
@@ -65,9 +64,9 @@ enum AbortReason {
 
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
-pub fn execute<S: Storage + Send + Sync>(
+pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     storage: &S,
-    chain: Chain,
+    chain: &C,
     block: Block,
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
@@ -81,7 +80,7 @@ pub fn execute<S: Storage + Send + Sync>(
     let tx_envs = match block.transactions {
         BlockTransactions::Full(txs) => txs
             .into_iter()
-            .map(get_tx_env)
+            .map(get_tx_env::<C>)
             .collect::<Result<Vec<TxEnv>, TransactionParsingError>>()
             .map_err(PevmError::InvalidTransaction)?,
         _ => return Err(PevmError::MissingTransactionData),
@@ -104,9 +103,9 @@ pub fn execute<S: Storage + Send + Sync>(
 /// Execute REVM transactions sequentially.
 // Useful for falling back for (small) blocks with many dependencies.
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
-pub fn execute_revm_sequential<S: Storage>(
+pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
     storage: &S,
-    chain: Chain,
+    chain: &C,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
@@ -138,9 +137,9 @@ pub fn execute_revm_sequential<S: Storage>(
 /// Execute an REVM block.
 // Ideally everyone would go through the [Alloy] interface. This one is currently
 // useful for testing, and for users that are heavily tied to Revm like Reth.
-pub fn execute_revm_parallel<S: Storage + Send + Sync>(
+pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     storage: &S,
-    chain: Chain,
+    chain: &C,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
@@ -326,9 +325,9 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
     Ok(fully_evaluated_results)
 }
 
-fn try_execute<S: Storage>(
+fn try_execute<S: Storage, C: PevmChain>(
     mv_memory: &MvMemory,
-    vm: &Vm<S>,
+    vm: &Vm<S, C>,
     scheduler: &Scheduler,
     abort_reason: &OnceLock<AbortReason>,
     execution_results: &[Mutex<Option<PevmTxExecutionResult>>],

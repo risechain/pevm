@@ -6,8 +6,8 @@
 
 use std::{num::NonZeroUsize, thread};
 
-use alloy_chains::Chain;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use pevm::network::ethereum::PevmChainEthereum;
 
 // Better project structure
 #[path = "../tests/common/mod.rs"]
@@ -17,7 +17,7 @@ pub mod common;
 static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    let chain = Chain::mainnet();
+    let chain = PevmChainEthereum::default();
     let concurrency_level = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
         // 8 seems to be the sweet max for Ethereum blocks. Any more
@@ -36,7 +36,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             b.iter(|| {
                 pevm::execute(
                     black_box(&storage),
-                    black_box(chain),
+                    black_box(&chain),
                     black_box(block.clone()),
                     black_box(concurrency_level),
                     black_box(true),
@@ -47,7 +47,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             b.iter(|| {
                 pevm::execute(
                     black_box(&storage),
-                    black_box(chain),
+                    black_box(&chain),
                     black_box(block.clone()),
                     black_box(concurrency_level),
                     black_box(false),

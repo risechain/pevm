@@ -7,10 +7,12 @@
 use std::{num::NonZeroUsize, thread};
 
 use ahash::AHashMap;
-use alloy_chains::Chain;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::{execute_revm_parallel, execute_revm_sequential, EvmAccount, InMemoryStorage};
+use pevm::{
+    execute_revm_parallel, execute_revm_sequential, network::ethereum::PevmChainEthereum,
+    EvmAccount, InMemoryStorage,
+};
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
 
 // Better project structure
@@ -30,7 +32,7 @@ static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
 pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let chain = Chain::mainnet();
+    let chain = PevmChainEthereum::default();
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
     let storage = InMemoryStorage::new(state, []);
@@ -39,7 +41,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
         b.iter(|| {
             execute_revm_sequential(
                 black_box(&storage),
-                black_box(chain),
+                black_box(&chain),
                 black_box(spec_id),
                 black_box(block_env.clone()),
                 black_box(txs.clone()),
@@ -50,7 +52,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
         b.iter(|| {
             execute_revm_parallel(
                 black_box(&storage),
-                black_box(chain),
+                black_box(&chain),
                 black_box(spec_id),
                 black_box(block_env.clone()),
                 black_box(txs.clone()),
