@@ -30,10 +30,10 @@ use crate::{
 };
 
 /// Errors when executing a block with PEVM.
-#[derive(Debug, PartialEq, Clone)]
-pub enum PevmError {
+#[derive(Debug, Clone, PartialEq)]
+pub enum PevmError<C: PevmChain> {
     /// Cannot derive the chain spec from the block header.
-    GetBlockSpecError(String),
+    GetBlockSpecError(C::GetBlockSpecError),
     /// Block header lacks information for execution.
     MissingHeaderData,
     /// Transactions lack information for execution.
@@ -52,7 +52,7 @@ pub enum PevmError {
 }
 
 /// Execution result of a block
-pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
+pub type PevmResult<C> = Result<Vec<PevmTxExecutionResult>, PevmError<C>>;
 
 enum AbortReason {
     FallbackToSequential,
@@ -70,10 +70,10 @@ pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     block: Block,
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
-) -> PevmResult {
+) -> PevmResult<C> {
     let spec_id = chain
         .get_block_spec(&block.header)
-        .map_err(|err| PevmError::GetBlockSpecError(format!("{:?}", err)))?;
+        .map_err(PevmError::GetBlockSpecError)?;
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
@@ -109,7 +109,7 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
-) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
+) -> PevmResult<C> {
     let mut db = CacheDB::new(StorageWrapper(storage));
     let mut evm = build_evm(&mut db, chain, spec_id, block_env, true);
     let mut results = Vec::with_capacity(txs.len());
@@ -144,7 +144,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
     concurrency_level: NonZeroUsize,
-) -> PevmResult {
+) -> PevmResult<C> {
     if txs.is_empty() {
         return Ok(Vec::new());
     }

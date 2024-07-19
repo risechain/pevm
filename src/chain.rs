@@ -12,12 +12,12 @@ use crate::{
 };
 
 /// Custom behaviours for different chains & networks
-pub trait PevmChain {
+pub trait PevmChain: Debug + Clone + PartialEq {
     /// The error type for [Self::get_block_spec].
-    type GetBlockSpecError: Debug + Clone;
+    type GetBlockSpecError: Debug + Clone + PartialEq;
 
     /// The error type for [Self::get_gas_price].
-    type GetGasPriceError: Debug + Clone;
+    type GetGasPriceError: Debug + Clone + PartialEq;
 
     /// Get chain id.
     fn id(&self) -> u64;

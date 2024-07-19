@@ -9,7 +9,7 @@ use revm::primitives::SpecId;
 use super::PevmChain;
 
 /// Implementation of [PevmChain] for Ethereum
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PevmEthereum {
     id: u64,
 }
@@ -21,10 +21,12 @@ impl PevmEthereum {
             id: NamedChain::Mainnet.into(),
         }
     }
+
+    // TODO: support Ethereum Sepolia and other testnets
 }
 
 /// Error type for [PevmEthereum::get_block_spec].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetBlockSpecError {
     /// When [header.number] is none.
     MissingBlockNumber,
@@ -33,7 +35,7 @@ pub enum GetBlockSpecError {
 }
 
 /// Error type for [PevmEthereum::get_gas_price].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetGasPriceError {
     /// [tx.type] is invalid.
     InvalidType(u8),

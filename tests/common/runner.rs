@@ -21,7 +21,10 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
     (address, account)
 }
 
-pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: &PevmResult) {
+pub fn assert_execution_result<C: PevmChain>(
+    sequential_result: &PevmResult<C>,
+    parallel_result: &PevmResult<C>,
+) {
     assert_eq!(sequential_result, parallel_result);
 }
 
