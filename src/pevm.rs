@@ -39,7 +39,7 @@ pub enum PevmError<C: PevmChain> {
     /// Transactions lack information for execution.
     MissingTransactionData,
     /// Invalid input transaction.
-    InvalidTransaction(TransactionParsingError),
+    InvalidTransaction(TransactionParsingError<C>),
     /// Storage error.
     // TODO: More concrete types than just an arbitrary string.
     StorageError(String),
@@ -81,7 +81,7 @@ pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
         BlockTransactions::Full(txs) => txs
             .into_iter()
             .map(|tx| get_tx_env(chain, tx))
-            .collect::<Result<Vec<TxEnv>, TransactionParsingError>>()
+            .collect::<Result<Vec<TxEnv>, TransactionParsingError<_>>>()
             .map_err(PevmError::InvalidTransaction)?,
         _ => return Err(PevmError::MissingTransactionData),
     };
