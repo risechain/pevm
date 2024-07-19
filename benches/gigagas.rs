@@ -10,8 +10,8 @@ use ahash::AHashMap;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{
-    execute_revm_parallel, execute_revm_sequential, network::ethereum::PevmChainEthereum,
-    EvmAccount, InMemoryStorage,
+    execute_revm_parallel, execute_revm_sequential, chain::PevmEthereum, EvmAccount,
+    InMemoryStorage,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
 
@@ -32,7 +32,7 @@ static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
 pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    let chain = PevmChainEthereum::default();
+    let chain = PevmEthereum::mainnet();
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
     let storage = InMemoryStorage::new(state, []);

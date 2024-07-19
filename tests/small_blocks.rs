@@ -3,7 +3,7 @@
 
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{network::ethereum::PevmChainEthereum, InMemoryStorage};
+use pevm::{chain::PevmEthereum, InMemoryStorage};
 use revm::primitives::{TransactTo, TxEnv};
 
 pub mod common;
@@ -12,7 +12,7 @@ pub mod common;
 fn empty_alloy_block() {
     common::test_execute_alloy(
         &InMemoryStorage::default(),
-        &PevmChainEthereum::default(),
+        &PevmEthereum::mainnet(),
         Block {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
             transactions: BlockTransactions::Full(Vec::new()),
@@ -31,7 +31,7 @@ fn empty_revm_block() {
 fn one_tx_alloy_block() {
     common::test_execute_alloy(
         &InMemoryStorage::new([common::mock_account(0)], []),
-        &PevmChainEthereum::default(),
+        &PevmEthereum::mainnet(),
         Block {
             // Legit header but with no transactions
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),

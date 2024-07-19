@@ -1,4 +1,4 @@
-//! Network specific utils
+//! Chain specific utils
 
 use std::fmt::Debug;
 
@@ -8,7 +8,7 @@ use revm::primitives::{BlockEnv, SpecId, TxEnv};
 
 use crate::mv_memory::MvMemory;
 
-/// A chain ID (u64) associated with relevant utils.
+/// Custom behaviours for different chains & networks
 pub trait PevmChain {
     /// The error type for [Self::build_mv_memory].
     type BuildMvMemoryError: Debug + Clone;
@@ -36,4 +36,5 @@ pub trait PevmChain {
     fn get_gas_price(tx: &Transaction) -> Result<U256, Self::GetGasPriceError>;
 }
 
-pub mod ethereum;
+mod ethereum;
+pub use ethereum::PevmEthereum;

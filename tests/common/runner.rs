@@ -3,7 +3,7 @@ use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
 use pevm::{
-    network::{ethereum::PevmChainEthereum, PevmChain},
+    chain::{PevmChain, PevmEthereum},
     EvmAccount, PevmResult, PevmTxExecutionResult, Storage,
 };
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
@@ -32,14 +32,14 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<
     assert_execution_result(
         &pevm::execute_revm_sequential(
             &storage,
-            &PevmChainEthereum::default(),
+            &PevmEthereum::mainnet(),
             SpecId::LATEST,
             BlockEnv::default(),
             txs.clone(),
         ),
         &pevm::execute_revm_parallel(
             &storage,
-            &PevmChainEthereum::default(),
+            &PevmEthereum::mainnet(),
             SpecId::LATEST,
             BlockEnv::default(),
             txs,

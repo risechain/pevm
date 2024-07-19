@@ -16,13 +16,13 @@ use super::PevmChain;
 
 /// Implementation of [PevmChain] for Ethereum
 #[derive(Debug, Clone)]
-pub struct PevmChainEthereum {
+pub struct PevmEthereum {
     id: u64,
 }
 
-impl Default for PevmChainEthereum {
+impl PevmEthereum {
     /// Ethereum Mainnet
-    fn default() -> Self {
+    pub fn mainnet() -> Self {
         Self {
             id: NamedChain::Mainnet.into(),
         }
@@ -49,7 +49,7 @@ pub enum GetGasPriceError {
     MissingMaxFeePerGas,
 }
 
-impl PevmChain for PevmChainEthereum {
+impl PevmChain for PevmEthereum {
     type BuildMvMemoryError = Infallible;
     type GetBlockSpecError = GetBlockSpecError;
     type GetGasPriceError = GetGasPriceError;

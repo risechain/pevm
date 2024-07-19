@@ -20,8 +20,8 @@ use revm::{
 };
 
 use crate::{
+    chain::PevmChain,
     mv_memory::MvMemory,
-    network::PevmChain,
     primitives::{get_block_env, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,

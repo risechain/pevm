@@ -4,7 +4,7 @@
 use alloy_rpc_types::{Header, Transaction};
 use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, TransactTo, TxEnv, U256};
 
-use crate::network::PevmChain;
+use crate::chain::PevmChain;
 
 /// Get the REVM block env of an Alloy block.
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L23-L48

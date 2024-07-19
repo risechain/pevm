@@ -14,7 +14,7 @@ use revm::db::CacheDB;
 use tokio::runtime::Runtime;
 
 use pevm::{
-    network::{ethereum::PevmChainEthereum, PevmChain},
+    chain::{PevmChain, PevmEthereum},
     EvmAccount, RpcStorage, StorageWrapper,
 };
 
@@ -52,11 +52,11 @@ fn mainnet_blocks_from_rpc() {
             )
             .unwrap()
             .unwrap();
-        let spec_id = PevmChainEthereum::get_block_spec(&block.header).unwrap();
+        let spec_id = PevmEthereum::get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let wrapped_storage = StorageWrapper(&rpc_storage);
         let db = CacheDB::new(&wrapped_storage);
-        common::test_execute_alloy(&db, &PevmChainEthereum::default(), block.clone(), true);
+        common::test_execute_alloy(&db, &PevmEthereum::mainnet(), block.clone(), true);
 
         // Snapshot blocks (for benchmark)
         // TODO: Port to a dedicated CLI instead?
@@ -91,7 +91,7 @@ fn mainnet_blocks_from_disk() {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(&storage, &PevmChainEthereum::default(), block.clone(), true)
+            common::test_execute_alloy(&storage, &PevmEthereum::mainnet(), block.clone(), true)
         }
     });
 }

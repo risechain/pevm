@@ -7,7 +7,7 @@
 use std::{num::NonZeroUsize, thread};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::network::ethereum::PevmChainEthereum;
+use pevm::chain::PevmEthereum;
 
 // Better project structure
 #[path = "../tests/common/mod.rs"]
@@ -17,7 +17,7 @@ pub mod common;
 static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    let chain = PevmChainEthereum::default();
+    let chain = PevmEthereum::mainnet();
     let concurrency_level = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
         // 8 seems to be the sweet max for Ethereum blocks. Any more

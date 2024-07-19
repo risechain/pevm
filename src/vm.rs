@@ -12,7 +12,7 @@ use revm::{
 use std::collections::HashMap;
 
 use crate::{
-    mv_memory::MvMemory, network::PevmChain, AccountBasic, BuildIdentityHasher, EvmAccount,
+    mv_memory::MvMemory, chain::PevmChain, AccountBasic, BuildIdentityHasher, EvmAccount,
     MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError,
     ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
 };

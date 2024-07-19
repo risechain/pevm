@@ -36,9 +36,9 @@ pub struct MvMemory {
     // (that skips hashing for [u64] keys) would make our code cleaner and "faster".
     // Nevertheless, the compiler should be good enough to optimize these cases anyway.
     data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
-    /// Last locations
+    /// Last read & written locations of each transaction
     last_locations: Vec<Mutex<LastLocations>>,
-    /// Lazy addresses
+    /// Lazy addresses that need full evaluation at the end of the block
     lazy_addresses: Mutex<LazyAddresses>,
 }
 

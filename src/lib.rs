@@ -218,4 +218,4 @@ mod storage;
 pub use storage::{AccountBasic, EvmAccount, InMemoryStorage, RpcStorage, Storage, StorageWrapper};
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};
-pub mod network;
+pub mod chain;
