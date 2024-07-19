@@ -10,9 +10,6 @@ use crate::mv_memory::MvMemory;
 
 /// Custom behaviours for different chains & networks
 pub trait PevmChain {
-    /// The error type for [Self::build_mv_memory].
-    type BuildMvMemoryError: Debug + Clone;
-
     /// The error type for [Self::get_block_spec].
     type GetBlockSpecError: Debug + Clone;
 
@@ -27,7 +24,7 @@ pub trait PevmChain {
         hasher: &ahash::RandomState,
         block_env: &BlockEnv,
         txs: &[TxEnv],
-    ) -> Result<MvMemory, Self::BuildMvMemoryError>;
+    ) -> MvMemory;
 
     /// Get block's [SpecId]
     fn get_block_spec(header: &Header) -> Result<SpecId, Self::GetBlockSpecError>;

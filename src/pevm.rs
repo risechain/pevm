@@ -34,8 +34,6 @@ use crate::{
 pub enum PevmError {
     /// Cannot derive the chain spec from the block header.
     GetBlockSpecError(String),
-    /// Cannot build MvMemory.
-    BuildMvMemoryError(String),
     /// Block header lacks information for execution.
     MissingHeaderData,
     /// Transactions lack information for execution.
@@ -156,9 +154,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     // Initialize the remaining core components
     // TODO: Provide more explicit garbage collecting configs for users over random background
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
-    let mv_memory = C::build_mv_memory(&hasher, &block_env, &txs)
-        .map(DeferDrop::new)
-        .map_err(|err| PevmError::BuildMvMemoryError(format!("{:?}", err)))?;
+    let mv_memory = DeferDrop::new(C::build_mv_memory(&hasher, &block_env, &txs));
     let txs = DeferDrop::new(txs);
     let vm = Vm::new(
         &hasher, storage, &mv_memory, &block_env, &txs, chain, spec_id,

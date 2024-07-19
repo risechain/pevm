@@ -1,5 +1,5 @@
 //! Ethereum
-use std::{collections::HashMap, convert::Infallible};
+use std::collections::HashMap;
 
 use alloy_chains::NamedChain;
 use alloy_consensus::TxType;
@@ -50,7 +50,6 @@ pub enum GetGasPriceError {
 }
 
 impl PevmChain for PevmEthereum {
-    type BuildMvMemoryError = Infallible;
     type GetBlockSpecError = GetBlockSpecError;
     type GetGasPriceError = GetGasPriceError;
 
@@ -62,7 +61,7 @@ impl PevmChain for PevmEthereum {
         hasher: &ahash::RandomState,
         block_env: &BlockEnv,
         txs: &[TxEnv],
-    ) -> Result<MvMemory, Infallible> {
+    ) -> MvMemory {
         let block_size = txs.len();
         let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
 
@@ -76,11 +75,7 @@ impl PevmChain for PevmEthereum {
         let mut lazy_addresses = LazyAddresses::default();
         lazy_addresses.0.insert(block_env.coinbase);
 
-        Ok(MvMemory::new(
-            block_size,
-            estimated_locations,
-            lazy_addresses,
-        ))
+        MvMemory::new(block_size, estimated_locations, lazy_addresses)
     }
 
     /// Get the REVM spec id of an Alloy block.
