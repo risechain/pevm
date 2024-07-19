@@ -73,8 +73,10 @@ impl PevmTxExecutionResult {
     }
 }
 
+// TODO: Rewrite as [Result]
 pub(crate) enum VmExecutionResult {
     Retry,
+    FallbackToSequential,
     ReadError {
         blocking_tx_idx: TxIdx,
     },
@@ -127,7 +129,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
         from_hash: MemoryLocationHash,
         to: Option<&'a Address>,
         to_hash: Option<MemoryLocationHash>,
-    ) -> Self {
+    ) -> Result<Self, ReadError> {
         let mut db = Self {
             vm,
             tx_idx,
@@ -146,13 +148,16 @@ impl<'a, S: Storage> VmDb<'a, S> {
         // or recipient in [MvMemory] since sequentially evaluating memory
         // locations with only one entry is much costlier than fully
         // evaluating it concurrently.
-        // TODO: Better error handling
+        // TODO: Re-order conditions (put most likely true condition ahead)
+        // to avoid [MvMemory] locks.
         // TODO: Only lazy update in block syncing mode, not for block
         // building.
-        db.is_lazy = (vm.mv_memory.have_location(&from_hash)
-            || to_hash.is_some_and(|to_hash| vm.mv_memory.have_location(&to_hash)))
-            && to.is_some_and(|to| db.get_code_hash(*to).unwrap().is_none());
-        db
+        if let Some(to) = to {
+            db.is_lazy = (vm.mv_memory.have_location(&from_hash)
+                || vm.mv_memory.have_location(&to_hash.unwrap()))
+                && db.get_code_hash(*to)?.is_none();
+        }
+        Ok(db)
     }
 
     fn hash_basic(&self, address: &Address) -> MemoryLocationHash {
@@ -179,6 +184,9 @@ impl<'a, S: Storage> VmDb<'a, S> {
                 MemoryEntry::Data(tx_incarnation, MemoryValue::CodeHash(code_hash)),
             )) = written_transactions.range(..self.tx_idx).next_back()
             {
+                if code_hash.is_none() {
+                    return Err(ReadError::SelfDestructedAccount);
+                }
                 let origin = ReadOrigin::MvMemory(TxVersion {
                     tx_idx: *tx_idx,
                     tx_incarnation: *tx_incarnation,
@@ -244,7 +252,6 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         // The sign of [balance_addition] since it can be negative for lazy senders.
         let mut positive_addition = true;
         let mut nonce_addition = 0;
-        let mut found_basic_from_mv_memory = false;
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
@@ -293,9 +300,11 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
                             }
                             new_origins.push(origin);
                             match value {
-                                MemoryValue::Basic(account) => {
-                                    final_account.clone_from(account);
-                                    found_basic_from_mv_memory = true;
+                                MemoryValue::Basic(basic) => {
+                                    if basic.is_none() {
+                                        return Err(ReadError::SelfDestructedAccount);
+                                    }
+                                    final_account.clone_from(basic);
                                     break;
                                 }
                                 MemoryValue::LazyRecipient(addition) => {
@@ -334,7 +343,7 @@ impl<'a, S: Storage> Database for VmDb<'a, S> {
         }
 
         // Fall back to storage
-        if !found_basic_from_mv_memory {
+        if final_account.is_none() {
             // Populate [Storage] on the first read
             if !has_prev_origins {
                 new_origins.push(ReadOrigin::Storage);
@@ -493,10 +502,10 @@ pub(crate) struct Vm<'a, S: Storage> {
     hasher: &'a ahash::RandomState,
     storage: &'a S,
     mv_memory: &'a MvMemory,
+    block_env: &'a BlockEnv,
     txs: &'a [TxEnv],
     chain: Chain,
     spec_id: SpecId,
-    block_env: BlockEnv,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
     new_bytecodes: DeferDrop<DashMap<B256, Bytecode>>,
@@ -507,20 +516,20 @@ impl<'a, S: Storage> Vm<'a, S> {
         hasher: &'a ahash::RandomState,
         storage: &'a S,
         mv_memory: &'a MvMemory,
+        block_env: &'a BlockEnv,
         txs: &'a [TxEnv],
         chain: Chain,
         spec_id: SpecId,
-        block_env: BlockEnv,
     ) -> Self {
         Self {
             hasher,
             storage,
             mv_memory,
+            block_env,
             txs,
             chain,
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
-            block_env,
             reward_policy: RewardPolicy::Ethereum, // TODO: Derive from [chain]
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
@@ -560,7 +569,7 @@ impl<'a, S: Storage> Vm<'a, S> {
         };
 
         // Execute
-        let mut db = VmDb::new(
+        let mut db = match VmDb::new(
             self,
             &tx_idx,
             tx.nonce.unwrap_or(1),
@@ -568,7 +577,11 @@ impl<'a, S: Storage> Vm<'a, S> {
             from_hash,
             to,
             to_hash,
-        );
+        ) {
+            Ok(db) => db,
+            // TODO: Handle different errors differently
+            Err(_) => return VmExecutionResult::FallbackToSequential,
+        };
         // TODO: Share as much Evm, Context, Handler, etc. among threads as possible
         // as creating them is very expensive.
         let mut evm = build_evm(
@@ -685,6 +698,9 @@ impl<'a, S: Storage> Vm<'a, S> {
                 }
             }
             Err(EVMError::Database(ReadError::InconsistentRead)) => VmExecutionResult::Retry,
+            Err(EVMError::Database(ReadError::SelfDestructedAccount)) => {
+                VmExecutionResult::FallbackToSequential
+            }
             Err(EVMError::Database(ReadError::BlockingIndex(blocking_tx_idx))) => {
                 VmExecutionResult::ReadError { blocking_tx_idx }
             }

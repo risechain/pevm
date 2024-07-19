@@ -55,6 +55,11 @@ pub enum PevmError {
 /// Execution result of a block
 pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
 
+enum AbortReason {
+    FallbackToSequential,
+    ExecutionError(ExecutionError),
+}
+
 // TODO: Add a [Pevm] struct for long-lasting use to minimize
 // (de)allocations between runs.
 
@@ -154,11 +159,11 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
     let mv_memory = DeferDrop::new(ethereum::build_mv_memory(&hasher, &block_env, block_size));
     let txs = DeferDrop::new(txs);
     let vm = Vm::new(
-        &hasher, storage, &mv_memory, &txs, chain, spec_id, block_env,
+        &hasher, storage, &mv_memory, &block_env, &txs, chain, spec_id,
     );
     let scheduler = DeferDrop::new(Scheduler::new(block_size));
 
-    let mut execution_error = OnceLock::new();
+    let mut abort_reason = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
 
     // TODO: Better thread handling
@@ -172,7 +177,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
                             &mv_memory,
                             &vm,
                             &scheduler,
-                            &execution_error,
+                            &abort_reason,
                             &execution_results,
                             tx_version,
                         ),
@@ -186,9 +191,8 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
                     // Parallel block builders would like to exclude such transaction,
                     // verifiers may want to exit early to save CPU cycles, while testers
                     // may want to collect all execution results. We are exiting early as
-                    // the default behaviour for now. Also, be aware of a potential deadlock
-                    // in the scheduler's next task loop when an error occurs.
-                    if execution_error.get().is_some() {
+                    // the default behaviour for now.
+                    if abort_reason.get().is_some() {
                         break;
                     }
 
@@ -200,8 +204,21 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
         }
     });
 
-    if let Some(err) = execution_error.take() {
-        return Err(PevmError::ExecutionError(format!("{err:?}")));
+    if let Some(abort_reason) = abort_reason.take() {
+        match abort_reason {
+            AbortReason::FallbackToSequential => {
+                return execute_revm_sequential(
+                    storage,
+                    chain,
+                    spec_id,
+                    block_env,
+                    DeferDrop::into_inner(txs),
+                )
+            }
+            AbortReason::ExecutionError(err) => {
+                return Err(PevmError::ExecutionError(format!("{err:?}")))
+            }
+        }
     }
 
     let mut fully_evaluated_results = Vec::with_capacity(block_size);
@@ -224,11 +241,11 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
                 _ => AccountBasic::default(),
             };
             // Accounts that take implicit writes like the beneficiary account can be contract!
-            let mut code_hash = match storage.code_hash(&address) {
+            let code_hash = match storage.code_hash(&address) {
                 Ok(code_hash) => code_hash,
                 Err(err) => return Err(PevmError::StorageError(err.to_string())),
             };
-            let mut code = if let Some(code_hash) = &code_hash {
+            let code = if let Some(code_hash) = &code_hash {
                 match storage.code_by_hash(code_hash) {
                     Ok(code) => code,
                     Err(err) => return Err(PevmError::StorageError(err.to_string())),
@@ -246,14 +263,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
                             current_account.balance = info.balance;
                             current_account.nonce = info.nonce;
                         } else {
-                            // TODO: Be careful of contracts re-deployed in the same block
-                            // that it is self-destructed, especially if there is an inbetween
-                            // transaction that funds it (to trigger lazy evaluation).
                             self_destructed = true;
-                            current_account.balance = U256::ZERO;
-                            current_account.nonce = 0;
-                            code_hash = None;
-                            code = None;
                         }
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
@@ -322,15 +332,27 @@ fn try_execute<S: Storage>(
     mv_memory: &MvMemory,
     vm: &Vm<S>,
     scheduler: &Scheduler,
-    execution_error: &OnceLock<ExecutionError>,
+    abort_reason: &OnceLock<AbortReason>,
     execution_results: &[Mutex<Option<PevmTxExecutionResult>>],
     tx_version: TxVersion,
 ) -> Option<Task> {
     loop {
         return match vm.execute(tx_version.tx_idx) {
-            VmExecutionResult::Retry => continue,
+            VmExecutionResult::Retry => {
+                if abort_reason.get().is_none() {
+                    continue;
+                }
+                None
+            }
+            VmExecutionResult::FallbackToSequential => {
+                scheduler.abort();
+                abort_reason.get_or_init(|| AbortReason::FallbackToSequential);
+                None
+            }
             VmExecutionResult::ReadError { blocking_tx_idx } => {
-                if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx) {
+                if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
+                    && abort_reason.get().is_none()
+                {
                     // Retry the execution immediately if the blocking transaction was
                     // re-executed by the time we can add it as a dependency.
                     continue;
@@ -338,8 +360,8 @@ fn try_execute<S: Storage>(
                 None
             }
             VmExecutionResult::ExecutionError(err) => {
-                // TODO: Better error handling
-                execution_error.set(err).unwrap();
+                scheduler.abort();
+                abort_reason.get_or_init(|| AbortReason::ExecutionError(err));
                 None
             }
             VmExecutionResult::Ok {
