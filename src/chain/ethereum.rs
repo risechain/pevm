@@ -57,33 +57,13 @@ impl PevmChain for PevmEthereum {
         self.id
     }
 
-    fn build_mv_memory(
-        hasher: &ahash::RandomState,
-        block_env: &BlockEnv,
-        txs: &[TxEnv],
-    ) -> MvMemory {
-        let block_size = txs.len();
-        let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
-
-        // TODO: Estimate more locations based on sender, to, etc.
-        let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
-        estimated_locations.insert(
-            beneficiary_location_hash,
-            (0..block_size).collect::<Vec<TxIdx>>(),
-        );
-
-        let mut lazy_addresses = LazyAddresses::default();
-        lazy_addresses.0.insert(block_env.coinbase);
-
-        MvMemory::new(block_size, estimated_locations, lazy_addresses)
-    }
-
     /// Get the REVM spec id of an Alloy block.
     // Currently hardcoding Ethereum hardforks from these reference:
     // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/revm/config.rs#L33-L78
     // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/chain/spec.rs#L44-L68
     // TODO: Better error handling & properly test this.
-    fn get_block_spec(header: &Header) -> Result<SpecId, Self::GetBlockSpecError> {
+    // TODO: Only Ethereum Mainnet is supported at the moment.
+    fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::GetBlockSpecError> {
         let number = header.number.ok_or(GetBlockSpecError::MissingBlockNumber)?;
         let total_difficulty = header
             .total_difficulty
@@ -118,7 +98,7 @@ impl PevmChain for PevmEthereum {
         })
     }
 
-    fn get_gas_price(tx: &Transaction) -> Result<U256, Self::GetGasPriceError> {
+    fn get_gas_price(&self, tx: &Transaction) -> Result<U256, Self::GetGasPriceError> {
         let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
         let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
             return Err(GetGasPriceError::InvalidType(tx_type_raw));
@@ -134,5 +114,27 @@ impl PevmChain for PevmEthereum {
                 .map(U256::from)
                 .ok_or(GetGasPriceError::MissingMaxFeePerGas),
         }
+    }
+
+    fn build_mv_memory(
+        &self,
+        hasher: &ahash::RandomState,
+        block_env: &BlockEnv,
+        txs: &[TxEnv],
+    ) -> MvMemory {
+        let block_size = txs.len();
+        let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
+
+        // TODO: Estimate more locations based on sender, to, etc.
+        let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
+        estimated_locations.insert(
+            beneficiary_location_hash,
+            (0..block_size).collect::<Vec<TxIdx>>(),
+        );
+
+        let mut lazy_addresses = LazyAddresses::default();
+        lazy_addresses.0.insert(block_env.coinbase);
+
+        MvMemory::new(block_size, estimated_locations, lazy_addresses)
     }
 }

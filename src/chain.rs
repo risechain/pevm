@@ -19,18 +19,19 @@ pub trait PevmChain {
     /// Get chain id.
     fn id(&self) -> u64;
 
+    /// Get block's [SpecId]
+    fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::GetBlockSpecError>;
+
+    /// Get tx gas price.
+    fn get_gas_price(&self, tx: &Transaction) -> Result<U256, Self::GetGasPriceError>;
+
     /// Build [MvMemory]
     fn build_mv_memory(
+        &self,
         hasher: &ahash::RandomState,
         block_env: &BlockEnv,
         txs: &[TxEnv],
     ) -> MvMemory;
-
-    /// Get block's [SpecId]
-    fn get_block_spec(header: &Header) -> Result<SpecId, Self::GetBlockSpecError>;
-
-    /// Get tx gas price.
-    fn get_gas_price(tx: &Transaction) -> Result<U256, Self::GetGasPriceError>;
 }
 
 mod ethereum;

@@ -52,11 +52,12 @@ fn mainnet_blocks_from_rpc() {
             )
             .unwrap()
             .unwrap();
-        let spec_id = PevmEthereum::get_block_spec(&block.header).unwrap();
+        let chain = PevmEthereum::mainnet();
+        let spec_id = PevmEthereum::get_block_spec(&chain, &block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let wrapped_storage = StorageWrapper(&rpc_storage);
         let db = CacheDB::new(&wrapped_storage);
-        common::test_execute_alloy(&db, &PevmEthereum::mainnet(), block.clone(), true);
+        common::test_execute_alloy(&db, &chain, block.clone(), true);
 
         // Snapshot blocks (for benchmark)
         // TODO: Port to a dedicated CLI instead?

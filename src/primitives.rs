@@ -38,14 +38,18 @@ pub enum TransactionParsingError {
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
 // TODO: Properly test this.
-pub(crate) fn get_tx_env<C: PevmChain>(tx: Transaction) -> Result<TxEnv, TransactionParsingError> {
+pub(crate) fn get_tx_env<C: PevmChain>(
+    chain: &C,
+    tx: Transaction,
+) -> Result<TxEnv, TransactionParsingError> {
     Ok(TxEnv {
         caller: tx.from,
         gas_limit: tx
             .gas
             .try_into()
             .map_err(|_| TransactionParsingError::OverflowedGasLimit)?,
-        gas_price: C::get_gas_price(&tx)
+        gas_price: chain
+            .get_gas_price(&tx)
             .map_err(|err| TransactionParsingError::GetGasPriceError(format!("{:?}", err)))?,
         gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
         transact_to: match tx.to {

@@ -71,7 +71,8 @@ pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
 ) -> PevmResult {
-    let spec_id = C::get_block_spec(&block.header)
+    let spec_id = chain
+        .get_block_spec(&block.header)
         .map_err(|err| PevmError::GetBlockSpecError(format!("{:?}", err)))?;
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
@@ -79,7 +80,7 @@ pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     let tx_envs = match block.transactions {
         BlockTransactions::Full(txs) => txs
             .into_iter()
-            .map(get_tx_env::<C>)
+            .map(|tx| get_tx_env(chain, tx))
             .collect::<Result<Vec<TxEnv>, TransactionParsingError>>()
             .map_err(PevmError::InvalidTransaction)?,
         _ => return Err(PevmError::MissingTransactionData),
@@ -154,7 +155,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     // Initialize the remaining core components
     // TODO: Provide more explicit garbage collecting configs for users over random background
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
-    let mv_memory = DeferDrop::new(C::build_mv_memory(&hasher, &block_env, &txs));
+    let mv_memory = DeferDrop::new(chain.build_mv_memory(&hasher, &block_env, &txs));
     let txs = DeferDrop::new(txs);
     let vm = Vm::new(
         &hasher, storage, &mv_memory, &block_env, &txs, chain, spec_id,
