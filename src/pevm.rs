@@ -214,15 +214,12 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
 
             // TODO: Assert that the evaluated nonce matches the tx's.
             for (tx_idx, memory_entry) in write_history {
-                let mut self_destructed = false;
                 let tx = unsafe { txs.get_unchecked(tx_idx) };
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                         if let Some(info) = info {
                             current_account.balance = info.balance;
                             current_account.nonce = info.nonce;
-                        } else {
-                            self_destructed = true;
                         }
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
@@ -279,9 +276,9 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                 }
                 account.mark_touch();
                 account.status -= AccountStatus::Cold;
-                // if self_destructed || spec_id.is_enabled_in(SPURIOUS_DRAGON) && account.is_empty() {
-                //     is_first = true;
-                // }
+                if spec_id.is_enabled_in(SPURIOUS_DRAGON) && account.is_empty() {
+                    is_first = true;
+                }
             }
         }
     }
