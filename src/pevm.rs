@@ -256,15 +256,14 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
 
             // TODO: Assert that the evaluated nonce matches the tx's.
             for (tx_idx, memory_entry) in write_history {
-                let mut self_destructed = false;
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                         if let Some(info) = info {
                             current_account.balance = info.balance;
                             current_account.nonce = info.nonce;
-                        } else {
-                            self_destructed = true;
                         }
+                        // TODO: Assert that there must be no self-destructed
+                        // accounts here.
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
                         current_account.balance += addition;
@@ -299,11 +298,10 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
                 let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(tx_idx) };
                 let account = tx_result.state.entry(address).or_default();
                 // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
-                if self_destructed
-                    || spec_id.is_enabled_in(SPURIOUS_DRAGON)
-                        && code_hash.is_none()
-                        && current_account.nonce == 0
-                        && current_account.balance == U256::ZERO
+                if spec_id.is_enabled_in(SPURIOUS_DRAGON)
+                    && code_hash.is_none()
+                    && current_account.nonce == 0
+                    && current_account.balance == U256::ZERO
                 {
                     *account = None;
                 } else if let Some(account) = account {
