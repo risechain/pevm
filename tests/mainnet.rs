@@ -9,13 +9,14 @@ use std::{
 use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
-use pevm::{
-    network::ethereum::{self, PevmChainEthereum},
-    EvmAccount, RpcStorage, StorageWrapper,
-};
 use reqwest::Url;
 use revm::db::CacheDB;
 use tokio::runtime::Runtime;
+
+use pevm::{
+    network::{ethereum::PevmChainEthereum, PevmChain},
+    EvmAccount, RpcStorage, StorageWrapper,
+};
 
 pub mod common;
 
@@ -51,7 +52,7 @@ fn mainnet_blocks_from_rpc() {
             )
             .unwrap()
             .unwrap();
-        let spec_id = ethereum::get_block_spec(&block.header).unwrap();
+        let spec_id = PevmChainEthereum::get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let wrapped_storage = StorageWrapper(&rpc_storage);
         let db = CacheDB::new(&wrapped_storage);

@@ -33,7 +33,7 @@ use crate::{
 #[derive(Debug, PartialEq, Clone)]
 pub enum PevmError {
     /// Cannot derive the chain spec from the block header.
-    UnknownBlockSpec,
+    GetBlockSpecError(String),
     /// Block header lacks information for execution.
     MissingHeaderData,
     /// Transactions lack information for execution.
@@ -71,9 +71,8 @@ pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
 ) -> PevmResult {
-    let Some(spec_id) = ethereum::get_block_spec(&block.header) else {
-        return Err(PevmError::UnknownBlockSpec);
-    };
+    let spec_id = C::get_block_spec(&block.header)
+        .map_err(|err| PevmError::GetBlockSpecError(format!("{:?}", err)))?;
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };

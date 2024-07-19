@@ -35,40 +35,40 @@ pub(crate) fn build_mv_memory(
     MvMemory::new(block_size, estimated_locations, lazy_addresses)
 }
 
-/// Get the REVM spec id of an Alloy block.
-// Currently hardcoding Ethereum hardforks from these reference:
-// https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/revm/config.rs#L33-L78
-// https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/chain/spec.rs#L44-L68
-// TODO: Better error handling & properly test this.
-pub fn get_block_spec(header: &Header) -> Option<SpecId> {
-    Some(if header.timestamp >= 1710338135 {
-        SpecId::CANCUN
-    } else if header.timestamp >= 1681338455 {
-        SpecId::SHANGHAI
-    } else if header.total_difficulty?.saturating_sub(header.difficulty)
-        >= U256::from(58_750_000_000_000_000_000_000_u128)
-    {
-        SpecId::MERGE
-    } else if header.number? >= 12965000 {
-        SpecId::LONDON
-    } else if header.number? >= 12244000 {
-        SpecId::BERLIN
-    } else if header.number? >= 9069000 {
-        SpecId::ISTANBUL
-    } else if header.number? >= 7280000 {
-        SpecId::PETERSBURG
-    } else if header.number? >= 4370000 {
-        SpecId::BYZANTIUM
-    } else if header.number? >= 2675000 {
-        SpecId::SPURIOUS_DRAGON
-    } else if header.number? >= 2463000 {
-        SpecId::TANGERINE
-    } else if header.number? >= 1150000 {
-        SpecId::HOMESTEAD
-    } else {
-        SpecId::FRONTIER
-    })
-}
+// /// Get the REVM spec id of an Alloy block.
+// // Currently hardcoding Ethereum hardforks from these reference:
+// // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/revm/config.rs#L33-L78
+// // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/chain/spec.rs#L44-L68
+// // TODO: Better error handling & properly test this.
+// pub fn get_block_spec(header: &Header) -> Option<SpecId> {
+//     Some(if header.timestamp >= 1710338135 {
+//         SpecId::CANCUN
+//     } else if header.timestamp >= 1681338455 {
+//         SpecId::SHANGHAI
+//     } else if header.total_difficulty?.saturating_sub(header.difficulty)
+//         >= U256::from(58_750_000_000_000_000_000_000_u128)
+//     {
+//         SpecId::MERGE
+//     } else if header.number? >= 12965000 {
+//         SpecId::LONDON
+//     } else if header.number? >= 12244000 {
+//         SpecId::BERLIN
+//     } else if header.number? >= 9069000 {
+//         SpecId::ISTANBUL
+//     } else if header.number? >= 7280000 {
+//         SpecId::PETERSBURG
+//     } else if header.number? >= 4370000 {
+//         SpecId::BYZANTIUM
+//     } else if header.number? >= 2675000 {
+//         SpecId::SPURIOUS_DRAGON
+//     } else if header.number? >= 2463000 {
+//         SpecId::TANGERINE
+//     } else if header.number? >= 1150000 {
+//         SpecId::HOMESTEAD
+//     } else {
+//         SpecId::FRONTIER
+//     })
+// }
 
 // pub(crate) fn get_gas_price(tx: &Transaction) -> Result<U256, TransactionParsingError> {
 //     let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
@@ -103,7 +103,16 @@ impl Default for PevmChainEthereum {
     }
 }
 
-/// Error type for [PevmEthereum::get_gas_price]
+/// Error type for [PevmEthereum::get_block_spec].
+#[derive(Debug, Clone)]
+pub enum GetBlockSpecError {
+    /// When [header.number] is none.
+    MissingBlockNumber,
+    /// When [header.total_difficulty] is none.
+    MissingTotalDifficulty,
+}
+
+/// Error type for [PevmEthereum::get_gas_price].
 #[derive(Debug, Clone)]
 pub enum GetGasPriceError {
     /// [tx.type] is invalid.
@@ -115,10 +124,51 @@ pub enum GetGasPriceError {
 }
 
 impl PevmChain for PevmChainEthereum {
+    type GetBlockSpecError = GetBlockSpecError;
     type GetGasPriceError = GetGasPriceError;
 
     fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Get the REVM spec id of an Alloy block.
+    // Currently hardcoding Ethereum hardforks from these reference:
+    // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/revm/config.rs#L33-L78
+    // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/chain/spec.rs#L44-L68
+    // TODO: Better error handling & properly test this.
+    fn get_block_spec(header: &Header) -> Result<SpecId, Self::GetBlockSpecError> {
+        let number = header.number.ok_or(GetBlockSpecError::MissingBlockNumber)?;
+        let total_difficulty = header
+            .total_difficulty
+            .ok_or(GetBlockSpecError::MissingTotalDifficulty)?;
+
+        Ok(if header.timestamp >= 1710338135 {
+            SpecId::CANCUN
+        } else if header.timestamp >= 1681338455 {
+            SpecId::SHANGHAI
+        } else if total_difficulty.saturating_sub(header.difficulty)
+            >= U256::from(58_750_000_000_000_000_000_000_u128)
+        {
+            SpecId::MERGE
+        } else if number >= 12965000 {
+            SpecId::LONDON
+        } else if number >= 12244000 {
+            SpecId::BERLIN
+        } else if number >= 9069000 {
+            SpecId::ISTANBUL
+        } else if number >= 7280000 {
+            SpecId::PETERSBURG
+        } else if number >= 4370000 {
+            SpecId::BYZANTIUM
+        } else if number >= 2675000 {
+            SpecId::SPURIOUS_DRAGON
+        } else if number >= 2463000 {
+            SpecId::TANGERINE
+        } else if number >= 1150000 {
+            SpecId::HOMESTEAD
+        } else {
+            SpecId::FRONTIER
+        })
     }
 
     fn get_gas_price(tx: &Transaction) -> Result<U256, Self::GetGasPriceError> {
