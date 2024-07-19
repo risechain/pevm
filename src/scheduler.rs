@@ -1,7 +1,7 @@
 use std::{
     cmp::min,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Mutex,
     },
     thread,
@@ -54,6 +54,9 @@ pub(crate) struct Scheduler {
     min_validation_idx: AtomicUsize,
     // The number of validated transactions
     num_validated: AtomicUsize,
+    // True if the scheduler has been aborted, likely due to fatal exeuction
+    // errors.
+    aborted: AtomicBool,
 }
 
 impl Scheduler {
@@ -75,7 +78,12 @@ impl Scheduler {
             validation_idx: AtomicUsize::new(block_size),
             min_validation_idx: AtomicUsize::new(block_size),
             num_validated: AtomicUsize::new(0),
+            aborted: AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn abort(&self) {
+        self.aborted.store(true, Ordering::Release);
     }
 
     fn try_execute(&self, tx_idx: TxIdx) -> Option<TxVersion> {
@@ -93,7 +101,7 @@ impl Scheduler {
     }
 
     pub(crate) fn next_task(&self) -> Option<Task> {
-        loop {
+        while !self.aborted.load(Ordering::Acquire) {
             let execution_idx = self.execution_idx.load(Ordering::Acquire);
             let validation_idx = self.validation_idx.load(Ordering::Acquire);
             if execution_idx >= self.block_size && validation_idx >= self.block_size {

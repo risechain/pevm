@@ -179,6 +179,9 @@ pub enum ReadError {
     /// not having a (+1) nonce from storage.
     /// TODO: Add the address and tx index to the error.
     InvalidNonce,
+    /// Read a self-destructed account that is very hard to handle, as
+    /// there is no performant way to mark all storage slots as cleared.
+    SelfDestructedAccount,
     /// The stored memory value type doesn't match its location type.
     /// TODO: Handle this at the type level?
     InvalidMemoryLocationType,
