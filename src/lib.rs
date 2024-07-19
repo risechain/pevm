@@ -82,6 +82,7 @@ enum MemoryValue {
     LazySender(U256),
 }
 
+#[derive(Debug)]
 enum MemoryEntry {
     Data(TxIncarnation, MemoryValue),
     // When an incarnation is aborted due to a validation failure, the

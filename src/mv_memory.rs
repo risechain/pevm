@@ -9,13 +9,14 @@ use crate::{
     ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct LastLocations {
     read: ReadSet,
     // Consider [SmallVec] since most transactions explicitly write to 2 locations!
     write: Vec<MemoryLocationHash>,
 }
 
+#[derive(Debug)]
 pub(crate) struct LazyAddresses(pub(crate) AHashSet<Address, BuildAddressHasher>);
 impl Default for LazyAddresses {
     fn default() -> Self {
@@ -23,17 +24,21 @@ impl Default for LazyAddresses {
     }
 }
 
-// The MvMemory contains shared memory in a form of a multi-version data
-// structure for values written and read by different transactions. It stores
-// multiple writes for each memory location, along with a value and an associated
-// version of a corresponding transaction.
-pub(crate) struct MvMemory {
+/// The MvMemory contains shared memory in a form of a multi-version data
+/// structure for values written and read by different transactions. It stores
+/// multiple writes for each memory location, along with a value and an associated
+/// version of a corresponding transaction.
+#[derive(Debug)]
+pub struct MvMemory {
+    /// History of each location
     // No more hashing is required as we already identify memory locations by their hash
     // in the read & write sets. [dashmap] having a dedicated interface for this use case
     // (that skips hashing for [u64] keys) would make our code cleaner and "faster".
     // Nevertheless, the compiler should be good enough to optimize these cases anyway.
     data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
+    /// Last locations
     last_locations: Vec<Mutex<LastLocations>>,
+    /// Lazy addresses
     lazy_addresses: Mutex<LazyAddresses>,
 }
 

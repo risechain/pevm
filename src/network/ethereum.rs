@@ -1,11 +1,11 @@
 //! Ethereum
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::Infallible};
 
 use alloy_chains::NamedChain;
 use alloy_consensus::TxType;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Header, Transaction};
-use revm::primitives::{BlockEnv, SpecId};
+use revm::primitives::{BlockEnv, SpecId, TxEnv};
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
@@ -14,26 +14,26 @@ use crate::{
 
 use super::PevmChain;
 
-/// Build MvMemory
-pub(crate) fn build_mv_memory(
-    hasher: &ahash::RandomState,
-    block_env: &BlockEnv,
-    block_size: usize,
-) -> MvMemory {
-    let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
+// /// Build MvMemory
+// pub(crate) fn build_mv_memory(
+//     hasher: &ahash::RandomState,
+//     block_env: &BlockEnv,
+//     block_size: usize,
+// ) -> MvMemory {
+//     let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
 
-    // TODO: Estimate more locations based on sender, to, etc.
-    let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
-    estimated_locations.insert(
-        beneficiary_location_hash,
-        (0..block_size).collect::<Vec<TxIdx>>(),
-    );
+//     // TODO: Estimate more locations based on sender, to, etc.
+//     let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
+//     estimated_locations.insert(
+//         beneficiary_location_hash,
+//         (0..block_size).collect::<Vec<TxIdx>>(),
+//     );
 
-    let mut lazy_addresses = LazyAddresses::default();
-    lazy_addresses.0.insert(block_env.coinbase);
+//     let mut lazy_addresses = LazyAddresses::default();
+//     lazy_addresses.0.insert(block_env.coinbase);
 
-    MvMemory::new(block_size, estimated_locations, lazy_addresses)
-}
+//     MvMemory::new(block_size, estimated_locations, lazy_addresses)
+// }
 
 // /// Get the REVM spec id of an Alloy block.
 // // Currently hardcoding Ethereum hardforks from these reference:
@@ -124,11 +124,37 @@ pub enum GetGasPriceError {
 }
 
 impl PevmChain for PevmChainEthereum {
+    type BuildMvMemoryError = Infallible;
     type GetBlockSpecError = GetBlockSpecError;
     type GetGasPriceError = GetGasPriceError;
 
     fn id(&self) -> u64 {
         self.id
+    }
+
+    fn build_mv_memory(
+        hasher: &ahash::RandomState,
+        block_env: &BlockEnv,
+        txs: &[TxEnv],
+    ) -> Result<MvMemory, Infallible> {
+        let block_size = txs.len();
+        let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
+
+        // TODO: Estimate more locations based on sender, to, etc.
+        let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
+        estimated_locations.insert(
+            beneficiary_location_hash,
+            (0..block_size).collect::<Vec<TxIdx>>(),
+        );
+
+        let mut lazy_addresses = LazyAddresses::default();
+        lazy_addresses.0.insert(block_env.coinbase);
+
+        Ok(MvMemory::new(
+            block_size,
+            estimated_locations,
+            lazy_addresses,
+        ))
     }
 
     /// Get the REVM spec id of an Alloy block.
