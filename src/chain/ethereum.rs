@@ -1,10 +1,17 @@
 //! Ethereum
 
+use std::{collections::HashMap, fmt::Debug};
+
 use alloy_chains::NamedChain;
 use alloy_consensus::TxType;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Header, Transaction};
-use revm::primitives::SpecId;
+use revm::primitives::{BlockEnv, SpecId, TxEnv};
+
+use crate::{
+    mv_memory::{LazyAddresses, MvMemory},
+    BuildIdentityHasher, MemoryLocation, TxIdx,
+};
 
 use super::PevmChain;
 
@@ -110,5 +117,27 @@ impl PevmChain for PevmEthereum {
                 .map(U256::from)
                 .ok_or(GetGasPriceError::MissingMaxFeePerGas),
         }
+    }
+
+    fn build_mv_memory(
+        &self,
+        hasher: &ahash::RandomState,
+        block_env: &BlockEnv,
+        txs: &[TxEnv],
+    ) -> MvMemory {
+        let block_size = txs.len();
+        let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
+
+        // TODO: Estimate more locations based on sender, to, etc.
+        let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
+        estimated_locations.insert(
+            beneficiary_location_hash,
+            (0..block_size).collect::<Vec<TxIdx>>(),
+        );
+
+        let mut lazy_addresses = LazyAddresses::default();
+        lazy_addresses.0.insert(block_env.coinbase);
+
+        MvMemory::new(block_size, estimated_locations, lazy_addresses)
     }
 }

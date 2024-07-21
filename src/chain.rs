@@ -8,7 +8,7 @@ use revm::primitives::{BlockEnv, SpecId, TxEnv};
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    BuildIdentityHasher, MemoryLocation, TxIdx,
+    BuildIdentityHasher,
 };
 
 /// Custom behaviours for different chains & networks
@@ -31,24 +31,15 @@ pub trait PevmChain: Debug + Clone + PartialEq {
     /// Build [MvMemory]
     fn build_mv_memory(
         &self,
-        hasher: &ahash::RandomState,
-        block_env: &BlockEnv,
+        _hasher: &ahash::RandomState,
+        _block_env: &BlockEnv,
         txs: &[TxEnv],
     ) -> MvMemory {
-        let block_size = txs.len();
-        let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
-
-        // TODO: Estimate more locations based on sender, to, etc.
-        let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
-        estimated_locations.insert(
-            beneficiary_location_hash,
-            (0..block_size).collect::<Vec<TxIdx>>(),
-        );
-
-        let mut lazy_addresses = LazyAddresses::default();
-        lazy_addresses.0.insert(block_env.coinbase);
-
-        MvMemory::new(block_size, estimated_locations, lazy_addresses)
+        MvMemory::new(
+            txs.len(),
+            HashMap::with_hasher(BuildIdentityHasher::default()),
+            LazyAddresses::default(),
+        )
     }
 }
 
