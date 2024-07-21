@@ -158,7 +158,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     let mv_memory = DeferDrop::new(chain.build_mv_memory(&hasher, &block_env, &txs));
     let txs = DeferDrop::new(txs);
     let vm = Vm::new(
-        &hasher, storage, &mv_memory, &block_env, &txs, chain, spec_id,
+        &hasher, storage, &mv_memory, chain, &block_env, &txs, spec_id,
     );
     let scheduler = DeferDrop::new(Scheduler::new(block_size));
 

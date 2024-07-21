@@ -12,7 +12,7 @@ use revm::{
 use std::collections::HashMap;
 
 use crate::{
-    mv_memory::MvMemory, chain::PevmChain, AccountBasic, BuildIdentityHasher, EvmAccount,
+    chain::PevmChain, mv_memory::MvMemory, AccountBasic, BuildIdentityHasher, EvmAccount,
     MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError,
     ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
 };
@@ -501,9 +501,9 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     hasher: &'a ahash::RandomState,
     storage: &'a S,
     mv_memory: &'a MvMemory,
+    chain: &'a C,
     block_env: &'a BlockEnv,
     txs: &'a [TxEnv],
-    chain: &'a C,
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
@@ -515,18 +515,18 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         hasher: &'a ahash::RandomState,
         storage: &'a S,
         mv_memory: &'a MvMemory,
+        chain: &'a C,
         block_env: &'a BlockEnv,
         txs: &'a [TxEnv],
-        chain: &'a C,
         spec_id: SpecId,
     ) -> Self {
         Self {
             hasher,
             storage,
             mv_memory,
+            chain,
             block_env,
             txs,
-            chain,
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             reward_policy: RewardPolicy::Ethereum, // TODO: Derive from [chain]
