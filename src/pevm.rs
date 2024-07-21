@@ -264,6 +264,7 @@ pub fn execute_revm<DB: DatabaseRef<Error: Display> + Send + Sync>(
                     if current_account.is_empty_code_hash() && !account.info.is_empty_code_hash()
                         || tx.transact_to == TransactTo::Create
                             && location_hash != beneficiary_location_hash
+                            && address != tx.caller
                     {
                         account.status |= AccountStatus::Created;
                         if account.info.code.is_none() {
