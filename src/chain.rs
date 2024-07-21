@@ -14,19 +14,19 @@ use crate::{
 /// Custom behaviours for different chains & networks
 pub trait PevmChain: Debug + Clone + PartialEq {
     /// The error type for [Self::get_block_spec].
-    type GetBlockSpecError: Debug + Clone + PartialEq;
+    type BlockSpecError: Debug + Clone + PartialEq;
 
     /// The error type for [Self::get_gas_price].
-    type GetGasPriceError: Debug + Clone + PartialEq;
+    type GasPriceError: Debug + Clone + PartialEq;
 
     /// Get chain id.
     fn id(&self) -> u64;
 
     /// Get block's [SpecId]
-    fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::GetBlockSpecError>;
+    fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError>;
 
     /// Get tx gas price.
-    fn get_gas_price(&self, tx: &Transaction) -> Result<U256, Self::GetGasPriceError>;
+    fn get_gas_price(&self, tx: &Transaction) -> Result<U256, Self::GasPriceError>;
 
     /// Build [MvMemory]
     fn build_mv_memory(

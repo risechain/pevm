@@ -30,7 +30,7 @@ impl Default for LazyAddresses {
 /// version of a corresponding transaction.
 #[derive(Debug)]
 pub struct MvMemory {
-    /// History of each location
+    /// The list of transaction incarnations and written values for each memory location
     // No more hashing is required as we already identify memory locations by their hash
     // in the read & write sets. [dashmap] having a dedicated interface for this use case
     // (that skips hashing for [u64] keys) would make our code cleaner and "faster".

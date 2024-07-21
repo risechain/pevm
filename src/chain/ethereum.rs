@@ -34,7 +34,7 @@ impl PevmEthereum {
 
 /// Error type for [PevmEthereum::get_block_spec].
 #[derive(Debug, Clone, PartialEq)]
-pub enum GetBlockSpecError {
+pub enum EthereumBlockSpecError {
     /// When [header.number] is none.
     MissingBlockNumber,
     /// When [header.total_difficulty] is none.
@@ -43,7 +43,7 @@ pub enum GetBlockSpecError {
 
 /// Error type for [PevmEthereum::get_gas_price].
 #[derive(Debug, Clone, PartialEq)]
-pub enum GetGasPriceError {
+pub enum EthereumGasPriceError {
     /// [tx.type] is invalid.
     InvalidType(u8),
     /// [tx.gas_price] is none.
@@ -53,8 +53,8 @@ pub enum GetGasPriceError {
 }
 
 impl PevmChain for PevmEthereum {
-    type GetBlockSpecError = GetBlockSpecError;
-    type GetGasPriceError = GetGasPriceError;
+    type BlockSpecError = EthereumBlockSpecError;
+    type GasPriceError = EthereumGasPriceError;
 
     fn id(&self) -> u64 {
         self.id
@@ -66,11 +66,13 @@ impl PevmChain for PevmEthereum {
     // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/chain/spec.rs#L44-L68
     // TODO: Better error handling & properly test this.
     // TODO: Only Ethereum Mainnet is supported at the moment.
-    fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::GetBlockSpecError> {
-        let number = header.number.ok_or(GetBlockSpecError::MissingBlockNumber)?;
+    fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError> {
+        let number = header
+            .number
+            .ok_or(EthereumBlockSpecError::MissingBlockNumber)?;
         let total_difficulty = header
             .total_difficulty
-            .ok_or(GetBlockSpecError::MissingTotalDifficulty)?;
+            .ok_or(EthereumBlockSpecError::MissingTotalDifficulty)?;
 
         Ok(if header.timestamp >= 1710338135 {
             SpecId::CANCUN
@@ -101,21 +103,21 @@ impl PevmChain for PevmEthereum {
         })
     }
 
-    fn get_gas_price(&self, tx: &Transaction) -> Result<U256, Self::GetGasPriceError> {
+    fn get_gas_price(&self, tx: &Transaction) -> Result<U256, Self::GasPriceError> {
         let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
         let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
-            return Err(GetGasPriceError::InvalidType(tx_type_raw));
+            return Err(EthereumGasPriceError::InvalidType(tx_type_raw));
         };
 
         match tx_type {
             TxType::Legacy | TxType::Eip2930 => tx
                 .gas_price
                 .map(U256::from)
-                .ok_or(GetGasPriceError::MissingGasPrice),
+                .ok_or(EthereumGasPriceError::MissingGasPrice),
             TxType::Eip1559 | TxType::Eip4844 => tx
                 .max_fee_per_gas
                 .map(U256::from)
-                .ok_or(GetGasPriceError::MissingMaxFeePerGas),
+                .ok_or(EthereumGasPriceError::MissingMaxFeePerGas),
         }
     }
 

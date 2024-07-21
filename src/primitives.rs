@@ -29,7 +29,7 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransactionParsingError<C: PevmChain> {
     OverflowedGasLimit,
-    GetGasPriceError(C::GetGasPriceError),
+    GasPriceError(C::GasPriceError),
     MissingMaxFeePerGas,
     InvalidType(u8),
 }
@@ -50,7 +50,7 @@ pub(crate) fn get_tx_env<C: PevmChain>(
             .map_err(|_| TransactionParsingError::OverflowedGasLimit)?,
         gas_price: chain
             .get_gas_price(&tx)
-            .map_err(TransactionParsingError::GetGasPriceError)?,
+            .map_err(TransactionParsingError::GasPriceError)?,
         gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
         transact_to: match tx.to {
             Some(address) => TransactTo::Call(address),
