@@ -384,9 +384,14 @@ impl<'a, DB: DatabaseRef<Error: Display>> Database for VmDb<'a, DB> {
             account.nonce += nonce_addition;
             if location_hash == self.from_hash && account.nonce != self.nonce {
                 if self.tx_idx > &0 {
-                    // TODO: Better retry strategy -- immediately, to the
-                    // closest sender tx, to the missing sender tx, etc.
-                    return Err(ReadError::BlockingIndex(self.tx_idx - 1));
+                    // It is better to complete an obviously wrong
+                    // execution than blindly retrying on a previous
+                    // transaction, which would deadlock if all threads
+                    // loop forever on completed transactions, while the
+                    // missing transaction never gets to executed.
+                    // TODO: Find and retry on the "correct" tx, like
+                    // the closest same sender.
+                    account.nonce = self.nonce;
                 } else {
                     return Err(ReadError::InvalidNonce);
                 }
