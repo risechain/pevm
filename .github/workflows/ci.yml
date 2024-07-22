@@ -34,4 +34,4 @@ jobs:
         # Each test still executes parallelly anyway.
         run: |
           git submodule update --init
-          cargo test --release -- --test-threads=1
+          cargo test --release --all-features -- --test-threads=1

@@ -80,3 +80,24 @@ fn ethereum_one_tx_alloy_block() {
 fn ethereum_independent_raw_transfers() {
     common::test_independent_raw_transfers(&PevmEthereum::mainnet(), 100_000);
 }
+
+#[cfg(feature = "optimism")]
+#[test]
+fn optimism_empty_alloy_block() {
+    use pevm::chain::PevmOptimism;
+    common::test_independent_raw_transfers(&PevmOptimism::mainnet(), 0);
+}
+
+#[cfg(feature = "optimism")]
+#[test]
+fn optimism_one_tx_alloy_block() {
+    use pevm::chain::PevmOptimism;
+    common::test_independent_raw_transfers(&PevmOptimism::mainnet(), 1);
+}
+
+#[cfg(feature = "optimism")]
+#[test]
+fn optimism_independent_raw_transfers() {
+    use pevm::chain::PevmOptimism;
+    common::test_independent_raw_transfers(&PevmOptimism::mainnet(), 100_000);
+}

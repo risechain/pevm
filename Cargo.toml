@@ -3,6 +3,14 @@ name = "pevm"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+optimism = [
+    "revm/optimism",
+    "dep:op-alloy-consensus",
+    "dep:op-alloy-network",
+    "dep:op-alloy-rpc-types",
+]
+
 [dependencies]
 # Put this behind a feature flag if there are use cases & users
 # that need more security guarantees even for internally hashing
@@ -34,6 +42,11 @@ alloy-transport = "0.3.1"
 alloy-transport-http = "0.3.1"
 reqwest = "0.12.7"
 tokio = { version = "1.40.0", features = ["rt-multi-thread"] }
+
+# OP dependencies
+op-alloy-consensus = { version = "0.2.7", optional = true }
+op-alloy-network = { version = "0.2.7", optional = true }
+op-alloy-rpc-types = { version = "0.2.7", optional = true }
 
 [dev-dependencies]
 bincode = "1.3.3"
