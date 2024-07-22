@@ -11,7 +11,7 @@ use revm::{
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    BuildIdentityHasher, PevmTxExecutionResult,
+    BuildIdentityHasher, MemoryLocationHash, PevmTxExecutionResult,
 };
 
 /// Different chains may have varying reward policies.
@@ -21,6 +21,14 @@ use crate::{
 pub enum RewardPolicy {
     /// Ethereum
     Ethereum,
+    /// Optimism
+    #[cfg(feature = "optimism")]
+    Optimism {
+        /// L1 Fee Receipient
+        l1_fee_recipient_location_hash: MemoryLocationHash,
+        /// Base Fee Vault
+        base_fee_vault_location_hash: MemoryLocationHash,
+    },
 }
 
 /// Custom behaviours for different chains & networks
@@ -75,3 +83,8 @@ pub trait PevmChain: Debug {
 
 mod ethereum;
 pub use ethereum::PevmEthereum;
+
+#[cfg(feature = "optimism")]
+pub(crate) mod optimism;
+#[cfg(feature = "optimism")]
+pub use optimism::PevmOptimism;

@@ -4,7 +4,10 @@
 use alloy_rpc_types::{Header, Transaction};
 use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, TransactTo, TxEnv, U256};
 
-use crate::chain::PevmChain;
+use crate::chain::{
+    optimism::{get_optimism_fields, OptimismFieldsConversionError},
+    PevmChain,
+};
 
 /// Get the REVM block env of an Alloy block.
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L23-L48
@@ -32,6 +35,8 @@ pub enum TransactionParsingError<C: PevmChain> {
     GasPriceError(C::GasPriceError),
     MissingMaxFeePerGas,
     InvalidType(u8),
+    #[cfg(feature = "optimism")]
+    OptimismFieldsConversionError(OptimismFieldsConversionError),
 }
 
 /// Get the REVM tx envs of an Alloy block.
@@ -43,6 +48,10 @@ pub(crate) fn get_tx_env<C: PevmChain>(
     tx: Transaction,
 ) -> Result<TxEnv, TransactionParsingError<C>> {
     Ok(TxEnv {
+        #[cfg(feature = "optimism")]
+        optimism: get_optimism_fields(tx.clone())
+            .map_err(TransactionParsingError::OptimismFieldsConversionError)?,
+
         caller: tx.from,
         gas_limit: tx
             .gas

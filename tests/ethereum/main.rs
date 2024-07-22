@@ -61,6 +61,9 @@ fn build_block_env(env: &Env) -> BlockEnv {
 
 fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv, ParseError> {
     Ok(TxEnv {
+        #[cfg(feature = "optimism")]
+        optimism: revm::primitives::OptimismFields::default(),
+
         caller: if let Some(address) = tx.sender {
             address
         } else if let Some(address) = recover_address(tx.secret_key.as_slice()) {
