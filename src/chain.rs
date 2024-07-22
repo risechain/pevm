@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Custom behaviours for different chains & networks
-pub trait PevmChain: Debug + Clone + PartialEq {
+pub trait PevmChain: Debug {
     /// The error type for [Self::get_block_spec].
     type BlockSpecError: Debug + Clone + PartialEq;
 

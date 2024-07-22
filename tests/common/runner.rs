@@ -21,7 +21,7 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
     (address, account)
 }
 
-pub fn assert_execution_result<C: PevmChain>(
+pub fn assert_execution_result<C: PevmChain + PartialEq>(
     sequential_result: &PevmResult<C>,
     parallel_result: &PevmResult<C>,
 ) {
@@ -93,7 +93,10 @@ fn calculate_receipt_root(
 
 // Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_alloy<S: Storage + Clone + Send + Sync, C: PevmChain + Send + Sync>(
+pub fn test_execute_alloy<
+    S: Storage + Clone + Send + Sync,
+    C: PevmChain + Send + Sync + PartialEq,
+>(
     storage: &S,
     chain: &C,
     block: Block,
