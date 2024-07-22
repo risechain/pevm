@@ -53,7 +53,7 @@ fn mainnet_blocks_from_rpc() {
             .unwrap()
             .unwrap();
         let chain = PevmEthereum::mainnet();
-        let spec_id = PevmEthereum::get_block_spec(&chain, &block.header).unwrap();
+        let spec_id = chain.get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let wrapped_storage = StorageWrapper(&rpc_storage);
         let db = CacheDB::new(&wrapped_storage);
