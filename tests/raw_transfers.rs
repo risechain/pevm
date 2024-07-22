@@ -1,8 +1,7 @@
 // Test raw transfers -- only send some ETH from one account to another without extra data.
 
-use alloy_chains::Chain;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::InMemoryStorage;
+use pevm::{chain::PevmEthereum, InMemoryStorage};
 use rand::random;
 use revm::primitives::{alloy_primitives::U160, env::TxEnv, Address, TransactTo, U256};
 
@@ -76,7 +75,7 @@ fn raw_transfers_independent_alloy() {
     common::test_execute_alloy(
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         &InMemoryStorage::new((0..=block_size).map(common::mock_account), []),
-        Chain::mainnet(),
+        &PevmEthereum::mainnet(),
         Block {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
             transactions: BlockTransactions::Full(

@@ -6,7 +6,6 @@ use std::{
 };
 
 use ahash::AHashMap;
-use alloy_chains::Chain;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
@@ -21,8 +20,8 @@ use revm::{
 };
 
 use crate::{
+    chain::PevmChain,
     mv_memory::MvMemory,
-    network::ethereum,
     primitives::{get_block_env, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
@@ -31,16 +30,16 @@ use crate::{
 };
 
 /// Errors when executing a block with PEVM.
-#[derive(Debug, PartialEq, Clone)]
-pub enum PevmError {
+#[derive(Debug, Clone, PartialEq)]
+pub enum PevmError<C: PevmChain> {
     /// Cannot derive the chain spec from the block header.
-    UnknownBlockSpec,
+    BlockSpecError(C::BlockSpecError),
     /// Block header lacks information for execution.
     MissingHeaderData,
     /// Transactions lack information for execution.
     MissingTransactionData,
     /// Invalid input transaction.
-    InvalidTransaction(TransactionParsingError),
+    InvalidTransaction(TransactionParsingError<C>),
     /// Storage error.
     // TODO: More concrete types than just an arbitrary string.
     StorageError(String),
@@ -53,7 +52,7 @@ pub enum PevmError {
 }
 
 /// Execution result of a block
-pub type PevmResult = Result<Vec<PevmTxExecutionResult>, PevmError>;
+pub type PevmResult<C> = Result<Vec<PevmTxExecutionResult>, PevmError<C>>;
 
 enum AbortReason {
     FallbackToSequential,
@@ -65,24 +64,24 @@ enum AbortReason {
 
 /// Execute an Alloy block, which is becoming the "standard" format in Rust.
 /// TODO: Better error handling.
-pub fn execute<S: Storage + Send + Sync>(
+pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     storage: &S,
-    chain: Chain,
+    chain: &C,
     block: Block,
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
-) -> PevmResult {
-    let Some(spec_id) = ethereum::get_block_spec(&block.header) else {
-        return Err(PevmError::UnknownBlockSpec);
-    };
+) -> PevmResult<C> {
+    let spec_id = chain
+        .get_block_spec(&block.header)
+        .map_err(PevmError::BlockSpecError)?;
     let Some(block_env) = get_block_env(&block.header) else {
         return Err(PevmError::MissingHeaderData);
     };
     let tx_envs = match block.transactions {
         BlockTransactions::Full(txs) => txs
             .into_iter()
-            .map(get_tx_env)
-            .collect::<Result<Vec<TxEnv>, TransactionParsingError>>()
+            .map(|tx| get_tx_env(chain, tx))
+            .collect::<Result<Vec<TxEnv>, TransactionParsingError<_>>>()
             .map_err(PevmError::InvalidTransaction)?,
         _ => return Err(PevmError::MissingTransactionData),
     };
@@ -104,13 +103,13 @@ pub fn execute<S: Storage + Send + Sync>(
 /// Execute REVM transactions sequentially.
 // Useful for falling back for (small) blocks with many dependencies.
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
-pub fn execute_revm_sequential<S: Storage>(
+pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
     storage: &S,
-    chain: Chain,
+    chain: &C,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
-) -> Result<Vec<PevmTxExecutionResult>, PevmError> {
+) -> PevmResult<C> {
     let mut db = CacheDB::new(StorageWrapper(storage));
     let mut evm = build_evm(&mut db, chain, spec_id, block_env, true);
     let mut results = Vec::with_capacity(txs.len());
@@ -138,14 +137,14 @@ pub fn execute_revm_sequential<S: Storage>(
 /// Execute an REVM block.
 // Ideally everyone would go through the [Alloy] interface. This one is currently
 // useful for testing, and for users that are heavily tied to Revm like Reth.
-pub fn execute_revm_parallel<S: Storage + Send + Sync>(
+pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     storage: &S,
-    chain: Chain,
+    chain: &C,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
     concurrency_level: NonZeroUsize,
-) -> PevmResult {
+) -> PevmResult<C> {
     if txs.is_empty() {
         return Ok(Vec::new());
     }
@@ -156,10 +155,10 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
     // Initialize the remaining core components
     // TODO: Provide more explicit garbage collecting configs for users over random background
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
-    let mv_memory = DeferDrop::new(ethereum::build_mv_memory(&hasher, &block_env, block_size));
+    let mv_memory = DeferDrop::new(chain.build_mv_memory(&hasher, &block_env, &txs));
     let txs = DeferDrop::new(txs);
     let vm = Vm::new(
-        &hasher, storage, &mv_memory, &block_env, &txs, chain, spec_id,
+        &hasher, storage, &mv_memory, chain, &block_env, &txs, spec_id,
     );
     let scheduler = DeferDrop::new(Scheduler::new(block_size));
 
@@ -326,9 +325,9 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync>(
     Ok(fully_evaluated_results)
 }
 
-fn try_execute<S: Storage>(
+fn try_execute<S: Storage, C: PevmChain>(
     mv_memory: &MvMemory,
-    vm: &Vm<S>,
+    vm: &Vm<S, C>,
     scheduler: &Scheduler,
     abort_reason: &OnceLock<AbortReason>,
     execution_results: &[Mutex<Option<PevmTxExecutionResult>>],

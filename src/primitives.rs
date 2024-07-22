@@ -4,7 +4,7 @@
 use alloy_rpc_types::{Header, Transaction};
 use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, TransactTo, TxEnv, U256};
 
-use crate::network::ethereum;
+use crate::chain::PevmChain;
 
 /// Get the REVM block env of an Alloy block.
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L23-L48
@@ -27,9 +27,9 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
 
 /// Represents errors that can occur when parsing transactions
 #[derive(Debug, Clone, PartialEq)]
-pub enum TransactionParsingError {
+pub enum TransactionParsingError<C: PevmChain> {
     OverflowedGasLimit,
-    MissingGasPrice,
+    GasPriceError(C::GasPriceError),
     MissingMaxFeePerGas,
     InvalidType(u8),
 }
@@ -38,14 +38,19 @@ pub enum TransactionParsingError {
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
 // TODO: Properly test this.
-pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingError> {
+pub(crate) fn get_tx_env<C: PevmChain>(
+    chain: &C,
+    tx: Transaction,
+) -> Result<TxEnv, TransactionParsingError<C>> {
     Ok(TxEnv {
         caller: tx.from,
         gas_limit: tx
             .gas
             .try_into()
             .map_err(|_| TransactionParsingError::OverflowedGasLimit)?,
-        gas_price: ethereum::get_gas_price(&tx)?,
+        gas_price: chain
+            .get_gas_price(&tx)
+            .map_err(TransactionParsingError::GasPriceError)?,
         gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
         transact_to: match tx.to {
             Some(address) => TransactTo::Call(address),

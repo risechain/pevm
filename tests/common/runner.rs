@@ -1,9 +1,11 @@
-use alloy_chains::Chain;
 use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
+use pevm::{
+    chain::{PevmChain, PevmEthereum},
+    EvmAccount, PevmResult, PevmTxExecutionResult, Storage,
+};
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
 use std::{collections::BTreeMap, num::NonZeroUsize, thread};
 
@@ -19,7 +21,10 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
     (address, account)
 }
 
-pub fn assert_execution_result(sequential_result: &PevmResult, parallel_result: &PevmResult) {
+pub fn assert_execution_result<C: PevmChain + PartialEq>(
+    sequential_result: &PevmResult<C>,
+    parallel_result: &PevmResult<C>,
+) {
     assert_eq!(sequential_result, parallel_result);
 }
 
@@ -30,14 +35,14 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<
     assert_execution_result(
         &pevm::execute_revm_sequential(
             &storage,
-            Chain::mainnet(),
+            &PevmEthereum::mainnet(),
             SpecId::LATEST,
             BlockEnv::default(),
             txs.clone(),
         ),
         &pevm::execute_revm_parallel(
             &storage,
-            Chain::mainnet(),
+            &PevmEthereum::mainnet(),
             SpecId::LATEST,
             BlockEnv::default(),
             txs,
@@ -88,9 +93,12 @@ fn calculate_receipt_root(
 
 // Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
+pub fn test_execute_alloy<
+    S: Storage + Clone + Send + Sync,
+    C: PevmChain + Send + Sync + PartialEq,
+>(
     storage: &S,
-    chain: Chain,
+    chain: &C,
     block: Block,
     must_match_block_header: bool,
 ) {

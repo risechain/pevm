@@ -9,7 +9,7 @@
 // - Help outline the minimal state commitment logic for PEVM.
 
 use ahash::AHashMap;
-use alloy_chains::Chain;
+use pevm::chain::PevmEthereum;
 use pevm::{AccountBasic, EvmAccount, InMemoryStorage, PevmError, PevmTxExecutionResult};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
@@ -127,7 +127,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 test.expect_exception.as_deref(),
                 pevm::execute_revm_parallel(
                     &InMemoryStorage::new(chain_state.clone(), []),
-                    Chain::mainnet(),
+                    &PevmEthereum::mainnet(),
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),
                     vec![tx_env.unwrap()],
