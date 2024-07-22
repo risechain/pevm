@@ -18,6 +18,14 @@ use crate::{mv_memory::MvMemory, PevmTxExecutionResult};
 pub enum RewardPolicy {
     /// Ethereum
     Ethereum,
+    /// Optimism
+    #[cfg(feature = "optimism")]
+    Optimism {
+        /// L1 Fee Receipient
+        l1_fee_recipient_location_hash: crate::MemoryLocationHash,
+        /// Base Fee Vault
+        base_fee_vault_location_hash: crate::MemoryLocationHash,
+    },
 }
 
 /// The error type of [PevmChain::calculate_receipt_root]
@@ -93,3 +101,8 @@ pub trait PevmChain: Debug {
 
 mod ethereum;
 pub use ethereum::PevmEthereum;
+
+#[cfg(feature = "optimism")]
+mod optimism;
+#[cfg(feature = "optimism")]
+pub use optimism::PevmOptimism;

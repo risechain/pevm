@@ -151,6 +151,8 @@ impl PevmChain for PevmEthereum {
             blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
             authorization_list: None, // TODO: Support in the upcoming hardfork
+            #[cfg(feature = "optimism")]
+            optimism: revm::primitives::OptimismFields::default(),
         })
     }
 
