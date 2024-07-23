@@ -7,13 +7,14 @@ use std::{
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{EvmAccount, EvmCode, InMemoryStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, EvmAccount>;
+pub type Bytecodes = AHashMap<B256, EvmCode>;
 pub type BlockHashes = AHashMap<u64, B256>;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {

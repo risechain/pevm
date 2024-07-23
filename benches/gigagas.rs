@@ -8,9 +8,10 @@ use std::{num::NonZeroUsize, thread};
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, U160, U256};
+use common::{Bytecodes, ChainState};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{
-    execute_revm_parallel, execute_revm_sequential, chain::PevmEthereum, EvmAccount,
+    chain::PevmEthereum, execute_revm_parallel, execute_revm_sequential, EvmAccount,
     InMemoryStorage,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
@@ -30,12 +31,18 @@ const GIGA_GAS: u64 = 1_000_000_000;
 #[global_allocator]
 static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
-pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<TxEnv>) {
+pub fn bench(
+    c: &mut Criterion,
+    name: &str,
+    state: ChainState,
+    bytecodes: Bytecodes,
+    txs: Vec<TxEnv>,
+) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let chain = PevmEthereum::mainnet();
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
-    let storage = InMemoryStorage::new(state, []);
+    let storage = InMemoryStorage::new_raw(state, bytecodes, []);
     let mut group = c.benchmark_group(name);
     group.bench_function("Sequential", |b| {
         b.iter(|| {
@@ -69,6 +76,7 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
         c,
         "Independent Raw Transfers",
         (0..=block_size).map(common::mock_account).collect(),
+        Bytecodes::default(),
         (1..=block_size)
             .map(|i| {
                 let address = Address::from(U160::from(i));
@@ -89,7 +97,16 @@ pub fn bench_erc20(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / erc20::GAS_LIMIT as f64).ceil() as usize;
     let (mut state, txs) = erc20::generate_cluster(block_size, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
-    bench(c, "Independent ERC20", state, txs);
+
+    let mut bytecodes = Bytecodes::new();
+    for account in state.values_mut() {
+        let code = account.code.take();
+        if let Some(code) = code {
+            bytecodes.insert(account.code_hash.unwrap(), code);
+        }
+    }
+
+    bench(c, "Independent ERC20", state, bytecodes, txs);
 }
 
 pub fn bench_uniswap(c: &mut Criterion) {
@@ -101,7 +118,16 @@ pub fn bench_uniswap(c: &mut Criterion) {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    bench(c, "Independent Uniswap", final_state, final_txs);
+
+    let mut bytecodes = Bytecodes::new();
+    for account in final_state.values_mut() {
+        let code = account.code.take();
+        if let Some(code) = code {
+            bytecodes.insert(account.code_hash.unwrap(), code);
+        }
+    }
+
+    bench(c, "Independent Uniswap", final_state, bytecodes, final_txs);
 }
 
 pub fn benchmark_gigagas(c: &mut Criterion) {
