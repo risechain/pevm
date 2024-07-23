@@ -1,6 +1,9 @@
 pub mod contract;
 
-use crate::{common::ChainState, erc20::contract::ERC20Token};
+use crate::{
+    common::{Bytecodes, ChainState},
+    erc20::contract::ERC20Token,
+};
 use ahash::AHashMap;
 use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
 use pevm::EvmAccount;
@@ -11,7 +14,7 @@ pub const GAS_LIMIT: u64 = 155_934;
 pub fn generate_cluster(
     num_people: usize,
     num_swaps_per_person: usize,
-) -> (ChainState, Vec<TxEnv>) {
+) -> (ChainState, Bytecodes, Vec<TxEnv>) {
     // TODO: Better randomness control. Sometimes we want duplicates to test
     // dependent transactions, sometimes we want to guarantee non-duplicates
     // for independent benchmarks.
@@ -162,5 +165,13 @@ pub fn generate_cluster(
         }
     }
 
-    (state, txs)
+    let mut bytecodes = Bytecodes::new();
+    for account in state.values_mut() {
+        let code = account.code.take();
+        if let Some(code) = code {
+            bytecodes.insert(account.code_hash.unwrap(), code);
+        }
+    }
+
+    (state, bytecodes, txs)
 }
