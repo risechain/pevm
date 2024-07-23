@@ -35,6 +35,7 @@ pub struct RpcStorage<N> {
     // Using a [Mutex] so we don't propagate mutability requirements back
     // to our [Storage] trait and meet [Send]/[Sync] requirements for Pevm.
     cache_accounts: Mutex<AHashMap<Address, EvmAccount>>,
+    cache_bytecodes: Mutex<AHashMap<B256, EvmCode>>,
     cache_block_hashes: Mutex<AHashMap<u64, B256>>,
     // TODO: Better async handling.
     runtime: Runtime,
@@ -48,6 +49,7 @@ impl<N> RpcStorage<N> {
             precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)),
             block_id,
             cache_accounts: Mutex::default(),
+            cache_bytecodes: Mutex::default(),
             cache_block_hashes: Mutex::default(),
             // TODO: Better error handling.
             runtime: Runtime::new().unwrap(),
@@ -103,16 +105,21 @@ impl<N: Network> Storage for RpcStorage<N> {
                 return Ok(None);
             }
             let code = Bytecode::new_raw(code);
+            let code_hash = code.hash_slow();
             let basic = AccountBasic { balance, nonce };
             self.cache_accounts.lock().unwrap().insert(
                 *address,
                 EvmAccount {
                     basic: basic.clone(),
-                    code_hash: (!code.is_empty()).then(|| code.hash_slow()),
-                    code: (!code.is_empty()).then(|| code.into()),
+                    code_hash: (!code.is_empty()).then_some(code_hash),
+                    code: None,
                     storage: AHashMap::default(),
                 },
             );
+            self.cache_bytecodes
+                .lock()
+                .unwrap()
+                .insert(code_hash, code.into());
             Ok(Some(basic))
         })
     }
@@ -128,17 +135,7 @@ impl<N: Network> Storage for RpcStorage<N> {
     }
 
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
-        // TODO: Cache bytecodes separately
-        for (_, account) in self.cache_accounts.lock().unwrap().iter() {
-            if account
-                .code_hash
-                .as_ref()
-                .is_some_and(|hash| hash == code_hash)
-            {
-                return Ok(account.code.clone());
-            }
-        }
-        Ok(None)
+        Ok(self.cache_bytecodes.lock().unwrap().get(code_hash).cloned())
     }
 
     fn has_storage(&self, _address: &Address) -> Result<bool, Self::Error> {
