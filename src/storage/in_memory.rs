@@ -18,32 +18,6 @@ pub struct InMemoryStorage {
 
 impl InMemoryStorage {
     /// Construct a new [InMemoryStorage]
-    // TODO: Take in [bytecodes] instead of reading duplicates from
-    // [accounts].
-    #[deprecated]
-    pub fn new(
-        accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
-        block_hashes: impl IntoIterator<Item = (u64, B256)>,
-    ) -> Self {
-        let mut result = Self {
-            accounts: Accounts::default(),
-            bytecodes: AHashMap::new(),
-            block_hashes: block_hashes.into_iter().collect(),
-        };
-
-        for (address, mut account) in accounts {
-            let code_hash: Option<B256> = account.code_hash;
-            let code: Option<EvmCode> = account.code.take();
-            result.accounts.insert(address, account);
-            if let Some(code_hash) = code_hash {
-                result.bytecodes.insert(code_hash, code.unwrap_or_default());
-            }
-        }
-
-        result
-    }
-
-    /// Construct a new [InMemoryStorage]
     pub fn new_raw(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
         bytecodes: impl IntoIterator<Item = (B256, EvmCode)>,

@@ -60,10 +60,18 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         .unwrap();
 
         // Parse state
-        let accounts: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
+        let mut state: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
             File::open(format!("blocks/{block_number}/pre_state.json")).unwrap(),
         ))
         .unwrap();
+
+        let mut bytecodes = Bytecodes::new();
+        for account in state.values_mut() {
+            let code = account.code.take();
+            if let Some(code) = code {
+                bytecodes.insert(account.code_hash.unwrap(), code);
+            }
+        }
 
         // Parse block hashes
         let block_hashes: BlockHashes =
@@ -76,6 +84,9 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
                 })
                 .unwrap_or_default();
 
-        handler(block, InMemoryStorage::new(accounts, block_hashes));
+        handler(
+            block,
+            InMemoryStorage::new_raw(state, bytecodes, block_hashes),
+        );
     }
 }
