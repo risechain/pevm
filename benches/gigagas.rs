@@ -95,39 +95,29 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
 
 pub fn bench_erc20(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / erc20::GAS_LIMIT as f64).ceil() as usize;
-    let (mut state, txs) = erc20::generate_cluster(block_size, 1, 1);
+    let (mut state, bytecodes, txs) = erc20::generate_cluster(block_size, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
-
-    let mut bytecodes = Bytecodes::new();
-    for account in state.values_mut() {
-        let code = account.code.take();
-        if let Some(code) = code {
-            bytecodes.insert(account.code_hash.unwrap(), code);
-        }
-    }
-
     bench(c, "Independent ERC20", state, bytecodes, txs);
 }
 
 pub fn bench_uniswap(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / uniswap::GAS_LIMIT as f64).ceil() as usize;
     let mut final_state = AHashMap::from([(Address::ZERO, EvmAccount::default())]); // Beneficiary
+    let mut final_bytecodes = Bytecodes::new();
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..block_size {
-        let (state, txs) = uniswap::generate_cluster(1, 1);
+        let (state, bytecodes, txs) = uniswap::generate_cluster(1, 1);
         final_state.extend(state);
+        final_bytecodes.extend(bytecodes);
         final_txs.extend(txs);
     }
-
-    let mut bytecodes = Bytecodes::new();
-    for account in final_state.values_mut() {
-        let code = account.code.take();
-        if let Some(code) = code {
-            bytecodes.insert(account.code_hash.unwrap(), code);
-        }
-    }
-
-    bench(c, "Independent Uniswap", final_state, bytecodes, final_txs);
+    bench(
+        c,
+        "Independent Uniswap",
+        final_state,
+        final_bytecodes,
+        final_txs,
+    );
 }
 
 pub fn benchmark_gigagas(c: &mut Criterion) {
