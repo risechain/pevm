@@ -20,6 +20,7 @@ impl InMemoryStorage {
     /// Construct a new [InMemoryStorage]
     // TODO: Take in [bytecodes] instead of reading duplicates from
     // [accounts].
+    #[deprecated]
     pub fn new(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
         block_hashes: impl IntoIterator<Item = (u64, B256)>,
@@ -40,6 +41,19 @@ impl InMemoryStorage {
         }
 
         result
+    }
+
+    /// Construct a new [InMemoryStorage]
+    pub fn new_raw(
+        accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
+        bytecodes: impl IntoIterator<Item = (B256, EvmCode)>,
+        block_hashes: impl IntoIterator<Item = (u64, B256)>,
+    ) -> Self {
+        Self {
+            accounts: accounts.into_iter().collect(),
+            bytecodes: bytecodes.into_iter().collect(),
+            block_hashes: block_hashes.into_iter().collect(),
+        }
     }
 }
 
