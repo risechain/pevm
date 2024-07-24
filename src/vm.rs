@@ -7,7 +7,7 @@ use revm::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
         ResultAndState, SpecId, TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
     },
-    Context, Database, Evm, EvmContext, Handler,
+    Context, Database, Evm, EvmContext,
 };
 use std::collections::HashMap;
 
@@ -782,7 +782,7 @@ pub(crate) fn build_evm<'a, DB: Database, C: PevmChain>(
         ),
         external: (),
     };
-    // TODO: Support OP handlers
-    let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
+
+    let handler = chain.get_handler(spec_id, with_reward_beneficiary);
     Evm::new(context, handler)
 }
