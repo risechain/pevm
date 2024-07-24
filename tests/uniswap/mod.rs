@@ -39,33 +39,35 @@ pub fn generate_cluster(
     let pool_address = UniswapV3Pool::new(dai_address, usdc_address, factory_address)
         .get_address(factory_address, pool_init_code_hash);
 
-    let weth9_account = WETH9::new().build();
+    let (weth9_account, weth9_code) = WETH9::new().build();
 
-    let dai_account = ERC20Token::new("DAI", "DAI", 18, 222_222_000_000_000_000_000_000u128)
-        .add_balances(&[pool_address], uint!(111_111_000_000_000_000_000_000_U256))
-        .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
-        .add_allowances(
-            &people_addresses,
-            single_swap_address,
-            uint!(1_000_000_000_000_000_000_U256),
-        )
-        .build();
+    let (dai_account, dai_code) =
+        ERC20Token::new("DAI", "DAI", 18, 222_222_000_000_000_000_000_000u128)
+            .add_balances(&[pool_address], uint!(111_111_000_000_000_000_000_000_U256))
+            .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
+            .add_allowances(
+                &people_addresses,
+                single_swap_address,
+                uint!(1_000_000_000_000_000_000_U256),
+            )
+            .build();
 
-    let usdc_account = ERC20Token::new("USDC", "USDC", 18, 222_222_000_000_000_000_000_000u128)
-        .add_balances(&[pool_address], uint!(111_111_000_000_000_000_000_000_U256))
-        .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
-        .add_allowances(
-            &people_addresses,
-            single_swap_address,
-            uint!(1_000_000_000_000_000_000_U256),
-        )
-        .build();
+    let (usdc_account, usdc_code) =
+        ERC20Token::new("USDC", "USDC", 18, 222_222_000_000_000_000_000_000u128)
+            .add_balances(&[pool_address], uint!(111_111_000_000_000_000_000_000_U256))
+            .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
+            .add_allowances(
+                &people_addresses,
+                single_swap_address,
+                uint!(1_000_000_000_000_000_000_U256),
+            )
+            .build();
 
-    let factory_account = UniswapV3Factory::new(owner)
+    let (factory_account, factory_code) = UniswapV3Factory::new(owner)
         .add_pool(dai_address, usdc_address, pool_address)
         .build(factory_address);
 
-    let pool_account = UniswapV3Pool::new(dai_address, usdc_address, factory_address)
+    let (pool_account, pool_code) = UniswapV3Pool::new(dai_address, usdc_address, factory_address)
         .add_position(
             nonfungible_position_manager_address,
             -600000,
@@ -97,11 +99,20 @@ pub fn generate_cluster(
         )
         .build(pool_address);
 
-    let swap_router_account =
+    let (swap_router_account, swap_router_code) =
         SwapRouter::new(weth9_address, factory_address, pool_init_code_hash).build();
 
-    let single_swap_account =
+    let (single_swap_account, single_swap_code) =
         SingleSwap::new(swap_router_address, dai_address, usdc_address).build();
+
+    let mut bytecodes = Bytecodes::new();
+    bytecodes.insert(dai_account.code_hash.unwrap(), dai_code);
+    bytecodes.insert(usdc_account.code_hash.unwrap(), usdc_code);
+    bytecodes.insert(weth9_account.code_hash.unwrap(), weth9_code);
+    bytecodes.insert(factory_account.code_hash.unwrap(), factory_code);
+    bytecodes.insert(pool_account.code_hash.unwrap(), pool_code);
+    bytecodes.insert(swap_router_account.code_hash.unwrap(), swap_router_code);
+    bytecodes.insert(single_swap_account.code_hash.unwrap(), single_swap_code);
 
     let mut state = AHashMap::from([
         (weth9_address, weth9_account),
@@ -162,14 +173,6 @@ pub fn generate_cluster(
                 nonce: Some(nonce as u64),
                 ..TxEnv::default()
             })
-        }
-    }
-
-    let mut bytecodes = Bytecodes::new();
-    for account in state.values_mut() {
-        let code = account.code.take();
-        if let Some(code) = code {
-            bytecodes.insert(account.code_hash.unwrap(), code);
         }
     }
 

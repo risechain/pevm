@@ -1,6 +1,6 @@
 use crate::common::storage::{from_address, from_indices, from_short_string, StorageBuilder};
 use ahash::AHashMap;
-use pevm::{AccountBasic, EvmAccount};
+use pevm::{AccountBasic, EvmAccount, EvmCode};
 use revm::primitives::{
     fixed_bytes, hex::FromHex, ruint::UintTryFrom, Address, Bytecode, Bytes, B256, U256,
 };
@@ -61,7 +61,7 @@ impl ERC20Token {
     // | _name        | string                                          | 3    | 0      | 32    |
     // | _symbol      | string                                          | 4    | 0      | 32    |
     // | _decimals    | uint8                                           | 5    | 0      | 1     |
-    pub fn build(&self) -> EvmAccount {
+    pub fn build(&self) -> (EvmAccount, EvmCode) {
         let hex = ERC20_TOKEN.trim();
         let bytecode = Bytecode::new_raw(Bytes::from_hex(hex).unwrap());
 
@@ -84,15 +84,18 @@ impl ERC20Token {
             );
         }
 
-        EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
+        (
+            EvmAccount {
+                basic: AccountBasic {
+                    balance: U256::ZERO,
+                    nonce: 1u64,
+                },
+                code_hash: Some(bytecode.hash_slow()),
+                code: None,
+                storage: store.build(),
             },
-            code_hash: Some(bytecode.hash_slow()),
-            code: Some(bytecode.into()),
-            storage: store.build(),
-        }
+            EvmCode::from(bytecode),
+        )
     }
 
     // $ forge inspect ERC20Token methods

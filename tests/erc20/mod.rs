@@ -29,9 +29,13 @@ pub fn generate_cluster(
 
     let gld_address = Address::new(rand::random());
 
-    let gld_account = ERC20Token::new("Gold Token", "GLD", 18, 222_222_000_000_000_000_000_000u128)
-        .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
-        .build();
+    let (gld_account, gld_code) =
+        ERC20Token::new("Gold Token", "GLD", 18, 222_222_000_000_000_000_000_000u128)
+            .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
+            .build();
+
+    let mut bytecodes = Bytecodes::new();
+    bytecodes.insert(gld_account.code_hash.unwrap(), gld_code);
 
     let mut state = AHashMap::from([(gld_address, gld_account)]);
     let mut txs = Vec::new();
@@ -58,14 +62,6 @@ pub fn generate_cluster(
                     ..TxEnv::default()
                 })
             }
-        }
-    }
-
-    let mut bytecodes = Bytecodes::new();
-    for account in state.values_mut() {
-        let code = account.code.take();
-        if let Some(code) = code {
-            bytecodes.insert(account.code_hash.unwrap(), code);
         }
     }
 

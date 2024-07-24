@@ -2,7 +2,7 @@ use crate::common::storage::{
     from_address, from_indices, from_short_string, from_tick, StorageBuilder,
 };
 use ahash::AHashMap;
-use pevm::{AccountBasic, EvmAccount};
+use pevm::{AccountBasic, EvmAccount, EvmCode};
 use revm::primitives::{
     fixed_bytes,
     hex::{FromHex, ToHexExt},
@@ -38,7 +38,7 @@ impl WETH9 {
     // | decimals  | uint8                                           | 2    | 0      | 1     |
     // | balanceOf | mapping(address => uint256)                     | 3    | 0      | 32    |
     // | allowance | mapping(address => mapping(address => uint256)) | 4    | 0      | 32    |
-    pub fn build(&self) -> EvmAccount {
+    pub fn build(&self) -> (EvmAccount, EvmCode) {
         let hex = WETH9.trim();
         let bytecode = Bytecode::new_raw(Bytes::from_hex(hex).unwrap());
 
@@ -49,15 +49,18 @@ impl WETH9 {
         store.set(4, 0); // mapping
         store.set(5, 0); // mapping
 
-        EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
+        (
+            EvmAccount {
+                basic: AccountBasic {
+                    balance: U256::ZERO,
+                    nonce: 1u64,
+                },
+                code_hash: Some(bytecode.hash_slow()),
+                code: None,
+                storage: store.build(),
             },
-            code_hash: Some(bytecode.hash_slow()),
-            code: Some(bytecode.into()),
-            storage: store.build(),
-        }
+            EvmCode::from(bytecode),
+        )
     }
 }
 
@@ -93,7 +96,7 @@ impl UniswapV3Factory {
     // | owner                | address                                                            | 3    | 0      | 20    |
     // | feeAmountTickSpacing | mapping(uint24 => int24)                                           | 4    | 0      | 32    |
     // | getPool              | mapping(address => mapping(address => mapping(uint24 => address))) | 5    | 0      | 32    |
-    pub fn build(&self, address: Address) -> EvmAccount {
+    pub fn build(&self, address: Address) -> (EvmAccount, EvmCode) {
         let hex = UNISWAP_V3_FACTORY.trim().replace(
             "0b748751e6f8b1a38c9386a19d9f8966b3593a9e",
             &address.encode_hex(),
@@ -129,15 +132,18 @@ impl UniswapV3Factory {
             );
         }
 
-        EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
+        (
+            EvmAccount {
+                basic: AccountBasic {
+                    balance: U256::ZERO,
+                    nonce: 1u64,
+                },
+                code_hash: Some(bytecode.hash_slow()),
+                code: None,
+                storage: store.build(),
             },
-            code_hash: Some(bytecode.hash_slow()),
-            code: Some(bytecode.into()),
-            storage: store.build(),
-        }
+            EvmCode::from(bytecode),
+        )
     }
 }
 
@@ -201,7 +207,7 @@ impl UniswapV3Pool {
     // | tickBitmap           | mapping(int16 => uint256)                | 6    | 0      | 32      |
     // | positions            | mapping(bytes32 => struct Position.Info) | 7    | 0      | 32      |
     // | observations         | struct Oracle.Observation[65535]         | 8    | 0      | 2097120 |
-    pub fn build(&self, address: Address) -> EvmAccount {
+    pub fn build(&self, address: Address) -> (EvmAccount, EvmCode) {
         let hex = UNISWAP_V3_POOL
             .trim()
             .replace(
@@ -251,15 +257,18 @@ impl UniswapV3Pool {
             store.set_many(from_indices(7, &[*key]), value);
         }
 
-        EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
+        (
+            EvmAccount {
+                basic: AccountBasic {
+                    balance: U256::ZERO,
+                    nonce: 1u64,
+                },
+                code_hash: Some(bytecode.hash_slow()),
+                code: None,
+                storage: store.build(),
             },
-            code_hash: Some(bytecode.hash_slow()),
-            code: Some(bytecode.into()),
-            storage: store.build(),
-        }
+            EvmCode::from(bytecode),
+        )
     }
 
     // @uniswap/v3-periphery/contracts/libraries/PoolAddress.sol
@@ -299,7 +308,7 @@ impl SwapRouter {
     // | Name           | Type    | Slot | Offset | Bytes |
     // |----------------|---------|------|--------|-------|
     // | amountInCached | uint256 | 0    | 0      | 32    |
-    pub fn build(&self) -> EvmAccount {
+    pub fn build(&self) -> (EvmAccount, EvmCode) {
         let hex = SWAP_ROUTER
             .trim()
             .replace(
@@ -323,15 +332,18 @@ impl SwapRouter {
             uint!(0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff_U256),
         );
 
-        EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
+        (
+            EvmAccount {
+                basic: AccountBasic {
+                    balance: U256::ZERO,
+                    nonce: 1u64,
+                },
+                code_hash: Some(bytecode.hash_slow()),
+                code: None,
+                storage: store.build(),
             },
-            code_hash: Some(bytecode.hash_slow()),
-            code: Some(bytecode.into()),
-            storage: store.build(),
-        }
+            EvmCode::from(bytecode),
+        )
     }
 }
 
@@ -357,7 +369,7 @@ impl SingleSwap {
     // | token0 | address | 0    | 0      | 20    |
     // | token1 | address | 1    | 0      | 20    |
     // | fee    | uint24  | 1    | 20     | 3     |
-    pub fn build(&self) -> EvmAccount {
+    pub fn build(&self) -> (EvmAccount, EvmCode) {
         let hex = SINGLE_SWAP.trim().replace(
             "e7cfcccb38ce07ba9d8d13431afe8cf6172de031",
             &self.swap_router.encode_hex(),
@@ -369,14 +381,17 @@ impl SingleSwap {
         store.set(1, from_address(self.token_1));
         store.set_with_offset(1, 20, 3, POOL_FEE);
 
-        EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
+        (
+            EvmAccount {
+                basic: AccountBasic {
+                    balance: U256::ZERO,
+                    nonce: 1u64,
+                },
+                code_hash: Some(bytecode.hash_slow()),
+                code: None,
+                storage: store.build(),
             },
-            code_hash: Some(bytecode.hash_slow()),
-            code: Some(bytecode.into()),
-            storage: store.build(),
-        }
+            EvmCode::from(bytecode),
+        )
     }
 }
