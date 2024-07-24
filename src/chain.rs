@@ -11,6 +11,7 @@ use revm::{
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
+    vm::RewardPolicy,
     BuildIdentityHasher,
 };
 
@@ -51,6 +52,9 @@ pub trait PevmChain: Debug {
         spec_id: SpecId,
         with_reward_beneficiary: bool,
     ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB>;
+
+    /// Get [RewardPolicy]
+    fn get_reward_policy(&self, hasher: &ahash::RandomState) -> RewardPolicy;
 }
 
 mod ethereum;

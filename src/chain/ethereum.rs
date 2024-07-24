@@ -13,6 +13,7 @@ use revm::{
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
+    vm::RewardPolicy,
     BuildIdentityHasher, MemoryLocation, TxIdx,
 };
 
@@ -152,5 +153,9 @@ impl PevmChain for PevmEthereum {
         with_reward_beneficiary: bool,
     ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB> {
         Handler::mainnet_with_spec(spec_id, with_reward_beneficiary)
+    }
+
+    fn get_reward_policy(&self, _hasher: &ahash::RandomState) -> RewardPolicy {
+        RewardPolicy::Ethereum
     }
 }

@@ -29,7 +29,8 @@ type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
 // Different chains may have varying reward policies.
 // This enum specifies which policy to follow, with optional
 // pre-calculated data to assist in reward calculations.
-enum RewardPolicy {
+#[derive(Debug, Clone)]
+pub enum RewardPolicy {
     Ethereum,
 }
 
@@ -529,7 +530,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             txs,
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
-            reward_policy: RewardPolicy::Ethereum, // TODO: Derive from [chain]
+            reward_policy: chain.get_reward_policy(hasher),
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DeferDrop::new(DashMap::default()),
