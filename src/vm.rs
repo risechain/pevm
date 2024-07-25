@@ -12,9 +12,11 @@ use revm::{
 use std::collections::HashMap;
 
 use crate::{
-    chain::PevmChain, mv_memory::MvMemory, AccountBasic, BuildIdentityHasher, EvmAccount,
-    MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError,
-    ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
+    chain::{PevmChain, RewardPolicy},
+    mv_memory::MvMemory,
+    AccountBasic, BuildIdentityHasher, EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash,
+    MemoryValue, NewLazyAddresses, ReadError, ReadOrigin, ReadSet, Storage, TxIdx, TxVersion,
+    WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -25,13 +27,6 @@ pub type ExecutionError = EVMError<ReadError>;
 /// If the value is [None], it indicates that the account is marked for removal.
 /// If the value is [Some(new_state)], it indicates that the account has become [new_state].
 type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
-
-// Different chains may have varying reward policies.
-// This enum specifies which policy to follow, with optional
-// pre-calculated data to assist in reward calculations.
-enum RewardPolicy {
-    Ethereum,
-}
 
 /// Execution result of a transaction
 #[derive(Debug, Clone, PartialEq)]
@@ -529,7 +524,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             txs,
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
-            reward_policy: RewardPolicy::Ethereum, // TODO: Derive from [chain]
+            reward_policy: chain.get_reward_policy(hasher),
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DeferDrop::new(DashMap::default()),

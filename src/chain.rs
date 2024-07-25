@@ -14,6 +14,15 @@ use crate::{
     BuildIdentityHasher,
 };
 
+/// Different chains may have varying reward policies.
+/// This enum specifies which policy to follow, with optional
+/// pre-calculated data to assist in reward calculations.
+#[derive(Debug, Clone)]
+pub enum RewardPolicy {
+    /// Ethereum
+    Ethereum,
+}
+
 /// Custom behaviours for different chains & networks
 pub trait PevmChain: Debug {
     /// The error type for [Self::get_block_spec].
@@ -51,6 +60,9 @@ pub trait PevmChain: Debug {
         spec_id: SpecId,
         with_reward_beneficiary: bool,
     ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB>;
+
+    /// Get [RewardPolicy]
+    fn get_reward_policy(&self, hasher: &ahash::RandomState) -> RewardPolicy;
 }
 
 mod ethereum;
