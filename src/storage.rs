@@ -20,10 +20,6 @@ pub struct EvmAccount {
     pub basic: AccountBasic,
     /// The optional code hash of the account.
     pub code_hash: Option<B256>,
-    /// The account's optional code
-    // TODO: Box this to reduce [EvmAccount]'s stack size?
-    #[deprecated]
-    pub code: Option<EvmCode>,
     /// The account's storage.
     pub storage: AHashMap<U256, U256>,
 }
@@ -37,7 +33,6 @@ impl From<Account> for EvmAccount {
                 nonce: account.info.nonce,
             },
             code_hash: has_code.then_some(account.info.code_hash),
-            code: has_code.then(|| account.info.code.unwrap().into()),
             storage: account
                 .storage
                 .into_iter()

@@ -118,7 +118,6 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                         nonce: raw_info.nonce,
                     },
                     code_hash: (!code.is_empty()).then(|| code.hash_slow()),
-                    code: None,
                     storage: raw_info.storage.clone().into_iter().collect(),
                 };
                 if let Some(code_hash) = account.code_hash {
@@ -200,7 +199,6 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                             let chain_state_account = chain_state.entry(address).or_default();
                             chain_state_account.basic = account.basic;
                             chain_state_account.code_hash = account.code_hash;
-                            chain_state_account.code = account.code;
                             chain_state_account.storage.extend(account.storage.into_iter());
                         } else {
                             chain_state.remove(&address);
@@ -214,7 +212,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                                 balance: account.basic.balance,
                                 nonce: account.basic.nonce,
                                 code_hash: account.code_hash.unwrap_or(KECCAK_EMPTY),
-                                code: account.code.map(Bytecode::from),
+                                code: None,
                             },
                             storage: account.storage.into_iter().collect(),
                         })}).collect::<Vec<_>>();

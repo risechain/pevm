@@ -117,7 +117,6 @@ impl<N: Network> Storage for RpcStorage<N> {
                 EvmAccount {
                     basic: basic.clone(),
                     code_hash: (!code.is_empty()).then_some(code_hash),
-                    code: None,
                     storage: AHashMap::default(),
                 },
             );

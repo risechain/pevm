@@ -91,7 +91,6 @@ impl ERC20Token {
                     nonce: 1u64,
                 },
                 code_hash: Some(bytecode.hash_slow()),
-                code: None,
                 storage: store.build(),
             },
             EvmCode::from(bytecode),

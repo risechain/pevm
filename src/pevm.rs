@@ -244,14 +244,6 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                 Ok(code_hash) => code_hash,
                 Err(err) => return Err(PevmError::StorageError(err.to_string())),
             };
-            let code = if let Some(code_hash) = &code_hash {
-                match storage.code_by_hash(code_hash) {
-                    Ok(code) => code,
-                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
-                }
-            } else {
-                None
-            };
 
             // TODO: Assert that the evaluated nonce matches the tx's.
             for (tx_idx, memory_entry) in write_history {
@@ -314,7 +306,6 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                     *account = Some(EvmAccount {
                         basic: current_account.clone(),
                         code_hash,
-                        code: code.clone(),
                         storage: AHashMap::default(),
                     });
                 }
