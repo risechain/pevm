@@ -11,9 +11,17 @@ use revm::{
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    vm::RewardPolicy,
     BuildIdentityHasher,
 };
+
+/// Different chains may have varying reward policies.
+/// This enum specifies which policy to follow, with optional
+/// pre-calculated data to assist in reward calculations.
+#[derive(Debug, Clone)]
+pub enum RewardPolicy {
+    /// Ethereum
+    Ethereum,
+}
 
 /// Custom behaviours for different chains & networks
 pub trait PevmChain: Debug {

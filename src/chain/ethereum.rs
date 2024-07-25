@@ -11,13 +11,11 @@ use revm::{
     Handler,
 };
 
+use super::{PevmChain, RewardPolicy};
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    vm::RewardPolicy,
     BuildIdentityHasher, MemoryLocation, TxIdx,
 };
-
-use super::PevmChain;
 
 /// Implementation of [PevmChain] for Ethereum
 #[derive(Debug, Clone, PartialEq)]
