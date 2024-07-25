@@ -15,7 +15,7 @@ use tokio::runtime::Runtime;
 
 use pevm::{
     chain::{PevmChain, PevmEthereum},
-    EvmAccount, RpcStorage, StorageWrapper,
+    EvmAccount, EvmCode, RpcStorage, StorageWrapper,
 };
 
 pub mod common;
@@ -74,6 +74,11 @@ fn mainnet_blocks_from_rpc() {
                 rpc_storage.get_cache_accounts().into_iter().collect();
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
             serde_json::to_writer(file_state, &accounts).unwrap();
+
+            let bytecodes: BTreeMap<B256, EvmCode> =
+                rpc_storage.get_cache_bytecodes().into_iter().collect();
+            let file_bytecodes = File::create(format!("{dir}/bytecodes.json")).unwrap();
+            serde_json::to_writer(file_bytecodes, &bytecodes).unwrap();
 
             // We convert to [BTreeMap] for consistent ordering & diffs between snapshots
             let block_hashes: BTreeMap<u64, B256> =

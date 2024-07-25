@@ -22,6 +22,7 @@ pub struct EvmAccount {
     pub code_hash: Option<B256>,
     /// The account's optional code
     // TODO: Box this to reduce [EvmAccount]'s stack size?
+    #[deprecated]
     pub code: Option<EvmCode>,
     /// The account's storage.
     pub storage: AHashMap<U256, U256>,

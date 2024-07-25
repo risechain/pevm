@@ -60,18 +60,16 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         .unwrap();
 
         // Parse state
-        let mut state: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
+        let state: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
             File::open(format!("blocks/{block_number}/pre_state.json")).unwrap(),
         ))
         .unwrap();
 
-        let mut bytecodes = Bytecodes::new();
-        for account in state.values_mut() {
-            let code = account.code.take();
-            if let Some(code) = code {
-                bytecodes.insert(account.code_hash.unwrap(), code);
-            }
-        }
+        // Parse bytecodes
+        let bytecodes: HashMap<B256, EvmCode> = serde_json::from_reader(BufReader::new(
+            File::open(format!("blocks/{block_number}/bytecodes.json")).unwrap(),
+        ))
+        .unwrap();
 
         // Parse block hashes
         let block_hashes: BlockHashes =

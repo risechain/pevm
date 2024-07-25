@@ -108,28 +108,23 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             }
 
             let mut chain_state = AHashMap::new();
+            let mut bytecodes = Bytecodes::new();
+
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
-                chain_state.insert(
-                    *address,
-                    EvmAccount {
-                        basic: AccountBasic {
-                            balance: raw_info.balance,
-                            nonce: raw_info.nonce,
-                        },
-                        code_hash: (!code.is_empty()).then(|| code.hash_slow()),
-                        code: (!code.is_empty()).then(|| code.into()),
-                        storage: raw_info.storage.clone().into_iter().collect(),
+                let account = EvmAccount {
+                    basic: AccountBasic {
+                        balance: raw_info.balance,
+                        nonce: raw_info.nonce,
                     },
-                );
-            }
-
-            let mut bytecodes = Bytecodes::new();
-            for account in chain_state.values_mut() {
-                let code = account.code.take();
-                if let Some(code) = code {
-                    bytecodes.insert(account.code_hash.unwrap(), code);
+                    code_hash: (!code.is_empty()).then(|| code.hash_slow()),
+                    code: None,
+                    storage: raw_info.storage.clone().into_iter().collect(),
+                };
+                if let Some(code_hash) = account.code_hash {
+                    bytecodes.insert(code_hash, code.into());
                 }
+                chain_state.insert(*address, account);
             }
 
             match (
