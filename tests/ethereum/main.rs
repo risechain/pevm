@@ -139,11 +139,11 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             ) {
                 // EIP-2681
                 (Some("TR_NonceHasMaxValue"), Ok(exec_results)) => {
-                    assert!(exec_results.len() == 1);
-                    assert!(exec_results[0].receipt.status.coerce_status());
+                    assert!(exec_results.tx_results.len() == 1);
+                    assert!(exec_results.tx_results[0].receipt.status.coerce_status());
                     // This is overly strict as we only need the newly created account's code to be empty.
                     // Extracting such account is unjustified complexity so let's live with this for now.
-                    assert!(exec_results[0].state.values().all(|account| {
+                    assert!(exec_results.tx_results[0].state.values().all(|account| {
                         match account {
                             Some(account) => account.code_hash.is_none(),
                             None => true,
@@ -186,8 +186,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 }
                 // Tests that exepect execution to succeed -> match post state root
                 (None, Ok(exec_results)) => {
-                    assert!(exec_results.len() == 1);
-                    let PevmTxExecutionResult {receipt, state} = exec_results[0].clone();
+                    assert!(exec_results.tx_results.len() == 1);
+                    let PevmTxExecutionResult {receipt, state} = exec_results.tx_results[0].clone();
 
                     let logs_root = log_rlp_hash(&receipt.logs);
                     assert_eq!(logs_root, test.logs, "Mismatched logs root for {path:?}");

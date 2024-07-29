@@ -108,7 +108,8 @@ pub fn test_execute_alloy<
     assert_execution_result(&sequential_result, &parallel_result);
 
     if must_match_block_header {
-        let tx_results = sequential_result.unwrap();
+        let pevm_results_and_bytecodes = sequential_result.unwrap();
+        let tx_results = pevm_results_and_bytecodes.tx_results;
 
         // We can only calculate the receipts root from Byzantium.
         // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the

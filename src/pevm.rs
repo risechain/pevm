@@ -6,7 +6,7 @@ use std::{
 };
 
 use ahash::AHashMap;
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
@@ -26,7 +26,8 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    AccountBasic, EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
+    AccountBasic, EvmAccount, EvmCode, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task,
+    TxVersion,
 };
 
 /// Errors when executing a block with PEVM.
@@ -51,8 +52,14 @@ pub enum PevmError<C: PevmChain> {
     UnreachableError,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PevmResultsAndBytecodes {
+    pub tx_results: Vec<PevmTxExecutionResult>,
+    pub bytecodes: AHashMap<B256, EvmCode>,
+}
+
 /// Execution result of a block
-pub type PevmResult<C> = Result<Vec<PevmTxExecutionResult>, PevmError<C>>;
+pub type PevmResult<C> = Result<PevmResultsAndBytecodes, PevmError<C>>;
 
 enum AbortReason {
     FallbackToSequential,
@@ -112,8 +119,10 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
 ) -> PevmResult<C> {
     let mut db = CacheDB::new(StorageWrapper(storage));
     let mut evm = build_evm(&mut db, chain, spec_id, block_env, true);
-    let mut results = Vec::with_capacity(txs.len());
+    let mut tx_results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
+    let mut code_hashes = Vec::<B256>::new();
+
     for tx in txs {
         *evm.tx_mut() = tx;
         match evm.transact() {
@@ -126,12 +135,35 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
                 cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
                 execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
 
-                results.push(execution_result);
+                for (_address, account) in execution_result.state.iter() {
+                    if let Some(account) = account {
+                        if let Some(code_hash) = account.code_hash {
+                            code_hashes.push(code_hash);
+                        }
+                    }
+                }
+                tx_results.push(execution_result);
             }
             Err(err) => return Err(PevmError::ExecutionError(err.to_string())),
         }
     }
-    Ok(results)
+
+    drop(evm);
+
+    let mut bytecodes = AHashMap::new();
+    for code_hash in code_hashes {
+        let code = db
+            .code_by_hash(&code_hash)
+            .map_err(|err| PevmError::StorageError(err.to_string()))?;
+        if let Some(code) = code {
+            bytecodes.insert(code_hash, code);
+        }
+    }
+
+    Ok(PevmResultsAndBytecodes {
+        tx_results,
+        bytecodes,
+    })
 }
 
 /// Execute an REVM block.
@@ -146,7 +178,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     concurrency_level: NonZeroUsize,
 ) -> PevmResult<C> {
     if txs.is_empty() {
-        return Ok(Vec::new());
+        return Ok(PevmResultsAndBytecodes::default());
     }
 
     // Preprocess locations
@@ -157,7 +189,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
     let mv_memory = DeferDrop::new(chain.build_mv_memory(&hasher, &block_env, &txs));
     let txs = DeferDrop::new(txs);
-    let vm = Vm::new(
+    let mut vm = Vm::new(
         &hasher, storage, &mv_memory, chain, &block_env, &txs, spec_id,
     );
     let scheduler = DeferDrop::new(Scheduler::new(block_size));
@@ -313,7 +345,30 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
         }
     }
 
-    Ok(fully_evaluated_results)
+    let mut bytecodes: AHashMap<B256, EvmCode> = vm
+        .take_new_bytecodes()
+        .into_iter()
+        .map(|(code_hash, bytecode)| (code_hash, bytecode.into()))
+        .collect();
+    for tx_result in fully_evaluated_results.iter() {
+        for (_address, account) in tx_result.state.iter() {
+            if let Some(account) = account {
+                if let Some(code_hash) = account.code_hash {
+                    if let Some(code) = storage
+                        .code_by_hash(&code_hash)
+                        .map_err(|err| PevmError::StorageError(err.to_string()))?
+                    {
+                        bytecodes.insert(code_hash, code);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(PevmResultsAndBytecodes {
+        tx_results: fully_evaluated_results,
+        bytecodes,
+    })
 }
 
 fn try_execute<S: Storage, C: PevmChain>(

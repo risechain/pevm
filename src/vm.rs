@@ -502,10 +502,14 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
-    new_bytecodes: DeferDrop<DashMap<B256, Bytecode>>,
+    new_bytecodes: DashMap<B256, Bytecode>,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
+    pub(crate) fn take_new_bytecodes(&mut self) -> impl IntoIterator<Item = (B256, Bytecode)> {
+        std::mem::take(&mut self.new_bytecodes).into_iter()
+    }
+
     pub(crate) fn new(
         hasher: &'a ahash::RandomState,
         storage: &'a S,
@@ -525,9 +529,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             reward_policy: chain.get_reward_policy(hasher),
-            // TODO: Fine-tune the number of shards, like to the next number of two from the
-            // number of worker threads.
-            new_bytecodes: DeferDrop::new(DashMap::default()),
+            new_bytecodes: DashMap::default(),
         }
     }
 

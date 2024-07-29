@@ -210,7 +210,10 @@ macro_rules! index_mutex {
 }
 
 mod pevm;
-pub use pevm::{execute, execute_revm_parallel, execute_revm_sequential, PevmError, PevmResult};
+pub use pevm::{
+    execute, execute_revm_parallel, execute_revm_sequential, PevmError, PevmResult,
+    PevmResultsAndBytecodes,
+};
 mod mv_memory;
 mod primitives;
 mod scheduler;
