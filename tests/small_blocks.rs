@@ -37,6 +37,7 @@ fn one_tx_alloy_block() {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
             transactions: BlockTransactions::Full(vec![Transaction {
                 transaction_type: Some(2),
+                nonce: 1,
                 from: Address::ZERO,
                 to: Some(Address::ZERO),
                 value: U256::from(1),
