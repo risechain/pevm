@@ -2,8 +2,8 @@
 
 use std::{collections::HashMap, fmt::Debug};
 
-use alloy_primitives::U256;
-use alloy_rpc_types::{Header, Transaction};
+use alloy_primitives::{B256, U256};
+use alloy_rpc_types::{BlockTransactions, Header, Transaction};
 use revm::{
     primitives::{BlockEnv, SpecId, TxEnv},
     Handler,
@@ -11,7 +11,7 @@ use revm::{
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    BuildIdentityHasher,
+    BuildIdentityHasher, PevmTxExecutionResult,
 };
 
 /// Different chains may have varying reward policies.
@@ -63,6 +63,14 @@ pub trait PevmChain: Debug {
 
     /// Get [RewardPolicy]
     fn get_reward_policy(&self, hasher: &ahash::RandomState) -> RewardPolicy;
+
+    /// Calculate receipt root
+    fn calculate_receipt_root(
+        &self,
+        spec_id: SpecId,
+        txs: &BlockTransactions<Transaction>,
+        tx_results: &[PevmTxExecutionResult],
+    ) -> B256;
 }
 
 mod ethereum;

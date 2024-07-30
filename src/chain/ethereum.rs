@@ -1,11 +1,15 @@
 //! Ethereum
 
-use std::{collections::HashMap, fmt::Debug};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+};
 
 use alloy_chains::NamedChain;
-use alloy_consensus::TxType;
-use alloy_primitives::U256;
-use alloy_rpc_types::{Header, Transaction};
+use alloy_consensus::{ReceiptEnvelope, TxType};
+use alloy_primitives::{B256, U256};
+use alloy_provider::network::eip2718::Encodable2718;
+use alloy_rpc_types::{BlockTransactions, Header, Transaction};
 use revm::{
     primitives::{BlockEnv, SpecId, TxEnv},
     Handler,
@@ -14,7 +18,7 @@ use revm::{
 use super::{PevmChain, RewardPolicy};
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
-    BuildIdentityHasher, MemoryLocation, TxIdx,
+    BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx,
 };
 
 /// Implementation of [PevmChain] for Ethereum
@@ -155,5 +159,47 @@ impl PevmChain for PevmEthereum {
 
     fn get_reward_policy(&self, _hasher: &ahash::RandomState) -> RewardPolicy {
         RewardPolicy::Ethereum
+    }
+
+    // Refer to section 4.3.2. Holistic Validity in the Ethereum Yellow Paper.
+    // https://github.com/ethereum/go-ethereum/blob/master/cmd/era/main.go#L289
+    fn calculate_receipt_root(
+        &self,
+        _spec_id: SpecId,
+        txs: &BlockTransactions<Transaction>,
+        tx_results: &[PevmTxExecutionResult],
+    ) -> B256 {
+        // 1. Create an iterator of ReceiptEnvelope
+        let tx_type_iter = txs
+            .txns()
+            .map(|tx| TxType::try_from(tx.transaction_type.unwrap_or_default()).unwrap());
+
+        let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone().with_bloom());
+
+        let receipt_envelope_iter =
+            Iterator::zip(tx_type_iter, receipt_iter).map(|(tx_type, receipt)| match tx_type {
+                TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
+                TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
+                TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
+                TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
+            });
+
+        // 2. Create a trie then calculate the root hash
+        // We use BTreeMap because the keys must be sorted in ascending order.
+        let trie_entries: BTreeMap<_, _> = receipt_envelope_iter
+            .enumerate()
+            .map(|(index, receipt)| {
+                let key_buffer = alloy_rlp::encode_fixed_size(&index);
+                let mut value_buffer = Vec::new();
+                receipt.encode_2718(&mut value_buffer);
+                (key_buffer, value_buffer)
+            })
+            .collect();
+
+        let mut hash_builder = alloy_trie::HashBuilder::default();
+        for (k, v) in trie_entries {
+            hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
+        }
+        hash_builder.root()
     }
 }
