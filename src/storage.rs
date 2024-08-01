@@ -19,9 +19,11 @@ pub struct EvmAccount {
     /// The account's basic information.
     pub basic: AccountBasic,
     /// The optional code hash of the account.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub code_hash: Option<B256>,
     /// The account's optional code
     // TODO: Box this to reduce [EvmAccount]'s stack size?
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<EvmCode>,
     /// The account's storage.
     pub storage: AHashMap<U256, U256>,
