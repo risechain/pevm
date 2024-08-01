@@ -34,7 +34,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     logs_bloom: Bloom::ZERO,
     difficulty: U256::ZERO,
     gas_used: 0,
-    total_difficulty: None,
+    total_difficulty: Some(U256::ZERO),
     extra_data: Bytes::new(),
     nonce: None,
     base_fee_per_gas: None,

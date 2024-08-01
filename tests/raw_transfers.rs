@@ -89,6 +89,7 @@ fn raw_transfers_independent_alloy() {
                             value: U256::from(1),
                             gas: common::RAW_TRANSFER_GAS_LIMIT.into(),
                             max_fee_per_gas: Some(1),
+                            nonce: 1,
                             ..Transaction::default()
                         }
                     })

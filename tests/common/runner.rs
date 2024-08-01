@@ -65,14 +65,14 @@ pub fn test_execute_alloy<
     let parallel_result = pevm::execute(storage, chain, block.clone(), concurrency_level, false);
     assert_execution_result(&sequential_result, &parallel_result);
 
+    let tx_results = sequential_result.unwrap();
     if must_match_block_header {
         let spec_id = chain.get_block_spec(&block.header).unwrap();
-        let tx_results = sequential_result.unwrap();
 
         // We can only calculate the receipts root from Byzantium.
         // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
         // receipt root is calculated with the post transaction state root,
-        // which we doesn't have in these tests.
+        // which we don't have in these tests.
         if block.header.number.unwrap() >= 4370000 {
             assert_eq!(
                 block.header.receipts_root,
