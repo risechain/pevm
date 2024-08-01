@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{
-    execute_revm_parallel, execute_revm_sequential, chain::PevmEthereum, EvmAccount,
+    chain::PevmEthereum, execute_revm_parallel, execute_revm_sequential, EvmAccount,
     InMemoryStorage,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
