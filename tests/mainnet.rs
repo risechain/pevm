@@ -65,7 +65,7 @@ fn mainnet_blocks_from_rpc() {
         // TODO: Port to a dedicated CLI instead?
         // TODO: Binary formats to save disk?
         if std::env::var("SNAPSHOT_BLOCKS") == Ok("1".to_string()) {
-            let dir = format!("blocks/{block_number}");
+            let dir = format!("data/blocks/{block_number}");
             fs::create_dir_all(dir.clone()).unwrap();
             let file_block = File::create(format!("{dir}/block.json")).unwrap();
             serde_json::to_writer(file_block, &block).unwrap();
@@ -73,7 +73,7 @@ fn mainnet_blocks_from_rpc() {
             // TODO: Snapshot with consistent ordering for ease of diffing.
             // Currently [EvmStorage]'s storage ordering isn't consistent.
             let mut state = BTreeMap::<Address, EvmAccount>::new();
-            let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("blocks/bytecodes.json") {
+            let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.json") {
                 Ok(file) => serde_json::from_reader(BufReader::new(file)).unwrap(),
                 Err(_) => BTreeMap::new(),
             };
@@ -87,7 +87,7 @@ fn mainnet_blocks_from_rpc() {
 
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
             serde_json::to_writer(file_state, &state).unwrap();
-            let file_bytecodes = File::create("blocks/bytecodes.json").unwrap();
+            let file_bytecodes = File::create("data/bytecodes.json").unwrap();
             serde_json::to_writer(file_bytecodes, &bytecodes).unwrap();
 
             // We convert to [BTreeMap] for consistent ordering & diffs between snapshots

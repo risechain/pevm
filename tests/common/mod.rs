@@ -50,22 +50,22 @@ pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
     // Parse bytecodes
     let bytecodes: HashMap<B256, EvmCode> =
-        serde_json::from_reader(BufReader::new(File::open("blocks/bytecodes.json").unwrap()))
+        serde_json::from_reader(BufReader::new(File::open("data/bytecodes.json").unwrap()))
             .unwrap();
 
-    for block_path in fs::read_dir("blocks").unwrap() {
+    for block_path in fs::read_dir("data/blocks").unwrap() {
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
 
         // Parse block
         let block: Block = serde_json::from_reader(BufReader::new(
-            File::open(format!("blocks/{block_number}/block.json")).unwrap(),
+            File::open(format!("data/blocks/{block_number}/block.json")).unwrap(),
         ))
         .unwrap();
 
         // Parse state
         let mut accounts: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
-            File::open(format!("blocks/{block_number}/pre_state.json")).unwrap(),
+            File::open(format!("data/blocks/{block_number}/pre_state.json")).unwrap(),
         ))
         .unwrap();
 
@@ -77,7 +77,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
 
         // Parse block hashes
         let block_hashes: BlockHashes =
-            File::open(format!("blocks/{block_number}/block_hashes.json"))
+            File::open(format!("data/blocks/{block_number}/block_hashes.json"))
                 .map(|file| {
                     type SerializedFormat = HashMap<u64, B256, ahash::RandomState>;
                     serde_json::from_reader::<_, SerializedFormat>(BufReader::new(file))
