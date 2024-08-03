@@ -49,9 +49,10 @@ pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 // TODO: Put somewhere better?
 pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
     // Parse bytecodes
-    let bytecodes: HashMap<B256, EvmCode> =
-        serde_json::from_reader(BufReader::new(File::open("data/bytecodes.json").unwrap()))
-            .unwrap();
+    let bytecodes: HashMap<B256, EvmCode> = bincode::deserialize_from(BufReader::new(
+        File::open("data/bytecodes.bincode").unwrap(),
+    ))
+    .unwrap();
 
     for block_path in fs::read_dir("data/blocks").unwrap() {
         let block_path = block_path.unwrap().path();

@@ -73,8 +73,9 @@ fn mainnet_blocks_from_rpc() {
             // TODO: Snapshot with consistent ordering for ease of diffing.
             // Currently [EvmStorage]'s storage ordering isn't consistent.
             let mut state = BTreeMap::<Address, EvmAccount>::new();
-            let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.json") {
-                Ok(file) => serde_json::from_reader(BufReader::new(file)).unwrap(),
+            let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode")
+            {
+                Ok(file) => bincode::deserialize_from(BufReader::new(file)).unwrap(),
                 Err(_) => BTreeMap::new(),
             };
             for (address, mut account) in rpc_storage.get_cache_accounts() {
@@ -87,8 +88,8 @@ fn mainnet_blocks_from_rpc() {
 
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
             serde_json::to_writer(file_state, &state).unwrap();
-            let file_bytecodes = File::create("data/bytecodes.json").unwrap();
-            serde_json::to_writer(file_bytecodes, &bytecodes).unwrap();
+            let file_bytecodes = File::create("data/bytecodes.bincode").unwrap();
+            bincode::serialize_into(file_bytecodes, &bytecodes).unwrap();
 
             // We convert to [BTreeMap] for consistent ordering & diffs between snapshots
             let block_hashes: BTreeMap<u64, B256> =
