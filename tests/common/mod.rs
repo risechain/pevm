@@ -7,7 +7,7 @@ use std::{
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{EvmAccount, EvmCode, InMemoryStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
@@ -48,25 +48,37 @@ pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
 pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
-    for block_path in fs::read_dir("blocks").unwrap() {
+    // Parse bytecodes
+    let bytecodes: HashMap<B256, EvmCode> = bincode::deserialize_from(BufReader::new(
+        File::open("data/bytecodes.bincode").unwrap(),
+    ))
+    .unwrap();
+
+    for block_path in fs::read_dir("data/blocks").unwrap() {
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
 
         // Parse block
         let block: Block = serde_json::from_reader(BufReader::new(
-            File::open(format!("blocks/{block_number}/block.json")).unwrap(),
+            File::open(format!("data/blocks/{block_number}/block.json")).unwrap(),
         ))
         .unwrap();
 
         // Parse state
-        let accounts: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
-            File::open(format!("blocks/{block_number}/pre_state.json")).unwrap(),
+        let mut accounts: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
+            File::open(format!("data/blocks/{block_number}/pre_state.json")).unwrap(),
         ))
         .unwrap();
 
+        for account in accounts.values_mut() {
+            if let Some(code_hash) = account.code_hash {
+                account.code = bytecodes.get(&code_hash).cloned();
+            }
+        }
+
         // Parse block hashes
         let block_hashes: BlockHashes =
-            File::open(format!("blocks/{block_number}/block_hashes.json"))
+            File::open(format!("data/blocks/{block_number}/block_hashes.json"))
                 .map(|file| {
                     type SerializedFormat = HashMap<u64, B256, ahash::RandomState>;
                     serde_json::from_reader::<_, SerializedFormat>(BufReader::new(file))

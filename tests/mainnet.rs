@@ -4,8 +4,10 @@
 use std::{
     collections::BTreeMap,
     fs::{self, File},
+    io::BufReader,
 };
 
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
@@ -15,7 +17,7 @@ use tokio::runtime::Runtime;
 
 use pevm::{
     chain::{PevmChain, PevmEthereum},
-    EvmAccount, RpcStorage, StorageWrapper,
+    EvmAccount, EvmCode, RpcStorage, StorageWrapper,
 };
 
 pub mod common;
@@ -63,17 +65,31 @@ fn mainnet_blocks_from_rpc() {
         // TODO: Port to a dedicated CLI instead?
         // TODO: Binary formats to save disk?
         if std::env::var("SNAPSHOT_BLOCKS") == Ok("1".to_string()) {
-            let dir = format!("blocks/{block_number}");
+            let dir = format!("data/blocks/{block_number}");
             fs::create_dir_all(dir.clone()).unwrap();
             let file_block = File::create(format!("{dir}/block.json")).unwrap();
             serde_json::to_writer(file_block, &block).unwrap();
 
             // TODO: Snapshot with consistent ordering for ease of diffing.
             // Currently [EvmStorage]'s storage ordering isn't consistent.
-            let accounts: BTreeMap<Address, EvmAccount> =
-                rpc_storage.get_cache_accounts().into_iter().collect();
+            let mut state = BTreeMap::<Address, EvmAccount>::new();
+            let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode")
+            {
+                Ok(file) => bincode::deserialize_from(BufReader::new(file)).unwrap(),
+                Err(_) => BTreeMap::new(),
+            };
+            for (address, mut account) in rpc_storage.get_cache_accounts() {
+                if let Some(code) = account.code.take() {
+                    assert_ne!(account.code_hash.unwrap(), KECCAK_EMPTY);
+                    bytecodes.insert(account.code_hash.unwrap(), code);
+                }
+                state.insert(address, account);
+            }
+
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
-            serde_json::to_writer(file_state, &accounts).unwrap();
+            serde_json::to_writer(file_state, &state).unwrap();
+            let file_bytecodes = File::create("data/bytecodes.bincode").unwrap();
+            bincode::serialize_into(file_bytecodes, &bytecodes).unwrap();
 
             // We convert to [BTreeMap] for consistent ordering & diffs between snapshots
             let block_hashes: BTreeMap<u64, B256> =
