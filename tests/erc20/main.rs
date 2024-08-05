@@ -19,7 +19,7 @@ fn erc20_independent() {
     const N: usize = 37123;
     let (mut state, txs) = generate_cluster(N, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
-    test_execute_revm(InMemoryStorage::new(state, []), txs);
+    test_execute_revm(InMemoryStorage::new(state, [], []), txs);
 }
 
 #[test]
@@ -40,5 +40,5 @@ fn erc20_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(InMemoryStorage::new(final_state, []), final_txs)
+    common::test_execute_revm(InMemoryStorage::new(final_state, [], []), final_txs)
 }

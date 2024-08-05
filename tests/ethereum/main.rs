@@ -126,7 +126,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             match (
                 test.expect_exception.as_deref(),
                 pevm::execute_revm_parallel(
-                    &InMemoryStorage::new(chain_state.clone(), []),
+                    &InMemoryStorage::new(chain_state.clone(), [], []),
                     &PevmEthereum::mainnet(),
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),

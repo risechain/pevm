@@ -22,19 +22,24 @@ impl InMemoryStorage {
     // [accounts].
     pub fn new(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
+        bytecodes: impl IntoIterator<Item = (B256, EvmCode)>,
         block_hashes: impl IntoIterator<Item = (u64, B256)>,
     ) -> Self {
-        let accounts: Accounts = accounts.into_iter().collect();
-        let mut bytecodes = AHashMap::default();
-        for (_, account) in accounts.iter() {
-            if let (Some(code_hash), Some(code)) = (account.code_hash, &account.code) {
-                bytecodes.entry(code_hash).or_insert_with(|| code.clone());
+        let mut accounts: Accounts = accounts.into_iter().collect();
+        let mut bytecodes: AHashMap<B256, EvmCode> = bytecodes.into_iter().collect();
+        let block_hashes: AHashMap<u64, B256> = block_hashes.into_iter().collect();
+
+        for account in accounts.values_mut() {
+            let code = account.code.take();
+            if let (Some(code), Some(code_hash)) = (code, account.code_hash) {
+                bytecodes.insert(code_hash, code);
             }
         }
+
         InMemoryStorage {
             accounts,
             bytecodes,
-            block_hashes: block_hashes.into_iter().collect(),
+            block_hashes,
         }
     }
 }
