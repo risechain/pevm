@@ -7,14 +7,13 @@ use std::{
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{EvmAccount, EvmCode, InMemoryStorage};
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, EvmAccount>;
-pub type Bytecodes = AHashMap<B256, EvmCode>;
 pub type BlockHashes = AHashMap<u64, B256>;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
@@ -50,7 +49,7 @@ pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 // TODO: Put somewhere better?
 pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
     // Parse bytecodes
-    let bytecodes: AHashMap<B256, EvmCode> = bincode::deserialize_from(BufReader::new(
+    let bytecodes: Bytecodes = bincode::deserialize_from(BufReader::new(
         File::open("data/bytecodes.bincode").unwrap(),
     ))
     .unwrap();

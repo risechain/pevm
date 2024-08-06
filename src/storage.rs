@@ -105,6 +105,9 @@ impl From<Bytecode> for EvmCode {
     }
 }
 
+/// Mapping between code hashes and [EvmCode] values
+pub type Bytecodes = AHashMap<B256, EvmCode>;
+
 /// An interface to provide chain state to Pevm for transaction execution.
 /// Staying close to the underlying REVM's Database trait while not leaking
 /// its primitives to library users (favoring Alloy at the moment).

@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{
-    chain::PevmEthereum, execute_revm_parallel, execute_revm_sequential, EvmAccount,
+    chain::PevmEthereum, execute_revm_parallel, execute_revm_sequential, Bytecodes, EvmAccount,
     InMemoryStorage,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
@@ -99,7 +99,7 @@ pub fn bench_erc20(c: &mut Criterion) {
 pub fn bench_uniswap(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / uniswap::GAS_LIMIT as f64).ceil() as usize;
     let mut final_state = AHashMap::from([(Address::ZERO, EvmAccount::default())]); // Beneficiary
-    let mut final_bytecodes = common::Bytecodes::new();
+    let mut final_bytecodes = Bytecodes::new();
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..block_size {
         let (state, bytecodes, txs) = uniswap::generate_cluster(1, 1);

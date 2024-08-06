@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug};
 use ahash::AHashMap;
 use alloy_primitives::{keccak256, Address, B256, U256};
 
-use super::EvmCode;
+use super::{Bytecodes, EvmCode};
 use crate::{AccountBasic, BuildAddressHasher, EvmAccount, Storage};
 
 type Accounts = HashMap<Address, EvmAccount, BuildAddressHasher>;
@@ -12,7 +12,7 @@ type Accounts = HashMap<Address, EvmAccount, BuildAddressHasher>;
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage<'a> {
     accounts: Accounts,
-    bytecodes: Option<&'a AHashMap<B256, EvmCode>>,
+    bytecodes: Option<&'a Bytecodes>,
     block_hashes: AHashMap<u64, B256>,
 }
 
@@ -20,7 +20,7 @@ impl<'a> InMemoryStorage<'a> {
     /// Construct a new [InMemoryStorage]
     pub fn new(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
-        bytecodes: Option<&'a AHashMap<B256, EvmCode>>,
+        bytecodes: Option<&'a Bytecodes>,
         block_hashes: impl IntoIterator<Item = (u64, B256)>,
     ) -> Self {
         InMemoryStorage {

@@ -1,12 +1,9 @@
 pub mod contract;
 
-use crate::{
-    common::{Bytecodes, ChainState},
-    erc20::contract::ERC20Token,
-};
+use crate::{common::ChainState, erc20::contract::ERC20Token};
 use ahash::AHashMap;
 use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
-use pevm::EvmAccount;
+use pevm::{Bytecodes, EvmAccount};
 use revm::primitives::{fixed_bytes, uint, Address, Bytes, TransactTo, TxEnv, B256, U256};
 
 pub const GAS_LIMIT: u64 = 155_934;

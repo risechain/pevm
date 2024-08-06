@@ -9,9 +9,9 @@ pub mod common;
 pub mod erc20;
 
 use ahash::AHashMap;
-use common::{test_execute_revm, Bytecodes};
+use common::test_execute_revm;
 use erc20::generate_cluster;
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
 use revm::primitives::{Address, TxEnv};
 
 #[test]

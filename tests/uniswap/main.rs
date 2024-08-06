@@ -13,8 +13,7 @@ pub mod uniswap;
 
 use crate::uniswap::generate_cluster;
 use ahash::AHashMap;
-use common::Bytecodes;
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
 use revm::primitives::{Address, TxEnv};
 
 #[test]

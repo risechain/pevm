@@ -1,8 +1,7 @@
 // Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
 
 use ahash::AHashMap;
-use common::Bytecodes;
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
 use rand::random;
 use revm::primitives::{env::TxEnv, Address, TransactTo, U256};
 

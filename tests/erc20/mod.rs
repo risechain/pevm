@@ -2,10 +2,10 @@ pub mod contract;
 
 use ahash::AHashMap;
 use contract::ERC20Token;
-use pevm::EvmAccount;
+use pevm::{Bytecodes, EvmAccount};
 use revm::primitives::{uint, Address, TransactTo, TxEnv, U256};
 
-use crate::common::{Bytecodes, ChainState};
+use crate::common::ChainState;
 
 pub const GAS_LIMIT: u64 = 26_938;
 
