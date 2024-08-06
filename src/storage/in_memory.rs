@@ -23,17 +23,10 @@ impl<'a> InMemoryStorage<'a> {
         bytecodes: Option<&'a AHashMap<B256, EvmCode>>,
         block_hashes: impl IntoIterator<Item = (u64, B256)>,
     ) -> Self {
-        let accounts: Accounts = accounts.into_iter().collect();
-        let block_hashes: AHashMap<u64, B256> = block_hashes.into_iter().collect();
-
-        for account in accounts.values() {
-            assert!(account.code.is_none());
-        }
-
         InMemoryStorage {
-            accounts,
+            accounts: accounts.into_iter().collect(),
             bytecodes,
-            block_hashes,
+            block_hashes: block_hashes.into_iter().collect(),
         }
     }
 }
