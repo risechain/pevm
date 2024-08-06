@@ -3,43 +3,35 @@ use std::{collections::HashMap, fmt::Debug};
 use ahash::AHashMap;
 use alloy_primitives::{keccak256, Address, B256, U256};
 
-use super::EvmCode;
+use super::{Bytecodes, EvmCode};
 use crate::{AccountBasic, BuildAddressHasher, EvmAccount, Storage};
 
 type Accounts = HashMap<Address, EvmAccount, BuildAddressHasher>;
 
 /// A storage that stores chain data in memory.
 #[derive(Debug, Default, Clone)]
-pub struct InMemoryStorage {
+pub struct InMemoryStorage<'a> {
     accounts: Accounts,
-    bytecodes: AHashMap<B256, EvmCode>,
+    bytecodes: Option<&'a Bytecodes>,
     block_hashes: AHashMap<u64, B256>,
 }
 
-impl InMemoryStorage {
+impl<'a> InMemoryStorage<'a> {
     /// Construct a new [InMemoryStorage]
-    // TODO: Take in [bytecodes] instead of reading duplicates from
-    // [accounts].
     pub fn new(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
+        bytecodes: Option<&'a Bytecodes>,
         block_hashes: impl IntoIterator<Item = (u64, B256)>,
     ) -> Self {
-        let accounts: Accounts = accounts.into_iter().collect();
-        let mut bytecodes = AHashMap::default();
-        for (_, account) in accounts.iter() {
-            if let (Some(code_hash), Some(code)) = (account.code_hash, &account.code) {
-                bytecodes.entry(code_hash).or_insert_with(|| code.clone());
-            }
-        }
         InMemoryStorage {
-            accounts,
+            accounts: accounts.into_iter().collect(),
             bytecodes,
             block_hashes: block_hashes.into_iter().collect(),
         }
     }
 }
 
-impl Storage for InMemoryStorage {
+impl<'a> Storage for InMemoryStorage<'a> {
     // TODO: More proper error handling
     type Error = u8;
 
@@ -58,7 +50,10 @@ impl Storage for InMemoryStorage {
     }
 
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
-        Ok(self.bytecodes.get(code_hash).cloned())
+        Ok(match self.bytecodes {
+            Some(bytecodes) => bytecodes.get(code_hash).cloned(),
+            None => None,
+        })
     }
 
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {

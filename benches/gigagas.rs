@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{
-    chain::PevmEthereum, execute_revm_parallel, execute_revm_sequential, EvmAccount,
+    chain::PevmEthereum, execute_revm_parallel, execute_revm_sequential, Bytecodes, EvmAccount,
     InMemoryStorage,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
@@ -30,12 +30,11 @@ const GIGA_GAS: u64 = 1_000_000_000;
 #[global_allocator]
 static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
-pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<TxEnv>) {
+pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let chain = PevmEthereum::mainnet();
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
-    let storage = InMemoryStorage::new(state, []);
     let mut group = c.benchmark_group(name);
     group.bench_function("Sequential", |b| {
         b.iter(|| {
@@ -68,7 +67,7 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
     bench(
         c,
         "Independent Raw Transfers",
-        (0..=block_size).map(common::mock_account).collect(),
+        InMemoryStorage::new((0..=block_size).map(common::mock_account), None, []),
         (1..=block_size)
             .map(|i| {
                 let address = Address::from(U160::from(i));
@@ -87,21 +86,33 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
 
 pub fn bench_erc20(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / erc20::GAS_LIMIT as f64).ceil() as usize;
-    let (mut state, txs) = erc20::generate_cluster(block_size, 1, 1);
+    let (mut state, bytecodes, txs) = erc20::generate_cluster(block_size, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
-    bench(c, "Independent ERC20", state, txs);
+    bench(
+        c,
+        "Independent ERC20",
+        InMemoryStorage::new(state, Some(&bytecodes), []),
+        txs,
+    );
 }
 
 pub fn bench_uniswap(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / uniswap::GAS_LIMIT as f64).ceil() as usize;
     let mut final_state = AHashMap::from([(Address::ZERO, EvmAccount::default())]); // Beneficiary
+    let mut final_bytecodes = Bytecodes::new();
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..block_size {
-        let (state, txs) = uniswap::generate_cluster(1, 1);
+        let (state, bytecodes, txs) = uniswap::generate_cluster(1, 1);
         final_state.extend(state);
+        final_bytecodes.extend(bytecodes);
         final_txs.extend(txs);
     }
-    bench(c, "Independent Uniswap", final_state, final_txs);
+    bench(
+        c,
+        "Independent Uniswap",
+        InMemoryStorage::new(final_state, Some(&final_bytecodes), []),
+        final_txs,
+    );
 }
 
 pub fn benchmark_gigagas(c: &mut Criterion) {

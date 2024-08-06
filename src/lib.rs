@@ -216,7 +216,8 @@ mod primitives;
 mod scheduler;
 mod storage;
 pub use storage::{
-    AccountBasic, EvmAccount, EvmCode, InMemoryStorage, RpcStorage, Storage, StorageWrapper,
+    AccountBasic, Bytecodes, EvmAccount, EvmCode, InMemoryStorage, RpcStorage, Storage,
+    StorageWrapper,
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};

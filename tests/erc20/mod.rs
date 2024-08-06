@@ -2,7 +2,7 @@ pub mod contract;
 
 use ahash::AHashMap;
 use contract::ERC20Token;
-use pevm::EvmAccount;
+use pevm::{Bytecodes, EvmAccount};
 use revm::primitives::{uint, Address, TransactTo, TxEnv, U256};
 
 use crate::common::ChainState;
@@ -20,7 +20,7 @@ pub fn generate_cluster(
     num_families: usize,
     num_people_per_family: usize,
     num_transfers_per_person: usize,
-) -> (ChainState, Vec<TxEnv>) {
+) -> (ChainState, Bytecodes, Vec<TxEnv>) {
     let families: Vec<Vec<Address>> = (0..num_families)
         .map(|_| generate_addresses(num_people_per_family))
         .collect();
@@ -61,5 +61,13 @@ pub fn generate_cluster(
         }
     }
 
-    (state, txs)
+    let mut bytecodes = Bytecodes::new();
+    for account in state.values_mut() {
+        let code = account.code.take();
+        if let Some(code) = code {
+            bytecodes.insert(account.code_hash.unwrap(), code);
+        }
+    }
+
+    (state, bytecodes, txs)
 }

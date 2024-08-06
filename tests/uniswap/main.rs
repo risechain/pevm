@@ -13,7 +13,7 @@ pub mod uniswap;
 
 use crate::uniswap::generate_cluster;
 use ahash::AHashMap;
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
 use revm::primitives::{Address, TxEnv};
 
 #[test]
@@ -23,11 +23,17 @@ fn uniswap_clusters() {
     const NUM_SWAPS_PER_PERSON: usize = 20;
 
     let mut final_state = AHashMap::from([(Address::ZERO, EvmAccount::default())]); // Beneficiary
+    let mut final_bytecodes = Bytecodes::new();
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..NUM_CLUSTERS {
-        let (state, txs) = generate_cluster(NUM_PEOPLE_PER_CLUSTER, NUM_SWAPS_PER_PERSON);
+        let (state, bytecodes, txs) =
+            generate_cluster(NUM_PEOPLE_PER_CLUSTER, NUM_SWAPS_PER_PERSON);
         final_state.extend(state);
+        final_bytecodes.extend(bytecodes);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(InMemoryStorage::new(final_state, []), final_txs)
+    common::test_execute_revm(
+        InMemoryStorage::new(final_state, Some(&final_bytecodes), []),
+        final_txs,
+    )
 }

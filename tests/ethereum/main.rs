@@ -10,7 +10,7 @@
 
 use ahash::AHashMap;
 use pevm::chain::PevmEthereum;
-use pevm::{AccountBasic, EvmAccount, InMemoryStorage, PevmError, PevmTxExecutionResult};
+use pevm::{AccountBasic, EvmAccount, EvmCode, InMemoryStorage, PevmError, PevmTxExecutionResult};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
@@ -107,8 +107,16 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             }
 
             let mut chain_state = AHashMap::new();
+            let mut bytecodes = AHashMap::new();
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
+                let code_hash = if code.is_empty() {
+                    None
+                } else {
+                    let code_hash = code.hash_slow();
+                    bytecodes.insert(code_hash, EvmCode::from(code));
+                    Some(code_hash)
+                };
                 chain_state.insert(
                     *address,
                     EvmAccount {
@@ -116,8 +124,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                             balance: raw_info.balance,
                             nonce: raw_info.nonce,
                         },
-                        code_hash: (!code.is_empty()).then(|| code.hash_slow()),
-                        code: (!code.is_empty()).then(|| code.into()),
+                        code_hash,
+                        code: None,
                         storage: raw_info.storage.clone().into_iter().collect(),
                     },
                 );
@@ -126,7 +134,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             match (
                 test.expect_exception.as_deref(),
                 pevm::execute_revm_parallel(
-                    &InMemoryStorage::new(chain_state.clone(), []),
+                    &InMemoryStorage::new(chain_state.clone(), Some(&bytecodes), []),
                     &PevmEthereum::mainnet(),
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),
