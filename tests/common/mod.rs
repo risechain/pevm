@@ -83,7 +83,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
 
         handler(
             block,
-            InMemoryStorage::new_with_bytecodes_ref(accounts, &bytecodes, block_hashes),
+            InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
         );
     }
 }

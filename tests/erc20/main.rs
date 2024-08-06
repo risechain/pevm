@@ -9,9 +9,10 @@ pub mod common;
 pub mod erc20;
 
 use ahash::AHashMap;
+use alloy_primitives::B256;
 use common::test_execute_revm;
 use erc20::generate_cluster;
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{EvmAccount, EvmCode, InMemoryStorage};
 use revm::primitives::{Address, TxEnv};
 
 #[test]
@@ -19,7 +20,16 @@ fn erc20_independent() {
     const N: usize = 37123;
     let (mut state, txs) = generate_cluster(N, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
-    test_execute_revm(InMemoryStorage::new(state, [], []), txs);
+
+    let mut bytecodes: AHashMap<B256, EvmCode> = AHashMap::new();
+    for account in state.values_mut() {
+        let code = account.code.take();
+        if let (Some(code), Some(code_hash)) = (code, account.code_hash) {
+            bytecodes.insert(code_hash, code);
+        }
+    }
+
+    test_execute_revm(InMemoryStorage::new(state, Some(&bytecodes), []), txs);
 }
 
 #[test]
@@ -40,5 +50,17 @@ fn erc20_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(InMemoryStorage::new(final_state, [], []), final_txs)
+
+    let mut bytecodes: AHashMap<B256, EvmCode> = AHashMap::new();
+    for account in final_state.values_mut() {
+        let code = account.code.take();
+        if let (Some(code), Some(code_hash)) = (code, account.code_hash) {
+            bytecodes.insert(code_hash, code);
+        }
+    }
+
+    common::test_execute_revm(
+        InMemoryStorage::new(final_state, Some(&bytecodes), []),
+        final_txs,
+    )
 }

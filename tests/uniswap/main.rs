@@ -13,7 +13,8 @@ pub mod uniswap;
 
 use crate::uniswap::generate_cluster;
 use ahash::AHashMap;
-use pevm::{EvmAccount, InMemoryStorage};
+use alloy_primitives::B256;
+use pevm::{EvmAccount, EvmCode, InMemoryStorage};
 use revm::primitives::{Address, TxEnv};
 
 #[test]
@@ -29,5 +30,17 @@ fn uniswap_clusters() {
         final_state.extend(state);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(InMemoryStorage::new(final_state, [], []), final_txs)
+
+    let mut bytecodes: AHashMap<B256, EvmCode> = AHashMap::new();
+    for account in final_state.values_mut() {
+        let code = account.code.take();
+        if let (Some(code), Some(code_hash)) = (code, account.code_hash) {
+            bytecodes.insert(code_hash, code);
+        }
+    }
+
+    common::test_execute_revm(
+        InMemoryStorage::new(final_state, Some(&bytecodes), []),
+        final_txs,
+    )
 }

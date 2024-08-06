@@ -12,8 +12,7 @@ type Accounts = HashMap<Address, EvmAccount, BuildAddressHasher>;
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage<'a> {
     accounts: Accounts,
-    bytecodes_ref: Option<&'a AHashMap<B256, EvmCode>>,
-    bytecodes: AHashMap<B256, EvmCode>,
+    bytecodes: Option<&'a AHashMap<B256, EvmCode>>,
     block_hashes: AHashMap<u64, B256>,
 }
 
@@ -21,32 +20,7 @@ impl<'a> InMemoryStorage<'a> {
     /// Construct a new [InMemoryStorage]
     pub fn new(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
-        bytecodes: impl IntoIterator<Item = (B256, EvmCode)>,
-        block_hashes: impl IntoIterator<Item = (u64, B256)>,
-    ) -> Self {
-        let mut accounts: Accounts = accounts.into_iter().collect();
-        let mut bytecodes: AHashMap<B256, EvmCode> = bytecodes.into_iter().collect();
-        let block_hashes: AHashMap<u64, B256> = block_hashes.into_iter().collect();
-
-        for account in accounts.values_mut() {
-            let code = account.code.take();
-            if let (Some(code), Some(code_hash)) = (code, account.code_hash) {
-                bytecodes.insert(code_hash, code);
-            }
-        }
-
-        InMemoryStorage {
-            accounts,
-            bytecodes_ref: None,
-            bytecodes,
-            block_hashes,
-        }
-    }
-
-    /// Construct a new [InMemoryStorage] with `bytecodes_ref`
-    pub fn new_with_bytecodes_ref(
-        accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
-        bytecodes_ref: &'a AHashMap<B256, EvmCode>,
+        bytecodes: Option<&'a AHashMap<B256, EvmCode>>,
         block_hashes: impl IntoIterator<Item = (u64, B256)>,
     ) -> Self {
         let accounts: Accounts = accounts.into_iter().collect();
@@ -58,8 +32,7 @@ impl<'a> InMemoryStorage<'a> {
 
         InMemoryStorage {
             accounts,
-            bytecodes_ref: Some(bytecodes_ref),
-            bytecodes: AHashMap::new(),
+            bytecodes,
             block_hashes,
         }
     }
@@ -84,12 +57,10 @@ impl<'a> Storage for InMemoryStorage<'a> {
     }
 
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
-        if let Some(bytecodes) = self.bytecodes_ref {
-            if let Some(evm_code) = bytecodes.get(code_hash) {
-                return Ok(Some(evm_code.clone()));
-            }
-        }
-        Ok(self.bytecodes.get(code_hash).cloned())
+        Ok(match self.bytecodes {
+            Some(bytecodes) => bytecodes.get(code_hash).cloned(),
+            None => None,
+        })
     }
 
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
