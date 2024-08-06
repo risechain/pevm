@@ -78,6 +78,7 @@ fn mainnet_blocks_from_rpc() {
                 Ok(file) => bincode::deserialize_from(BufReader::new(file)).unwrap(),
                 Err(_) => BTreeMap::new(),
             };
+            bytecodes.extend(rpc_storage.get_cache_bytecodes());
             for (address, mut account) in rpc_storage.get_cache_accounts() {
                 if let Some(code) = account.code.take() {
                     assert_ne!(account.code_hash.unwrap(), KECCAK_EMPTY);
