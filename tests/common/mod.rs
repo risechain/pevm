@@ -49,7 +49,7 @@ pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 // TODO: Put somewhere better?
 pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
     // Parse bytecodes
-    let bytecodes: HashMap<B256, EvmCode> = bincode::deserialize_from(BufReader::new(
+    let bytecodes: AHashMap<B256, EvmCode> = bincode::deserialize_from(BufReader::new(
         File::open("data/bytecodes.bincode").unwrap(),
     ))
     .unwrap();
@@ -83,7 +83,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
 
         handler(
             block,
-            InMemoryStorage::new(accounts, bytecodes.clone(), block_hashes),
+            InMemoryStorage::new_with_bytecodes_ref(accounts, &bytecodes, block_hashes),
         );
     }
 }
