@@ -61,6 +61,11 @@ impl<N> RpcStorage<N> {
         self.cache_accounts.lock().unwrap().clone()
     }
 
+    /// Get a snapshot of bytecodes
+    pub fn get_cache_bytecodes(&self) -> AHashMap<B256, EvmCode> {
+        self.cache_bytecodes.lock().unwrap().clone()
+    }
+
     /// Get a snapshot of block hashes
     pub fn get_cache_block_hashes(&self) -> AHashMap<u64, B256> {
         self.cache_block_hashes.lock().unwrap().clone()
@@ -108,14 +113,13 @@ impl<N: Network> Storage for RpcStorage<N> {
             let code_hash = if code.is_empty() {
                 None
             } else {
-                Some(code.hash_slow())
-            };
-            if let Some(code_hash) = code_hash {
+                let code_hash = code.hash_slow();
                 self.cache_bytecodes
                     .lock()
                     .unwrap()
                     .insert(code_hash, code.into());
-            }
+                Some(code_hash)
+            };
             let basic = AccountBasic { balance, nonce };
             self.cache_accounts.lock().unwrap().insert(
                 *address,
