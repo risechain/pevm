@@ -59,6 +59,8 @@ pub(crate) struct Scheduler {
     aborted: AtomicBool,
 }
 
+// TODO: Better error handling.
+// Like returning errors instead of panicking on [unreachable]s.
 impl Scheduler {
     pub(crate) fn new(block_size: usize) -> Self {
         Self {
@@ -208,7 +210,7 @@ impl Scheduler {
     ) -> Option<Task> {
         let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
         if tx.status == IncarnationStatus::Executing {
-            // TODO: Assert that `i` equals `tx_version.tx_incarnation`?
+            debug_assert_eq!(tx.incarnation, tx_version.tx_incarnation);
             tx.status = IncarnationStatus::Executed;
             drop(tx);
 
@@ -260,7 +262,6 @@ impl Scheduler {
                 // lower or equal -- it will catch up later.
             }
         } else {
-            // TODO: Better error handling
             unreachable!("Trying to finish execution in a non-executing state")
         }
         None

@@ -214,8 +214,6 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
 impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     type Error = ReadError;
 
-    // TODO: More granularity here to ensure we only record dependencies for,
-    // say, only an account's balance instead of the whole account info.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let location_hash = self.hash_basic(&address);
 
@@ -590,7 +588,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             Ok(result_and_state) => {
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
-                // TODO: Allocate up to [result_and_state.state.len()] anyway?
                 let mut write_set = WriteSet::with_capacity(3);
                 let mut lazy_addresses = NewLazyAddresses::new();
                 for (address, account) in result_and_state.state.iter() {
@@ -633,9 +630,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                 }
                                 lazy_addresses.push(*address);
                             } else {
-                                // TODO: More granularity here to ensure we only notify new
-                                // memory writes, for instance, only an account's balance instead
-                                // of the whole account.
                                 write_set.push((
                                     account_location_hash,
                                     MemoryValue::Basic(Some(AccountBasic {

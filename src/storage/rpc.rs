@@ -1,3 +1,6 @@
+// TODO: Put this behind an RPC flag to not pollute the core
+// library with RPC network & transport dependencies, etc.
+
 use std::{fmt::Debug, future::IntoFuture, sync::Mutex};
 
 use ahash::AHashMap;
@@ -17,9 +20,6 @@ use crate::{AccountBasic, EvmAccount, Storage};
 
 use super::EvmCode;
 
-// TODO: Support generic network & transport types.
-// TODO: Put this behind an RPC flag to not pollute the core
-// library with RPC network & transport dependencies, etc.
 type RpcProvider<N> = RootProvider<Http<Client>, N>;
 
 /// A storage that fetches state data via RPC for execution.

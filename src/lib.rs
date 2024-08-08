@@ -25,12 +25,9 @@ impl Hasher for AddressHasher {
 }
 type BuildAddressHasher = BuildHasherDefault<AddressHasher>;
 
-// TODO: More granularity here to separate an account's balance, nonce, and
-// code instead of marking conflict at the whole account. That way checking
-// for a mid-block code change (contract deployment) doesn't need to traverse
-// a potential long list of lazy balance updates, etc.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum MemoryLocation {
+    // TODO: Separate an account's balance and nonce?
     Basic(Address),
     CodeHash(Address),
     Storage(Address, U256),
@@ -209,10 +206,11 @@ macro_rules! index_mutex {
     };
 }
 
+pub mod chain;
+mod compat;
+mod mv_memory;
 mod pevm;
 pub use pevm::{execute, execute_revm_parallel, execute_revm_sequential, PevmError, PevmResult};
-mod mv_memory;
-mod primitives;
 mod scheduler;
 mod storage;
 pub use storage::{
@@ -221,4 +219,3 @@ pub use storage::{
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};
-pub mod chain;

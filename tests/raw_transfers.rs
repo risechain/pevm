@@ -67,8 +67,6 @@ fn raw_transfers_same_sender_multiple_txs() {
     );
 }
 
-// TODO: Move alloy tests to real block tests once we have
-// a better Storage interface.
 #[test]
 fn raw_transfers_independent_alloy() {
     let block_size = 100_000; // number of transactions

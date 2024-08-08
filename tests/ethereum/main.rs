@@ -247,7 +247,7 @@ fn ethereum_state_tests() {
         //   - vmPerformance/loopMul.json
         //   - stQuadraticComplexityTest/Call50000_sha256.json
         .collect::<Vec<_>>()
-        .par_iter() // TODO: Further improve test speed
+        .par_iter()
         .for_each(|path| {
             let raw_content = fs::read_to_string(path)
                 .unwrap_or_else(|e| panic!("Cannot read suite {path:?}: {e:?}"));

@@ -177,7 +177,6 @@ impl MvMemory {
     // structure with special ESTIMATE markers to quickly abort higher transactions
     // that read them.
     pub(crate) fn convert_writes_to_estimates(&self, tx_idx: TxIdx) {
-        // TODO: Better error handling
         for location in index_mutex!(self.last_locations, tx_idx).write.iter() {
             if let Some(mut written_transactions) = self.data.get_mut(location) {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
