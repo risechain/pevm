@@ -7,7 +7,7 @@ use std::{
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
+use pevm::{create_db_dir, remove_db_dir, Bytecodes, EvmAccount, InMemoryStorage, OnDiskStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
@@ -47,7 +47,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
+pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, OnDiskStorage)) {
     // Parse bytecodes
     let bytecodes: Bytecodes = bincode::deserialize_from(BufReader::new(
         File::open("data/bytecodes.bincode").unwrap(),
@@ -81,9 +81,18 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
                 })
                 .unwrap_or_default();
 
+        let db_dir = create_db_dir(
+            block_number,
+            bytecodes.iter(),
+            accounts.iter(),
+            block_hashes.iter(),
+        )
+        .unwrap();
         handler(
             block,
             InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
+            OnDiskStorage::open(&db_dir).unwrap(),
         );
+        remove_db_dir(db_dir).unwrap();
     }
 }

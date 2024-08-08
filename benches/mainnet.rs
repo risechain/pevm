@@ -25,17 +25,17 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         // with many dependencies.
         .min(NonZeroUsize::new(8).unwrap());
 
-    common::for_each_block_from_disk(|block, storage| {
+    common::for_each_block_from_disk(|block, in_memory_storage, on_disk_storage| {
         let mut group = c.benchmark_group(format!(
             "Block {}({} txs, {} gas)",
             block.header.number.unwrap(),
             block.transactions.len(),
             block.header.gas_used
         ));
-        group.bench_function("Sequential", |b| {
+        group.bench_function("Sequential (in memory)", |b| {
             b.iter(|| {
                 pevm::execute(
-                    black_box(&storage),
+                    black_box(&in_memory_storage),
                     black_box(&chain),
                     black_box(block.clone()),
                     black_box(concurrency_level),
@@ -43,10 +43,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 )
             })
         });
-        group.bench_function("Parallel", |b| {
+        group.bench_function("Parallel (in memory)", |b| {
             b.iter(|| {
                 pevm::execute(
-                    black_box(&storage),
+                    black_box(&in_memory_storage),
                     black_box(&chain),
                     black_box(block.clone()),
                     black_box(concurrency_level),
@@ -54,6 +54,32 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 )
             })
         });
+        group.bench_function("Sequential (on_disk)", |b| {
+            b.iter(|| {
+                pevm::execute(
+                    black_box(&on_disk_storage),
+                    black_box(&chain),
+                    black_box(block.clone()),
+                    black_box(concurrency_level),
+                    black_box(true),
+                )
+            })
+        });
+        on_disk_storage.clear_cache();
+
+        group.bench_function("Parallel (on_disk)", |b| {
+            b.iter(|| {
+                pevm::execute(
+                    black_box(&on_disk_storage),
+                    black_box(&chain),
+                    black_box(block.clone()),
+                    black_box(concurrency_level),
+                    black_box(false),
+                )
+            })
+        });
+        on_disk_storage.clear_cache();
+
         group.finish();
     });
 }

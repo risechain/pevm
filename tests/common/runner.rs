@@ -53,10 +53,7 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<
 
 // Execute an Alloy block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_alloy<
-    S: Storage + Clone + Send + Sync,
-    C: PevmChain + Send + Sync + PartialEq,
->(
+pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync + PartialEq>(
     storage: &S,
     chain: &C,
     block: Block,

@@ -18,10 +18,8 @@ pub struct EvmAccount {
     /// The account's nonce.
     pub nonce: u64,
     /// The optional code hash of the account.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub code_hash: Option<B256>,
     /// The account's optional code.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<EvmCode>,
     /// The account's storage.
     pub storage: AHashMap<U256, U256>,
@@ -228,6 +226,6 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
 mod in_memory;
 pub use in_memory::InMemoryStorage;
 mod on_disk;
-pub use on_disk::OnDiskStorage;
+pub use on_disk::{create_db_dir, remove_db_dir, OnDiskStorage};
 mod rpc;
 pub use rpc::RpcStorage;
