@@ -77,7 +77,10 @@ impl<N: Network> Storage for RpcStorage<N> {
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
         if let Some(account) = self.cache_accounts.lock().unwrap().get(address) {
-            return Ok(Some(account.basic.clone()));
+            return Ok(Some(AccountBasic {
+                balance: account.balance,
+                nonce: account.nonce,
+            }));
         }
         self.runtime.block_on(async {
             let (res_balance, res_nonce, res_code) = tokio::join!(
@@ -120,17 +123,17 @@ impl<N: Network> Storage for RpcStorage<N> {
                     .insert(code_hash, code.into());
                 Some(code_hash)
             };
-            let basic = AccountBasic { balance, nonce };
             self.cache_accounts.lock().unwrap().insert(
                 *address,
                 EvmAccount {
-                    basic: basic.clone(),
+                    balance,
+                    nonce,
                     code_hash,
                     code: None,
                     storage: AHashMap::default(),
                 },
             );
-            Ok(Some(basic))
+            Ok(Some(AccountBasic { balance, nonce }))
         })
     }
 

@@ -26,7 +26,7 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    AccountBasic, EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
+    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
 };
 
 /// Errors when executing a block with PEVM.
@@ -238,9 +238,9 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
         let location_hash = hasher.hash_one(MemoryLocation::Basic(address));
         if let Some(write_history) = mv_memory.consume_location(&location_hash) {
             // TODO: We don't need to read from storage if the first entry is a fully evaluated account.
-            let mut current_account = match storage.basic(&address) {
-                Ok(Some(account)) => account,
-                _ => AccountBasic::default(),
+            let (mut balance, mut nonce) = match storage.basic(&address) {
+                Ok(Some(account)) => (account.balance, account.nonce),
+                _ => (U256::ZERO, 0),
             };
             // Accounts that take implicit writes like the beneficiary account can be contract!
             let code_hash = match storage.code_hash(&address) {
@@ -261,14 +261,14 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                         if let Some(info) = info {
-                            current_account.balance = info.balance;
-                            current_account.nonce = info.nonce;
+                            balance = info.balance;
+                            nonce = info.nonce;
                         }
                         // TODO: Assert that there must be no self-destructed
                         // accounts here.
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
-                        current_account.balance += addition;
+                        balance += addition;
                     }
                     MemoryEntry::Data(_, MemoryValue::LazySender(addition)) => {
                         // We must re-do extra sender balance checks as we mock
@@ -282,15 +282,15 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                         if let Some(blob_fee) = tx.max_fee_per_blob_gas {
                             max_fee += U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee);
                         }
-                        if current_account.balance < max_fee {
+                        if balance < max_fee {
                             return Err(PevmError::ExecutionError(
                                 "Transaction(LackOfFundForMaxFee)".to_string(),
                             ));
                         }
-                        current_account.balance -= addition;
+                        balance -= addition;
                         // End of overflow TODO
 
-                        current_account.nonce += 1;
+                        nonce += 1;
                     }
                     // TODO: Better error handling
                     _ => unreachable!(),
@@ -302,20 +302,21 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                 // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
                 if spec_id.is_enabled_in(SPURIOUS_DRAGON)
                     && code_hash.is_none()
-                    && current_account.nonce == 0
-                    && current_account.balance == U256::ZERO
+                    && nonce == 0
+                    && balance == U256::ZERO
                 {
                     *account = None;
                 } else if let Some(account) = account {
                     // Explicit write: only overwrite the account info in case there are storage changes
                     // TODO: Can code be changed mid-block?
-                    account.basic.balance = current_account.balance;
-                    account.basic.nonce = current_account.nonce;
+                    account.balance = balance;
+                    account.nonce = nonce;
                 } else {
                     // Implicit write: e.g. gas payments to the beneficiary account,
                     // which doesn't have explicit writes in [tx_result.state]
                     *account = Some(EvmAccount {
-                        basic: current_account.clone(),
+                        balance,
+                        nonce,
                         code_hash,
                         code: code.clone(),
                         storage: AHashMap::default(),

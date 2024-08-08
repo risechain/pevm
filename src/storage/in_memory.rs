@@ -36,10 +36,10 @@ impl<'a> Storage for InMemoryStorage<'a> {
     type Error = u8;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
-        Ok(self
-            .accounts
-            .get(address)
-            .map(|account| account.basic.clone()))
+        Ok(self.accounts.get(address).map(|account| AccountBasic {
+            balance: account.balance,
+            nonce: account.nonce,
+        }))
     }
 
     fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error> {

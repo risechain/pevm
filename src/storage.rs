@@ -11,17 +11,16 @@ use revm::{
 use serde::{Deserialize, Serialize};
 
 /// An EVM account.
-// TODO: Flatten [AccountBasic] or more ideally, replace this with an Alloy type.
-// [AccountBasic] works for now as we're tightly tied to REVM types, hence
-// conversions between [AccountBasic] & [AccountInfo] are very convenient.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EvmAccount {
-    /// The account's basic information.
-    pub basic: AccountBasic,
+    /// The account's balance.
+    pub balance: U256,
+    /// The account's nonce.
+    pub nonce: u64,
     /// The optional code hash of the account.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_hash: Option<B256>,
-    /// The account's optional code
+    /// The account's optional code.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<EvmCode>,
     /// The account's storage.
@@ -32,10 +31,8 @@ impl From<Account> for EvmAccount {
     fn from(account: Account) -> Self {
         let has_code = !account.info.is_empty_code_hash();
         Self {
-            basic: AccountBasic {
-                balance: account.info.balance,
-                nonce: account.info.nonce,
-            },
+            balance: account.info.balance,
+            nonce: account.info.nonce,
             code_hash: has_code.then_some(account.info.code_hash),
             code: has_code.then(|| account.info.code.unwrap().into()),
             storage: account

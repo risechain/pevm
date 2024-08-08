@@ -1,6 +1,6 @@
 use crate::common::storage::{from_address, from_indices, from_short_string, StorageBuilder};
 use ahash::AHashMap;
-use pevm::{AccountBasic, EvmAccount};
+use pevm::EvmAccount;
 use revm::primitives::{
     fixed_bytes, hex::FromHex, ruint::UintTryFrom, Address, Bytecode, Bytes, B256, U256,
 };
@@ -85,10 +85,8 @@ impl ERC20Token {
         }
 
         EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
-            },
+            balance: U256::ZERO,
+            nonce: 1u64,
             code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
