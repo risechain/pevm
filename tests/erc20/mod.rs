@@ -37,9 +37,13 @@ pub fn generate_cluster(
     let mut txs = Vec::new();
 
     for person in people_addresses.iter() {
-        let mut account = EvmAccount::default();
-        account.basic.balance = uint!(4_567_000_000_000_000_000_000_U256);
-        state.insert(*person, account);
+        state.insert(
+            *person,
+            EvmAccount {
+                balance: uint!(4_567_000_000_000_000_000_000_U256),
+                ..EvmAccount::default()
+            },
+        );
     }
 
     for nonce in 0..num_transfers_per_person {

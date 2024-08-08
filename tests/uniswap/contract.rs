@@ -2,7 +2,7 @@ use crate::common::storage::{
     from_address, from_indices, from_short_string, from_tick, StorageBuilder,
 };
 use ahash::AHashMap;
-use pevm::{AccountBasic, EvmAccount};
+use pevm::EvmAccount;
 use revm::primitives::{
     fixed_bytes,
     hex::{FromHex, ToHexExt},
@@ -50,10 +50,8 @@ impl WETH9 {
         store.set(5, 0); // mapping
 
         EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
-            },
+            balance: U256::ZERO,
+            nonce: 1u64,
             code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
@@ -130,10 +128,8 @@ impl UniswapV3Factory {
         }
 
         EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
-            },
+            balance: U256::ZERO,
+            nonce: 1u64,
             code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
@@ -252,10 +248,8 @@ impl UniswapV3Pool {
         }
 
         EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
-            },
+            balance: U256::ZERO,
+            nonce: 1u64,
             code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
@@ -324,10 +318,8 @@ impl SwapRouter {
         );
 
         EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
-            },
+            balance: U256::ZERO,
+            nonce: 1u64,
             code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),
@@ -370,10 +362,8 @@ impl SingleSwap {
         store.set_with_offset(1, 20, 3, POOL_FEE);
 
         EvmAccount {
-            basic: AccountBasic {
-                balance: U256::ZERO,
-                nonce: 1u64,
-            },
+            balance: U256::ZERO,
+            nonce: 1u64,
             code_hash: Some(bytecode.hash_slow()),
             code: Some(bytecode.into()),
             storage: store.build(),

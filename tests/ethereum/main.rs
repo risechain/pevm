@@ -10,7 +10,7 @@
 
 use ahash::AHashMap;
 use pevm::chain::PevmEthereum;
-use pevm::{AccountBasic, EvmAccount, EvmCode, InMemoryStorage, PevmError, PevmTxExecutionResult};
+use pevm::{EvmAccount, EvmCode, InMemoryStorage, PevmError, PevmTxExecutionResult};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
@@ -120,10 +120,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 chain_state.insert(
                     *address,
                     EvmAccount {
-                        basic: AccountBasic {
-                            balance: raw_info.balance,
-                            nonce: raw_info.nonce,
-                        },
+                        balance: raw_info.balance,
+                        nonce: raw_info.nonce,
                         code_hash,
                         code: None,
                         storage: raw_info.storage.clone().into_iter().collect(),
@@ -202,7 +200,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     for (address, account) in state {
                         if let Some(account) = account {
                             let chain_state_account = chain_state.entry(address).or_default();
-                            chain_state_account.basic = account.basic;
+                            chain_state_account.balance = account.balance;
+                            chain_state_account.nonce = account.nonce;
                             chain_state_account.code_hash = account.code_hash;
                             chain_state_account.code = account.code;
                             chain_state_account.storage.extend(account.storage.into_iter());
@@ -215,8 +214,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     let plain_chain_state = chain_state.into_iter().map(|(address, account)| {
                         (address, PlainAccount {
                             info: AccountInfo {
-                                balance: account.basic.balance,
-                                nonce: account.basic.nonce,
+                                balance: account.balance,
+                                nonce: account.nonce,
                                 code_hash: account.code_hash.unwrap_or(KECCAK_EMPTY),
                                 code: account.code.map(Bytecode::from),
                             },

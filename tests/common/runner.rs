@@ -11,11 +11,13 @@ use std::{num::NonZeroUsize, thread};
 // Useful for mock iterations.
 pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
     let address = Address::from(U160::from(idx));
-    let mut account = EvmAccount::default();
-    // Filling half full accounts to have enough tokens for tests without worrying about
-    // the corner case of balance not going beyond `U256::MAX`.
-    account.basic.balance = U256::MAX.div_ceil(U256::from(2));
-    account.basic.nonce = 1;
+    let account = EvmAccount {
+        // Filling half full accounts to have enough tokens for tests without worrying about
+        // the corner case of balance not going beyond [U256::MAX].
+        balance: U256::MAX.div_ceil(U256::from(2)),
+        nonce: 1,
+        ..EvmAccount::default()
+    };
     (address, account)
 }
 
