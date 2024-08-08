@@ -237,11 +237,18 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     for address in mv_memory.consume_lazy_addresses() {
         let location_hash = hasher.hash_one(MemoryLocation::Basic(address));
         if let Some(write_history) = mv_memory.consume_location(&location_hash) {
-            // TODO: We don't need to read from storage if the first entry is a fully evaluated account.
-            let (mut balance, mut nonce) = match storage.basic(&address) {
-                Ok(Some(account)) => (account.balance, account.nonce),
-                _ => (U256::ZERO, 0),
-            };
+            let mut balance = U256::ZERO;
+            let mut nonce = 0;
+            // Read from storage if the first multi-version entry is not an absolute value.
+            if !matches!(
+                write_history.first_key_value(),
+                Some((_, MemoryEntry::Data(_, MemoryValue::Basic(_))))
+            ) {
+                if let Ok(Some(account)) = storage.basic(&address) {
+                    balance = account.balance;
+                    nonce = account.nonce;
+                }
+            }
             // Accounts that take implicit writes like the beneficiary account can be contract!
             let code_hash = match storage.code_hash(&address) {
                 Ok(code_hash) => code_hash,
