@@ -1,6 +1,3 @@
-// TODO: Move this into `tests/ethereum`.
-// TODO: `tokio::test`?
-
 use std::{
     collections::BTreeMap,
     fs::{self, File},
@@ -22,6 +19,7 @@ use pevm::{
 
 pub mod common;
 
+// TODO: [tokio::test]?
 #[test]
 fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("RPC_URL") {

@@ -21,8 +21,8 @@ use revm::{
 
 use crate::{
     chain::PevmChain,
+    compat::{get_block_env, get_tx_env, TransactionParsingError},
     mv_memory::MvMemory,
-    primitives::{get_block_env, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
