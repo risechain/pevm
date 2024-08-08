@@ -106,6 +106,7 @@ struct VmDb<'a, S: Storage, C: PevmChain> {
     from_hash: MemoryLocationHash,
     to: Option<&'a Address>,
     to_hash: Option<MemoryLocationHash>,
+    to_code_hash: Option<B256>,
     // Indicates if we lazy update this transaction.
     // Only applied to raw transfers' senders & recipients at the moment.
     is_lazy: bool,
@@ -132,6 +133,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
             from_hash,
             to,
             to_hash,
+            to_code_hash: None,
             is_lazy: false,
             // Unless it is a raw transfer that is lazy updated, we'll
             // read at least from the sender and recipient accounts.
@@ -142,14 +144,13 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // or recipient in [MvMemory] since sequentially evaluating memory
         // locations with only one entry is much costlier than fully
         // evaluating it concurrently.
-        // TODO: Re-order conditions (put most likely true condition ahead)
-        // to avoid [MvMemory] locks.
         // TODO: Only lazy update in block syncing mode, not for block
         // building.
         if let Some(to) = to {
-            db.is_lazy = (vm.mv_memory.have_location(&from_hash)
-                || vm.mv_memory.have_location(&to_hash.unwrap()))
-                && db.get_code_hash(*to)?.is_none();
+            db.to_code_hash = db.get_code_hash(*to)?;
+            db.is_lazy = db.to_code_hash.is_none()
+                && (vm.mv_memory.have_location(&from_hash)
+                    || vm.mv_memory.have_location(&to_hash.unwrap()));
         }
         Ok(db)
     }
@@ -387,7 +388,11 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                 account.balance -= balance_addition;
             };
 
-            let code_hash = self.get_code_hash(address)?;
+            let code_hash = if Some(location_hash) == self.to_hash {
+                self.to_code_hash
+            } else {
+                self.get_code_hash(address)?
+            };
             let code = if let Some(code_hash) = &code_hash {
                 if let Some(code) = self.vm.new_bytecodes.get(code_hash) {
                     Some(code.clone())
