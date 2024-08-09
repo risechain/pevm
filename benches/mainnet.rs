@@ -4,7 +4,11 @@
 
 #![allow(missing_docs)]
 
-use std::{num::NonZeroUsize, thread};
+use std::{
+    num::NonZeroUsize,
+    thread,
+    time::{Duration, Instant},
+};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::chain::PevmEthereum;
@@ -32,7 +36,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             block.transactions.len(),
             block.header.gas_used
         ));
-        group.bench_function("Sequential (in memory)", |b| {
+        group.bench_function("Sequential/In Memory", |b| {
             b.iter(|| {
                 pevm::execute(
                     black_box(&in_memory_storage),
@@ -43,7 +47,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 )
             })
         });
-        group.bench_function("Parallel (in memory)", |b| {
+        group.bench_function("Parallel/In Memory", |b| {
             b.iter(|| {
                 pevm::execute(
                     black_box(&in_memory_storage),
@@ -54,31 +58,45 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 )
             })
         });
-        group.bench_function("Sequential (on_disk)", |b| {
-            b.iter(|| {
-                pevm::execute(
-                    black_box(&on_disk_storage),
-                    black_box(&chain),
-                    black_box(block.clone()),
-                    black_box(concurrency_level),
-                    black_box(true),
-                )
+        group.bench_function("Sequential/On Disk", |b| {
+            b.iter_custom(|iters| {
+                let mut total_duration = Duration::ZERO;
+                for _i in 0..iters {
+                    let start = Instant::now();
+                    pevm::execute(
+                        black_box(&on_disk_storage),
+                        black_box(&chain),
+                        black_box(block.clone()),
+                        black_box(concurrency_level),
+                        black_box(true),
+                    )
+                    .unwrap();
+                    total_duration += start.elapsed();
+                    on_disk_storage.clear_cache();
+                }
+                total_duration
             })
         });
-        on_disk_storage.clear_cache();
 
-        group.bench_function("Parallel (on_disk)", |b| {
-            b.iter(|| {
-                pevm::execute(
-                    black_box(&on_disk_storage),
-                    black_box(&chain),
-                    black_box(block.clone()),
-                    black_box(concurrency_level),
-                    black_box(false),
-                )
+        group.bench_function("Parallel/On Disk", |b| {
+            b.iter_custom(|iters| {
+                let mut total_duration = Duration::ZERO;
+                for _i in 0..iters {
+                    let start = Instant::now();
+                    pevm::execute(
+                        black_box(&on_disk_storage),
+                        black_box(&chain),
+                        black_box(block.clone()),
+                        black_box(concurrency_level),
+                        black_box(false),
+                    )
+                    .unwrap();
+                    total_duration += start.elapsed();
+                    on_disk_storage.clear_cache();
+                }
+                total_duration
             })
         });
-        on_disk_storage.clear_cache();
 
         group.finish();
     });

@@ -119,6 +119,7 @@ fn mainnet_blocks_from_disk() {
                 block.clone(),
                 true,
             );
+            on_disk_storage.clear_cache();
         }
     });
 }

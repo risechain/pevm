@@ -7,10 +7,12 @@ use std::{
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{create_db_dir, remove_db_dir, Bytecodes, EvmAccount, InMemoryStorage, OnDiskStorage};
+use libmdbx::DatabaseOptions;
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage, OnDiskStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
+mod mdbx;
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, EvmAccount>;
@@ -81,8 +83,10 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, 
                 })
                 .unwrap_or_default();
 
-        let db_dir = create_db_dir(
-            block_number,
+        let mut db_dir = std::env::temp_dir();
+        db_dir.push(block_number);
+        mdbx::create_db_dir(
+            &db_dir,
             bytecodes.iter(),
             accounts.iter(),
             block_hashes.iter(),
@@ -91,8 +95,15 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, 
         handler(
             block,
             InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
-            OnDiskStorage::open(&db_dir).unwrap(),
+            OnDiskStorage::open(
+                &db_dir,
+                DatabaseOptions {
+                    max_tables: Some(16),
+                    ..DatabaseOptions::default()
+                },
+            )
+            .unwrap(),
         );
-        remove_db_dir(db_dir).unwrap();
+        std::fs::remove_dir_all(db_dir).unwrap();
     }
 }

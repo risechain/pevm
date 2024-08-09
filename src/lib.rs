@@ -214,8 +214,8 @@ pub use pevm::{execute, execute_revm_parallel, execute_revm_sequential, PevmErro
 mod scheduler;
 mod storage;
 pub use storage::{
-    create_db_dir, remove_db_dir, AccountBasic, Bytecodes, EvmAccount, EvmCode, InMemoryStorage,
-    OnDiskStorage, RpcStorage, Storage, StorageWrapper,
+    AccountBasic, Bytecodes, EvmAccount, EvmCode, InMemoryStorage, OnDiskStorage, RpcStorage,
+    Storage, StorageWrapper,
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};

@@ -226,6 +226,6 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
 mod in_memory;
 pub use in_memory::InMemoryStorage;
 mod on_disk;
-pub use on_disk::{create_db_dir, remove_db_dir, OnDiskStorage};
+pub use on_disk::OnDiskStorage;
 mod rpc;
 pub use rpc::RpcStorage;
