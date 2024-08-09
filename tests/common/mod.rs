@@ -2,15 +2,18 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::BufReader,
+    path::PathBuf,
 };
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
+use libmdbx::DatabaseOptions;
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage, OnDiskStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
+mod mdbx;
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, EvmAccount>;
@@ -46,8 +49,22 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
 
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
+#[allow(missing_debug_implementations)]
+pub struct OnDiskStorageFactory {
+    path: PathBuf,
+    options: DatabaseOptions,
+}
+
+impl OnDiskStorageFactory {
+    pub fn create(&self) -> OnDiskStorage {
+        OnDiskStorage::open(&self.path, self.options.clone()).unwrap()
+    }
+}
+
 // TODO: Put somewhere better?
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
+pub fn for_each_block_from_disk(
+    mut handler: impl FnMut(Block, InMemoryStorage, OnDiskStorageFactory),
+) {
     // Parse bytecodes
     let bytecodes: Bytecodes = bincode::deserialize_from(BufReader::new(
         File::open("data/bytecodes.bincode").unwrap(),
@@ -81,9 +98,26 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
                 })
                 .unwrap_or_default();
 
+        let mut db_dir = std::env::temp_dir();
+        db_dir.push(block_number);
+        mdbx::create_db_dir(
+            &db_dir,
+            bytecodes.iter(),
+            accounts.iter(),
+            block_hashes.iter(),
+        )
+        .unwrap();
         handler(
             block,
             InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
+            OnDiskStorageFactory {
+                path: db_dir.clone(),
+                options: DatabaseOptions {
+                    max_tables: Some(16),
+                    ..DatabaseOptions::default()
+                },
+            },
         );
+        std::fs::remove_dir_all(db_dir).unwrap();
     }
 }

@@ -32,10 +32,10 @@ min_speed_up = float("inf")
 
 for path in os.listdir(CRITERION_PATH):
     if path.startswith("Block"):
-        estimate_sequential = read_estimate(path, "Sequential")
+        estimate_sequential = read_estimate(path, "Sequential_On Disk")
         total_sequential += estimate_sequential
 
-        estimate_parallel = read_estimate(path, "Parallel")
+        estimate_parallel = read_estimate(path, "Parallel_On Disk")
         total_parallel += estimate_parallel
 
         speed_up = round(estimate_sequential / estimate_parallel, 2)
