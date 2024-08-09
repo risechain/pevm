@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::BufReader,
+    path::PathBuf,
 };
 
 use ahash::AHashMap;
@@ -48,8 +49,22 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
 
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
+#[allow(missing_debug_implementations)]
+pub struct OnDiskStorageFactory {
+    path: PathBuf,
+    options: DatabaseOptions,
+}
+
+impl OnDiskStorageFactory {
+    pub fn create(&self) -> OnDiskStorage {
+        OnDiskStorage::open(&self.path, self.options.clone()).unwrap()
+    }
+}
+
 // TODO: Put somewhere better?
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, OnDiskStorage)) {
+pub fn for_each_block_from_disk(
+    mut handler: impl FnMut(Block, InMemoryStorage, OnDiskStorageFactory),
+) {
     // Parse bytecodes
     let bytecodes: Bytecodes = bincode::deserialize_from(BufReader::new(
         File::open("data/bytecodes.bincode").unwrap(),
@@ -95,14 +110,13 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, 
         handler(
             block,
             InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
-            OnDiskStorage::open(
-                &db_dir,
-                DatabaseOptions {
+            OnDiskStorageFactory {
+                path: db_dir.clone(),
+                options: DatabaseOptions {
                     max_tables: Some(16),
                     ..DatabaseOptions::default()
                 },
-            )
-            .unwrap(),
+            },
         );
         std::fs::remove_dir_all(db_dir).unwrap();
     }

@@ -103,7 +103,7 @@ fn mainnet_blocks_from_rpc() {
 
 #[test]
 fn mainnet_blocks_from_disk() {
-    common::for_each_block_from_disk(|block, in_memory_storage, on_disk_storage| {
+    common::for_each_block_from_disk(|block, in_memory_storage, on_disk_storage_factory| {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
@@ -113,13 +113,15 @@ fn mainnet_blocks_from_disk() {
                 block.clone(),
                 true,
             );
+
+            let on_disk_storage = on_disk_storage_factory.create();
             common::test_execute_alloy(
                 &on_disk_storage,
                 &PevmEthereum::mainnet(),
                 block.clone(),
                 true,
             );
-            on_disk_storage.clear_cache();
+            // on_disk_storage.clear_cache();
         }
     });
 }
