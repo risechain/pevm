@@ -10,7 +10,9 @@
 
 use ahash::AHashMap;
 use pevm::chain::PevmEthereum;
-use pevm::{Bytecodes, EvmAccount, EvmCode, InMemoryStorage, PevmError, PevmTxExecutionResult};
+use pevm::{
+    Bytecodes, EvmAccount, EvmCode, InMemoryStorage, Pevm, PevmError, PevmTxExecutionResult,
+};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
@@ -131,7 +133,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
 
             match (
                 test.expect_exception.as_deref(),
-                pevm::execute_revm_parallel(
+                Pevm::default().execute_revm_parallel(
                     &InMemoryStorage::new(chain_state.clone(), Some(&bytecodes), []),
                     &PevmEthereum::mainnet(),
                     spec_name.to_spec_id(),

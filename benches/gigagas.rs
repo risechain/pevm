@@ -9,8 +9,8 @@ use std::{num::NonZeroUsize, thread};
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{
-    chain::PevmEthereum, execute_revm_parallel, execute_revm_sequential, Bytecodes, ChainState,
-    EvmAccount, InMemoryStorage,
+    chain::PevmEthereum, execute_revm_sequential, Bytecodes, ChainState, EvmAccount,
+    InMemoryStorage, Pevm,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
 
@@ -34,6 +34,7 @@ pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<T
     let chain = PevmEthereum::mainnet();
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
+    let mut pevm = Pevm::default();
     let mut group = c.benchmark_group(name);
     group.bench_function("Sequential", |b| {
         b.iter(|| {
@@ -48,7 +49,7 @@ pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<T
     });
     group.bench_function("Parallel", |b| {
         b.iter(|| {
-            execute_revm_parallel(
+            pevm.execute_revm_parallel(
                 black_box(&storage),
                 black_box(&chain),
                 black_box(spec_id),

@@ -54,53 +54,337 @@ pub enum PevmError<C: PevmChain> {
 /// Execution result of a block
 pub type PevmResult<C> = Result<Vec<PevmTxExecutionResult>, PevmError<C>>;
 
+#[derive(Debug)]
 enum AbortReason {
     FallbackToSequential,
     ExecutionError(ExecutionError),
 }
 
-// TODO: Add a [Pevm] struct for long-lasting use to minimize
-// (de)allocations between runs.
+// TODO: Port more recyclable resources into here.
+#[derive(Debug, Default)]
+/// The main pevm struct that executes blocks.
+pub struct Pevm {
+    hasher: ahash::RandomState,
+    execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
+    abort_reason: OnceLock<AbortReason>,
+}
 
-/// Execute an Alloy block, which is becoming the "standard" format in Rust.
-/// TODO: Better error handling.
-pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
-    storage: &S,
-    chain: &C,
-    block: Block,
-    concurrency_level: NonZeroUsize,
-    force_sequential: bool,
-) -> PevmResult<C> {
-    let spec_id = chain
-        .get_block_spec(&block.header)
-        .map_err(PevmError::BlockSpecError)?;
-    let Some(block_env) = get_block_env(&block.header) else {
-        return Err(PevmError::MissingHeaderData);
-    };
-    let tx_envs = match block.transactions {
-        BlockTransactions::Full(txs) => txs
-            .into_iter()
-            .map(|tx| get_tx_env(chain, tx))
-            .collect::<Result<Vec<TxEnv>, TransactionParsingError<_>>>()
-            .map_err(PevmError::InvalidTransaction)?,
-        _ => return Err(PevmError::MissingTransactionData),
-    };
-    // TODO: Continue to fine tune this condition.
-    if force_sequential
-        || tx_envs.len() < concurrency_level.into()
-        || block.header.gas_used < 4_000_000
-    {
-        execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
-    } else {
-        execute_revm_parallel(
-            storage,
-            chain,
-            spec_id,
-            block_env,
-            tx_envs,
-            concurrency_level,
-        )
+impl Pevm {
+    /// Execute an Alloy block, which is becoming the "standard" format in Rust.
+    /// TODO: Better error handling.
+    pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
+        &mut self,
+        storage: &S,
+        chain: &C,
+        block: Block,
+        concurrency_level: NonZeroUsize,
+        force_sequential: bool,
+    ) -> PevmResult<C> {
+        let spec_id = chain
+            .get_block_spec(&block.header)
+            .map_err(PevmError::BlockSpecError)?;
+        let Some(block_env) = get_block_env(&block.header) else {
+            return Err(PevmError::MissingHeaderData);
+        };
+        let tx_envs = match block.transactions {
+            BlockTransactions::Full(txs) => txs
+                .into_iter()
+                .map(|tx| get_tx_env(chain, tx))
+                .collect::<Result<Vec<TxEnv>, TransactionParsingError<_>>>()
+                .map_err(PevmError::InvalidTransaction)?,
+            _ => return Err(PevmError::MissingTransactionData),
+        };
+        // TODO: Continue to fine tune this condition.
+        if force_sequential
+            || tx_envs.len() < concurrency_level.into()
+            || block.header.gas_used < 4_000_000
+        {
+            execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
+        } else {
+            self.execute_revm_parallel(
+                storage,
+                chain,
+                spec_id,
+                block_env,
+                tx_envs,
+                concurrency_level,
+            )
+        }
     }
+
+    /// Execute an REVM block.
+    // Ideally everyone would go through the [Alloy] interface. This one is currently
+    // useful for testing, and for users that are heavily tied to Revm like Reth.
+    pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
+        &mut self,
+        storage: &S,
+        chain: &C,
+        spec_id: SpecId,
+        block_env: BlockEnv,
+        txs: Vec<TxEnv>,
+        concurrency_level: NonZeroUsize,
+    ) -> PevmResult<C> {
+        if txs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let block_size = txs.len();
+
+        // Accumulated data to be defer-dropped once.
+        // TODO: Provide more explicit garbage collecting configs for users.
+        // For instance, to have a dedicated thread (pool) for cleanup.
+        // Struct is also clearer than tuple here?
+        let data = DeferDrop::new((
+            chain.build_mv_memory(&self.hasher, &block_env, &txs),
+            Scheduler::new(block_size),
+            txs,
+        ));
+        let mv_memory = &data.0;
+        let scheduler = &data.1;
+        let txs = &data.2;
+        // End of accumulated defer-dropped data
+
+        let vm = Vm::new(
+            &self.hasher,
+            storage,
+            mv_memory,
+            chain,
+            &block_env,
+            txs,
+            spec_id,
+        );
+
+        if block_size > self.execution_results.len() {
+            let additional = block_size - self.execution_results.len();
+            self.execution_results.reserve(additional);
+            for _ in 0..additional {
+                self.execution_results.push(Mutex::new(None));
+            }
+        }
+
+        // TODO: Better thread handling
+        thread::scope(|scope| {
+            for _ in 0..concurrency_level.into() {
+                scope.spawn(|| {
+                    let mut task = scheduler.next_task();
+                    while task.is_some() {
+                        task = match task.unwrap() {
+                            Task::Execution(tx_version) => {
+                                self.try_execute(&vm, scheduler, tx_version)
+                            }
+                            Task::Validation(tx_version) => {
+                                try_validate(mv_memory, scheduler, &tx_version)
+                            }
+                        };
+
+                        // TODO: Have different functions or an enum for the caller to choose
+                        // the handling behaviour when a transaction's EVM execution fails.
+                        // Parallel block builders would like to exclude such transaction,
+                        // verifiers may want to exit early to save CPU cycles, while testers
+                        // may want to collect all execution results. We are exiting early as
+                        // the default behaviour for now.
+                        if self.abort_reason.get().is_some() {
+                            break;
+                        }
+
+                        if task.is_none() {
+                            task = scheduler.next_task();
+                        }
+                    }
+                });
+            }
+        });
+
+        if let Some(abort_reason) = self.abort_reason.take() {
+            match abort_reason {
+                AbortReason::FallbackToSequential => {
+                    return execute_revm_sequential(
+                        storage,
+                        chain,
+                        spec_id,
+                        block_env,
+                        DeferDrop::into_inner(data).2,
+                    )
+                }
+                AbortReason::ExecutionError(err) => {
+                    return Err(PevmError::ExecutionError(format!("{err:?}")))
+                }
+            }
+        }
+
+        let mut fully_evaluated_results = Vec::with_capacity(block_size);
+        let mut cumulative_gas_used: u128 = 0;
+        for i in 0..block_size {
+            let mut execution_result = index_mutex!(self.execution_results, i).take().unwrap();
+            cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
+            execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
+            fully_evaluated_results.push(execution_result);
+        }
+
+        // We fully evaluate (the balance and nonce of) the beneficiary account
+        // and raw transfer recipients that may have been atomically updated.
+        for address in mv_memory.consume_lazy_addresses() {
+            let location_hash = self.hasher.hash_one(MemoryLocation::Basic(address));
+            if let Some(write_history) = mv_memory.consume_location(&location_hash) {
+                let mut balance = U256::ZERO;
+                let mut nonce = 0;
+                // Read from storage if the first multi-version entry is not an absolute value.
+                if !matches!(
+                    write_history.first_key_value(),
+                    Some((_, MemoryEntry::Data(_, MemoryValue::Basic(_))))
+                ) {
+                    if let Ok(Some(account)) = storage.basic(&address) {
+                        balance = account.balance;
+                        nonce = account.nonce;
+                    }
+                }
+                // Accounts that take implicit writes like the beneficiary account can be contract!
+                let code_hash = match storage.code_hash(&address) {
+                    Ok(code_hash) => code_hash,
+                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
+                };
+                let code = if let Some(code_hash) = &code_hash {
+                    match storage.code_by_hash(code_hash) {
+                        Ok(code) => code,
+                        Err(err) => return Err(PevmError::StorageError(err.to_string())),
+                    }
+                } else {
+                    None
+                };
+
+                // TODO: Assert that the evaluated nonce matches the tx's.
+                for (tx_idx, memory_entry) in write_history {
+                    match memory_entry {
+                        MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
+                            // TODO: Assert that there must be no self-destructed
+                            // accounts here.
+                            balance = info.balance;
+                            nonce = info.nonce;
+                        }
+                        MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
+                            balance += addition;
+                        }
+                        MemoryEntry::Data(_, MemoryValue::LazySender(addition)) => {
+                            // We must re-do extra sender balance checks as we mock
+                            // the max value in [Vm] during execution. Ideally we
+                            // can turn off these redundant checks in revm.
+                            // TODO: Guard against overflows & underflows
+                            // Ideally we would share these calculations with revm
+                            // (using their utility functions).
+                            let tx = unsafe { txs.get_unchecked(tx_idx) };
+                            let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
+                            if let Some(blob_fee) = tx.max_fee_per_blob_gas {
+                                max_fee +=
+                                    U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee);
+                            }
+                            if balance < max_fee {
+                                return Err(PevmError::ExecutionError(
+                                    "Transaction(LackOfFundForMaxFee)".to_string(),
+                                ));
+                            }
+                            balance -= addition;
+                            // End of overflow TODO
+
+                            nonce += 1;
+                        }
+                        // TODO: Better error handling
+                        _ => unreachable!(),
+                    }
+
+                    // SAFETY: The multi-version data structure should not leak an index over block size.
+                    let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(tx_idx) };
+                    let account = tx_result.state.entry(address).or_default();
+                    // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
+                    if spec_id.is_enabled_in(SPURIOUS_DRAGON)
+                        && code_hash.is_none()
+                        && nonce == 0
+                        && balance == U256::ZERO
+                    {
+                        *account = None;
+                    } else if let Some(account) = account {
+                        // Explicit write: only overwrite the account info in case there are storage changes
+                        // TODO: Can code be changed mid-block?
+                        account.balance = balance;
+                        account.nonce = nonce;
+                    } else {
+                        // Implicit write: e.g. gas payments to the beneficiary account,
+                        // which doesn't have explicit writes in [tx_result.state]
+                        *account = Some(EvmAccount {
+                            balance,
+                            nonce,
+                            code_hash,
+                            code: code.clone(),
+                            storage: AHashMap::default(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(fully_evaluated_results)
+    }
+
+    fn try_execute<S: Storage, C: PevmChain>(
+        &self,
+        vm: &Vm<S, C>,
+        scheduler: &Scheduler,
+        tx_version: TxVersion,
+    ) -> Option<Task> {
+        loop {
+            return match vm.execute(&tx_version) {
+                VmExecutionResult::Retry => {
+                    if self.abort_reason.get().is_none() {
+                        continue;
+                    }
+                    None
+                }
+                VmExecutionResult::FallbackToSequential => {
+                    scheduler.abort();
+                    self.abort_reason
+                        .get_or_init(|| AbortReason::FallbackToSequential);
+                    None
+                }
+                VmExecutionResult::ReadError { blocking_tx_idx } => {
+                    if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
+                        && self.abort_reason.get().is_none()
+                    {
+                        // Retry the execution immediately if the blocking transaction was
+                        // re-executed by the time we can add it as a dependency.
+                        continue;
+                    }
+                    None
+                }
+                VmExecutionResult::ExecutionError(err) => {
+                    scheduler.abort();
+                    self.abort_reason
+                        .get_or_init(|| AbortReason::ExecutionError(err));
+                    None
+                }
+                VmExecutionResult::Ok {
+                    execution_result,
+                    wrote_new_location,
+                    next_validation_idx,
+                } => {
+                    *index_mutex!(self.execution_results, tx_version.tx_idx) =
+                        Some(execution_result);
+                    scheduler.finish_execution(tx_version, wrote_new_location, next_validation_idx)
+                }
+            };
+        }
+    }
+}
+
+fn try_validate(
+    mv_memory: &MvMemory,
+    scheduler: &Scheduler,
+    tx_version: &TxVersion,
+) -> Option<Task> {
+    let read_set_valid = mv_memory.validate_read_locations(tx_version.tx_idx);
+    let aborted = !read_set_valid && scheduler.try_validation_abort(tx_version);
+    if aborted {
+        mv_memory.convert_writes_to_estimates(tx_version.tx_idx);
+    }
+    scheduler.finish_validation(tx_version, aborted)
 }
 
 /// Execute REVM transactions sequentially.
@@ -135,266 +419,4 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
         }
     }
     Ok(results)
-}
-
-/// Execute an REVM block.
-// Ideally everyone would go through the [Alloy] interface. This one is currently
-// useful for testing, and for users that are heavily tied to Revm like Reth.
-pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
-    storage: &S,
-    chain: &C,
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    txs: Vec<TxEnv>,
-    concurrency_level: NonZeroUsize,
-) -> PevmResult<C> {
-    if txs.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let block_size = txs.len();
-    let hasher = ahash::RandomState::new();
-
-    // Accumulated data to be defer-dropped once.
-    // TODO: Provide more explicit garbage collecting configs for users.
-    // For instance, to have a dedicated thread (pool) for cleanup.
-    // Struct is also clearer than tuple here?
-    let data = DeferDrop::new((
-        chain.build_mv_memory(&hasher, &block_env, &txs),
-        Scheduler::new(block_size),
-        txs,
-    ));
-    let mv_memory = &data.0;
-    let scheduler = &data.1;
-    let txs = &data.2;
-    // End of accumulated defer-dropped data
-
-    let vm = Vm::new(&hasher, storage, mv_memory, chain, &block_env, txs, spec_id);
-
-    let mut abort_reason = OnceLock::new();
-    let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
-
-    // TODO: Better thread handling
-    thread::scope(|scope| {
-        for _ in 0..concurrency_level.into() {
-            scope.spawn(|| {
-                let mut task = scheduler.next_task();
-                while task.is_some() {
-                    task = match task.unwrap() {
-                        Task::Execution(tx_version) => try_execute(
-                            &vm,
-                            scheduler,
-                            &abort_reason,
-                            &execution_results,
-                            tx_version,
-                        ),
-                        Task::Validation(tx_version) => {
-                            try_validate(mv_memory, scheduler, &tx_version)
-                        }
-                    };
-
-                    // TODO: Have different functions or an enum for the caller to choose
-                    // the handling behaviour when a transaction's EVM execution fails.
-                    // Parallel block builders would like to exclude such transaction,
-                    // verifiers may want to exit early to save CPU cycles, while testers
-                    // may want to collect all execution results. We are exiting early as
-                    // the default behaviour for now.
-                    if abort_reason.get().is_some() {
-                        break;
-                    }
-
-                    if task.is_none() {
-                        task = scheduler.next_task();
-                    }
-                }
-            });
-        }
-    });
-
-    if let Some(abort_reason) = abort_reason.take() {
-        match abort_reason {
-            AbortReason::FallbackToSequential => {
-                return execute_revm_sequential(
-                    storage,
-                    chain,
-                    spec_id,
-                    block_env,
-                    DeferDrop::into_inner(data).2,
-                )
-            }
-            AbortReason::ExecutionError(err) => {
-                return Err(PevmError::ExecutionError(format!("{err:?}")))
-            }
-        }
-    }
-
-    let mut fully_evaluated_results = Vec::with_capacity(block_size);
-    let mut cumulative_gas_used: u128 = 0;
-    for mutex in execution_results {
-        let mut execution_result = mutex.into_inner().unwrap().unwrap();
-        cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
-        execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
-        fully_evaluated_results.push(execution_result);
-    }
-
-    // We fully evaluate (the balance and nonce of) the beneficiary account
-    // and raw transfer recipients that may have been atomically updated.
-    for address in mv_memory.consume_lazy_addresses() {
-        let location_hash = hasher.hash_one(MemoryLocation::Basic(address));
-        if let Some(write_history) = mv_memory.consume_location(&location_hash) {
-            let mut balance = U256::ZERO;
-            let mut nonce = 0;
-            // Read from storage if the first multi-version entry is not an absolute value.
-            if !matches!(
-                write_history.first_key_value(),
-                Some((_, MemoryEntry::Data(_, MemoryValue::Basic(_))))
-            ) {
-                if let Ok(Some(account)) = storage.basic(&address) {
-                    balance = account.balance;
-                    nonce = account.nonce;
-                }
-            }
-            // Accounts that take implicit writes like the beneficiary account can be contract!
-            let code_hash = match storage.code_hash(&address) {
-                Ok(code_hash) => code_hash,
-                Err(err) => return Err(PevmError::StorageError(err.to_string())),
-            };
-            let code = if let Some(code_hash) = &code_hash {
-                match storage.code_by_hash(code_hash) {
-                    Ok(code) => code,
-                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
-                }
-            } else {
-                None
-            };
-
-            // TODO: Assert that the evaluated nonce matches the tx's.
-            for (tx_idx, memory_entry) in write_history {
-                match memory_entry {
-                    MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                        // TODO: Assert that there must be no self-destructed
-                        // accounts here.
-                        balance = info.balance;
-                        nonce = info.nonce;
-                    }
-                    MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
-                        balance += addition;
-                    }
-                    MemoryEntry::Data(_, MemoryValue::LazySender(addition)) => {
-                        // We must re-do extra sender balance checks as we mock
-                        // the max value in [Vm] during execution. Ideally we
-                        // can turn off these redundant checks in revm.
-                        // TODO: Guard against overflows & underflows
-                        // Ideally we would share these calculations with revm
-                        // (using their utility functions).
-                        let tx = unsafe { txs.get_unchecked(tx_idx) };
-                        let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
-                        if let Some(blob_fee) = tx.max_fee_per_blob_gas {
-                            max_fee += U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee);
-                        }
-                        if balance < max_fee {
-                            return Err(PevmError::ExecutionError(
-                                "Transaction(LackOfFundForMaxFee)".to_string(),
-                            ));
-                        }
-                        balance -= addition;
-                        // End of overflow TODO
-
-                        nonce += 1;
-                    }
-                    // TODO: Better error handling
-                    _ => unreachable!(),
-                }
-
-                // SAFETY: The multi-version data structure should not leak an index over block size.
-                let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(tx_idx) };
-                let account = tx_result.state.entry(address).or_default();
-                // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
-                if spec_id.is_enabled_in(SPURIOUS_DRAGON)
-                    && code_hash.is_none()
-                    && nonce == 0
-                    && balance == U256::ZERO
-                {
-                    *account = None;
-                } else if let Some(account) = account {
-                    // Explicit write: only overwrite the account info in case there are storage changes
-                    // TODO: Can code be changed mid-block?
-                    account.balance = balance;
-                    account.nonce = nonce;
-                } else {
-                    // Implicit write: e.g. gas payments to the beneficiary account,
-                    // which doesn't have explicit writes in [tx_result.state]
-                    *account = Some(EvmAccount {
-                        balance,
-                        nonce,
-                        code_hash,
-                        code: code.clone(),
-                        storage: AHashMap::default(),
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(fully_evaluated_results)
-}
-
-fn try_execute<S: Storage, C: PevmChain>(
-    vm: &Vm<S, C>,
-    scheduler: &Scheduler,
-    abort_reason: &OnceLock<AbortReason>,
-    execution_results: &[Mutex<Option<PevmTxExecutionResult>>],
-    tx_version: TxVersion,
-) -> Option<Task> {
-    loop {
-        return match vm.execute(&tx_version) {
-            VmExecutionResult::Retry => {
-                if abort_reason.get().is_none() {
-                    continue;
-                }
-                None
-            }
-            VmExecutionResult::FallbackToSequential => {
-                scheduler.abort();
-                abort_reason.get_or_init(|| AbortReason::FallbackToSequential);
-                None
-            }
-            VmExecutionResult::ReadError { blocking_tx_idx } => {
-                if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
-                    && abort_reason.get().is_none()
-                {
-                    // Retry the execution immediately if the blocking transaction was
-                    // re-executed by the time we can add it as a dependency.
-                    continue;
-                }
-                None
-            }
-            VmExecutionResult::ExecutionError(err) => {
-                scheduler.abort();
-                abort_reason.get_or_init(|| AbortReason::ExecutionError(err));
-                None
-            }
-            VmExecutionResult::Ok {
-                execution_result,
-                wrote_new_location,
-                next_validation_idx,
-            } => {
-                *index_mutex!(execution_results, tx_version.tx_idx) = Some(execution_result);
-                scheduler.finish_execution(tx_version, wrote_new_location, next_validation_idx)
-            }
-        };
-    }
-}
-
-fn try_validate(
-    mv_memory: &MvMemory,
-    scheduler: &Scheduler,
-    tx_version: &TxVersion,
-) -> Option<Task> {
-    let read_set_valid = mv_memory.validate_read_locations(tx_version.tx_idx);
-    let aborted = !read_set_valid && scheduler.try_validation_abort(tx_version);
-    if aborted {
-        mv_memory.convert_writes_to_estimates(tx_version.tx_idx);
-    }
-    scheduler.finish_validation(tx_version, aborted)
 }
