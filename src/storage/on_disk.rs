@@ -17,6 +17,8 @@ use super::{AccountBasic, EvmAccount, EvmCode, Storage};
 pub struct OnDiskStorage {
     db: Database<NoWriteMap>,
     cache_accounts: Mutex<AHashMap<Address, Option<EvmAccount>>>,
+    cache_bytecodes: Mutex<AHashMap<B256, Option<EvmCode>>>,
+    cache_block_hashes: Mutex<AHashMap<u64, B256>>,
 }
 
 impl OnDiskStorage {
@@ -32,6 +34,8 @@ impl OnDiskStorage {
         Ok(Self {
             db,
             cache_accounts: Mutex::default(),
+            cache_bytecodes: Mutex::default(),
+            cache_block_hashes: Mutex::default(),
         })
     }
 
@@ -66,7 +70,9 @@ impl OnDiskStorage {
 
     /// Clear cache
     pub fn clear_cache(&self) {
-        self.cache_accounts.lock().unwrap().clear()
+        self.cache_accounts.lock().unwrap().clear();
+        self.cache_bytecodes.lock().unwrap().clear();
+        self.cache_block_hashes.lock().unwrap().clear();
     }
 }
 
@@ -89,6 +95,10 @@ impl Storage for OnDiskStorage {
     }
 
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
+        if let Some(code) = self.cache_bytecodes.lock().unwrap().get(code_hash) {
+            return Ok(code.clone());
+        }
+
         let tx = self.db.begin_ro_txn()?;
         let table = tx.open_table(Some("bytecodes"))?;
         let bytes: Option<Vec<u8>> = tx.get(&table, code_hash.as_ref())?;
@@ -99,6 +109,11 @@ impl Storage for OnDiskStorage {
             ),
             None => None,
         };
+
+        self.cache_bytecodes
+            .lock()
+            .unwrap()
+            .insert(*code_hash, code.clone());
         Ok(code)
     }
 
@@ -121,14 +136,21 @@ impl Storage for OnDiskStorage {
     }
 
     fn block_hash(&self, number: &u64) -> Result<B256, Self::Error> {
+        if let Some(block_hash) = self.cache_block_hashes.lock().unwrap().get(number) {
+            return Ok(*block_hash);
+        }
+
         let tx = self.db.begin_ro_txn()?;
-        let Some(block_hash) = tx
+        let block_hash = tx
             .open_table(Some("block_hashes"))
             .and_then(|table| tx.get(&table, B64::from(*number).as_ref()))
             .map(|bytes: Option<[u8; 32]>| bytes.map(B256::from))?
-        else {
-            return Ok(keccak256(number.to_string().as_bytes()));
-        };
+            .unwrap_or_else(|| keccak256(number.to_string().as_bytes()));
+
+        self.cache_block_hashes
+            .lock()
+            .unwrap()
+            .insert(*number, block_hash);
         Ok(block_hash)
     }
 }
