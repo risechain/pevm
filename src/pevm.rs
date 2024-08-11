@@ -152,18 +152,24 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
         return Ok(Vec::new());
     }
 
-    // Preprocess locations
     let block_size = txs.len();
     let hasher = ahash::RandomState::new();
-    // Initialize the remaining core components
-    // TODO: Provide more explicit garbage collecting configs for users over random background
-    // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
-    let mv_memory = DeferDrop::new(chain.build_mv_memory(&hasher, &block_env, &txs));
-    let txs = DeferDrop::new(txs);
-    let vm = Vm::new(
-        &hasher, storage, &mv_memory, chain, &block_env, &txs, spec_id,
-    );
-    let scheduler = DeferDrop::new(Scheduler::new(block_size));
+
+    // Accumulated data to be defer-dropped once.
+    // TODO: Provide more explicit garbage collecting configs for users.
+    // For instance, to have a dedicated thread (pool) for cleanup.
+    // Struct is also clearer than tuple here?
+    let data = DeferDrop::new((
+        chain.build_mv_memory(&hasher, &block_env, &txs),
+        Scheduler::new(block_size),
+        txs,
+    ));
+    let mv_memory = &data.0;
+    let scheduler = &data.1;
+    let txs = &data.2;
+    // End of accumulated defer-dropped data
+
+    let vm = Vm::new(&hasher, storage, mv_memory, chain, &block_env, txs, spec_id);
 
     let mut abort_reason = OnceLock::new();
     let execution_results: Vec<_> = (0..block_size).map(|_| Mutex::new(None)).collect();
@@ -176,15 +182,15 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                 while task.is_some() {
                     task = match task.unwrap() {
                         Task::Execution(tx_version) => try_execute(
-                            &mv_memory,
+                            mv_memory,
                             &vm,
-                            &scheduler,
+                            scheduler,
                             &abort_reason,
                             &execution_results,
                             tx_version,
                         ),
                         Task::Validation(tx_version) => {
-                            try_validate(&mv_memory, &scheduler, &tx_version)
+                            try_validate(mv_memory, scheduler, &tx_version)
                         }
                     };
 
@@ -214,7 +220,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                     chain,
                     spec_id,
                     block_env,
-                    DeferDrop::into_inner(txs),
+                    DeferDrop::into_inner(data).2,
                 )
             }
             AbortReason::ExecutionError(err) => {
@@ -282,7 +288,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                         // TODO: Guard against overflows & underflows
                         // Ideally we would share these calculations with revm
                         // (using their utility functions).
-                        let tx = &unsafe { txs.get_unchecked(tx_idx) };
+                        let tx = unsafe { txs.get_unchecked(tx_idx) };
                         let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
                         if let Some(blob_fee) = tx.max_fee_per_blob_gas {
                             max_fee += U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee);
