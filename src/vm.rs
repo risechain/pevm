@@ -249,33 +249,16 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
-            // We enforce consecutive indexes for locations that all transactions write to like
-            // the beneficiary balance. The goal is to not wastefully evaluate when we know
-            // we're missing data -- let's just depend on the missing data instead.
-            let need_consecutive_idxs = location_hash == self.vm.beneficiary_location_hash;
-            // While we can depend on the precise missing transaction index (known during lazy evaluation),
-            // through benchmark constantly retrying via the previous transaction index performs much better.
-            // TODO: Fine-tune this now that we can also retry directly without waiting for a lower tx.
-            let reschedule = Err(ReadError::BlockingIndex(self.tx_idx - 1));
-
             if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
-                let mut current_idx = self.tx_idx;
-                let mut iter = written_transactions.range(..current_idx);
+                let mut iter = written_transactions.range(..self.tx_idx);
 
                 // Fully evaluate lazy updates
                 loop {
                     match iter.next_back() {
                         Some((blocking_idx, MemoryEntry::Estimate)) => {
-                            return if need_consecutive_idxs {
-                                reschedule
-                            } else {
-                                Err(ReadError::BlockingIndex(*blocking_idx))
-                            }
+                            return Err(ReadError::BlockingIndex(*blocking_idx))
                         }
                         Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
-                            if need_consecutive_idxs && closest_idx != &(current_idx - 1) {
-                                return reschedule;
-                            }
                             // About to push a new origin
                             // Inconsistent: new origin will be longer than the previous!
                             if has_prev_origins && read_origins.len() == new_origins.len() {
@@ -309,7 +292,6 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                                         positive_addition = *addition >= balance_addition;
                                         balance_addition = balance_addition.abs_diff(*addition);
                                     }
-                                    current_idx = closest_idx;
                                 }
                                 MemoryValue::LazySender(subtraction) => {
                                     if positive_addition {
@@ -319,21 +301,15 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                                         balance_addition += subtraction;
                                     }
                                     nonce_addition += 1;
-                                    current_idx = closest_idx;
                                 }
                                 _ => return Err(ReadError::InvalidMemoryLocationType),
                             }
                         }
                         None => {
-                            if need_consecutive_idxs && current_idx > &0 {
-                                return reschedule;
-                            }
                             break;
                         }
                     }
                 }
-            } else if need_consecutive_idxs {
-                return reschedule;
             }
         }
 
