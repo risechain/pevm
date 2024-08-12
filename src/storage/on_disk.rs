@@ -37,6 +37,7 @@ impl OnDiskStorage {
                 let tx = self.db.begin_ro_txn()?;
                 let table = tx.open_table(Some("accounts"))?;
                 let bytes: Option<Vec<u8>> = tx.get(&table, address.as_ref())?;
+                drop(tx);
                 let account: Option<EvmAccount> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
@@ -73,6 +74,7 @@ impl Storage for OnDiskStorage {
                 let tx = self.db.begin_ro_txn()?;
                 let table = tx.open_table(Some("bytecodes"))?;
                 let bytes: Option<Vec<u8>> = tx.get(&table, code_hash.as_ref())?;
+                drop(tx);
                 let code: Option<EvmCode> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
@@ -109,12 +111,13 @@ impl Storage for OnDiskStorage {
             Entry::Occupied(occupied) => Ok(*occupied.get()),
             Entry::Vacant(vacant) => {
                 let tx = self.db.begin_ro_txn()?;
-                let block_hash = tx
-                    .open_table(Some("block_hashes"))
-                    .and_then(|table| tx.get(&table, B64::from(*number).as_ref()))
-                    .map(|bytes: Option<[u8; 32]>| bytes.map(B256::from))?
-                    .unwrap_or_else(|| keccak256(number.to_string().as_bytes()));
-
+                let table = tx.open_table(Some("block_hashes"))?;
+                let bytes: Option<[u8; 32]> = tx.get(&table, B64::from(*number).as_ref())?;
+                drop(tx);
+                let block_hash = match bytes {
+                    Some(bytes) => B256::from(bytes),
+                    None => keccak256(number.to_string().as_bytes()),
+                };
                 vacant.insert(block_hash);
                 Ok(block_hash)
             }
