@@ -2,13 +2,13 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::BufReader,
+    path::PathBuf,
 };
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use libmdbx::DatabaseOptions;
-use pevm::{Bytecodes, EvmAccount, InMemoryStorage, OnDiskStorage};
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
@@ -49,7 +49,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, OnDiskStorage)) {
+pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, &PathBuf)) {
     // Parse bytecodes
     let bytecodes: Bytecodes = bincode::deserialize_from(BufReader::new(
         File::open("data/bytecodes.bincode").unwrap(),
@@ -83,10 +83,10 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, 
                 })
                 .unwrap_or_default();
 
-        let mut db_dir = std::env::temp_dir();
-        db_dir.push(block_number);
+        let mut mdbx_dir = std::env::temp_dir();
+        mdbx_dir.push(block_number);
         mdbx::create_db_dir(
-            &db_dir,
+            &mdbx_dir,
             bytecodes.iter(),
             accounts.iter(),
             block_hashes.iter(),
@@ -95,15 +95,8 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage, 
         handler(
             block,
             InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
-            OnDiskStorage::open(
-                &db_dir,
-                DatabaseOptions {
-                    max_tables: Some(16),
-                    ..DatabaseOptions::default()
-                },
-            )
-            .unwrap(),
+            &mdbx_dir,
         );
-        std::fs::remove_dir_all(db_dir).unwrap();
+        std::fs::remove_dir_all(mdbx_dir).unwrap();
     }
 }

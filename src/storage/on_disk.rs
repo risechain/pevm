@@ -48,13 +48,6 @@ impl OnDiskStorage {
             }
         }
     }
-
-    /// Clear cache
-    pub fn clear_cache(&self) {
-        self.cache_accounts.clear();
-        self.cache_bytecodes.clear();
-        self.cache_block_hashes.clear();
-    }
 }
 
 impl Storage for OnDiskStorage {

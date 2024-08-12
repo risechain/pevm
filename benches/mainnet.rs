@@ -11,7 +11,8 @@ use std::{
 };
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::chain::PevmEthereum;
+use libmdbx::DatabaseOptions;
+use pevm::{chain::PevmEthereum, OnDiskStorage};
 
 // Better project structure
 #[path = "../tests/common/mod.rs"]
@@ -29,7 +30,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         // with many dependencies.
         .min(NonZeroUsize::new(8).unwrap());
 
-    common::for_each_block_from_disk(|block, in_memory_storage, on_disk_storage| {
+    common::for_each_block_from_disk(|block, in_memory_storage, mdbx_dir| {
         let mut group = c.benchmark_group(format!(
             "Block {}({} txs, {} gas)",
             block.header.number.unwrap(),
@@ -62,6 +63,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut total_duration = Duration::ZERO;
                 for _i in 0..iters {
+                    let on_disk_storage = OnDiskStorage::open(
+                        mdbx_dir.clone(),
+                        DatabaseOptions {
+                            max_tables: Some(16),
+                            ..DatabaseOptions::default()
+                        },
+                    )
+                    .unwrap();
                     let start = Instant::now();
                     pevm::execute(
                         black_box(&on_disk_storage),
@@ -72,7 +81,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     )
                     .unwrap();
                     total_duration += start.elapsed();
-                    on_disk_storage.clear_cache();
                 }
                 total_duration
             })
@@ -82,6 +90,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut total_duration = Duration::ZERO;
                 for _i in 0..iters {
+                    let on_disk_storage = OnDiskStorage::open(
+                        mdbx_dir.clone(),
+                        DatabaseOptions {
+                            max_tables: Some(16),
+                            ..DatabaseOptions::default()
+                        },
+                    )
+                    .unwrap();
                     let start = Instant::now();
                     pevm::execute(
                         black_box(&on_disk_storage),
@@ -92,7 +108,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     )
                     .unwrap();
                     total_duration += start.elapsed();
-                    on_disk_storage.clear_cache();
                 }
                 total_duration
             })
