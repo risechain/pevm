@@ -3,6 +3,11 @@ name = "pevm"
 version = "0.1.0"
 edition = "2021"
 
+[workspace.package]
+version = "1.0.1"
+edition = "2021"
+rust-version = "1.79"
+
 [dependencies]
 # Put this behind a feature flag if there are use cases & users
 # that need more security guarantees even for internally hashing
@@ -36,7 +41,7 @@ tokio = { version = "1.39.2", features = ["rt-multi-thread"] }
 # On-Disk Storage dependencies
 # TODO: Mark these deps as optional under a feature.
 # https://doc.rust-lang.org/cargo/reference/features.html#optional-dependencies
-libmdbx = "0.5.0"
+reth-libmdbx = { path = "crates/libmdbx-rs" }
 bincode = "1.3.3"
 
 [dev-dependencies]

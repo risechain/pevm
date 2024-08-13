@@ -2,14 +2,14 @@ use std::path::Path;
 
 use alloy_primitives::{keccak256, Address, B256, B64, U256};
 use dashmap::{DashMap, Entry, OccupiedEntry};
-use libmdbx::{Database, DatabaseOptions, NoWriteMap};
+use reth_libmdbx::Environment;
 
 use super::{AccountBasic, EvmAccount, EvmCode, Storage};
 
 /// A storage that reads data from an on-disk MDBX database.
 #[derive(Debug)]
 pub struct OnDiskStorage {
-    db: Database<NoWriteMap>,
+    env: Environment,
     cache_accounts: DashMap<Address, Option<EvmAccount>>,
     cache_bytecodes: DashMap<B256, Option<EvmCode>>,
     cache_block_hashes: DashMap<u64, B256>,
@@ -17,10 +17,9 @@ pub struct OnDiskStorage {
 
 impl OnDiskStorage {
     /// Opens the on-disk storage at the specified path.
-    pub fn open(path: impl AsRef<Path>, options: DatabaseOptions) -> Result<Self, libmdbx::Error> {
-        let db = Database::open_with_options(path, options)?;
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, reth_libmdbx::Error> {
         Ok(Self {
-            db,
+            env: Environment::builder().set_max_dbs(16).open(path.as_ref())?,
             cache_accounts: DashMap::default(),
             cache_bytecodes: DashMap::default(),
             cache_block_hashes: DashMap::default(),
@@ -30,18 +29,18 @@ impl OnDiskStorage {
     fn load_account(
         &self,
         address: Address,
-    ) -> Result<OccupiedEntry<Address, Option<EvmAccount>>, libmdbx::Error> {
+    ) -> Result<OccupiedEntry<Address, Option<EvmAccount>>, reth_libmdbx::Error> {
         match self.cache_accounts.entry(address) {
             Entry::Occupied(occupied) => Ok(occupied),
             Entry::Vacant(vacant) => {
-                let tx = self.db.begin_ro_txn()?;
-                let table = tx.open_table(Some("accounts"))?;
-                let bytes: Option<Vec<u8>> = tx.get(&table, address.as_ref())?;
+                let tx = self.env.begin_ro_txn()?;
+                let table = tx.open_db(Some("accounts"))?;
+                let bytes: Option<Vec<u8>> = tx.get(table.dbi(), address.as_ref())?;
                 drop(tx);
                 let account: Option<EvmAccount> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
-                            .map_err(|err| libmdbx::Error::DecodeError(err))?,
+                            .map_err(|_| reth_libmdbx::Error::DecodeError)?,
                     ),
                     None => None,
                 };
@@ -52,7 +51,7 @@ impl OnDiskStorage {
 }
 
 impl Storage for OnDiskStorage {
-    type Error = libmdbx::Error;
+    type Error = reth_libmdbx::Error;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
         let entry = self.load_account(*address)?;
@@ -71,14 +70,14 @@ impl Storage for OnDiskStorage {
         match self.cache_bytecodes.entry(*code_hash) {
             Entry::Occupied(occupied) => Ok(occupied.get().clone()),
             Entry::Vacant(vacant) => {
-                let tx = self.db.begin_ro_txn()?;
-                let table = tx.open_table(Some("bytecodes"))?;
-                let bytes: Option<Vec<u8>> = tx.get(&table, code_hash.as_ref())?;
+                let tx = self.env.begin_ro_txn()?;
+                let table = tx.open_db(Some("bytecodes"))?;
+                let bytes: Option<Vec<u8>> = tx.get(table.dbi(), code_hash.as_ref())?;
                 drop(tx);
                 let code: Option<EvmCode> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
-                            .map_err(|err| libmdbx::Error::DecodeError(err))?,
+                            .map_err(|_| reth_libmdbx::Error::DecodeError)?,
                     ),
                     None => None,
                 };
@@ -110,9 +109,9 @@ impl Storage for OnDiskStorage {
         match self.cache_block_hashes.entry(*number) {
             Entry::Occupied(occupied) => Ok(*occupied.get()),
             Entry::Vacant(vacant) => {
-                let tx = self.db.begin_ro_txn()?;
-                let table = tx.open_table(Some("block_hashes"))?;
-                let bytes: Option<[u8; 32]> = tx.get(&table, B64::from(*number).as_ref())?;
+                let tx = self.env.begin_ro_txn()?;
+                let table = tx.open_db(Some("block_hashes"))?;
+                let bytes: Option<[u8; 32]> = tx.get(table.dbi(), B64::from(*number).as_ref())?;
                 drop(tx);
                 let block_hash = match bytes {
                     Some(bytes) => B256::from(bytes),

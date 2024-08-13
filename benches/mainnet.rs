@@ -11,7 +11,6 @@ use std::{
 };
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use libmdbx::DatabaseOptions;
 use pevm::{chain::PevmEthereum, OnDiskStorage};
 
 // Better project structure
@@ -63,14 +62,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut total_duration = Duration::ZERO;
                 for _i in 0..iters {
-                    let on_disk_storage = OnDiskStorage::open(
-                        mdbx_dir.clone(),
-                        DatabaseOptions {
-                            max_tables: Some(16),
-                            ..DatabaseOptions::default()
-                        },
-                    )
-                    .unwrap();
+                    let on_disk_storage = OnDiskStorage::open(mdbx_dir).unwrap();
                     let start = Instant::now();
                     pevm::execute(
                         black_box(&on_disk_storage),
@@ -90,14 +82,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut total_duration = Duration::ZERO;
                 for _i in 0..iters {
-                    let on_disk_storage = OnDiskStorage::open(
-                        mdbx_dir.clone(),
-                        DatabaseOptions {
-                            max_tables: Some(16),
-                            ..DatabaseOptions::default()
-                        },
-                    )
-                    .unwrap();
+                    let on_disk_storage = OnDiskStorage::open(mdbx_dir).unwrap();
                     let start = Instant::now();
                     pevm::execute(
                         black_box(&on_disk_storage),

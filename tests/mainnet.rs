@@ -8,7 +8,6 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
-use libmdbx::DatabaseOptions;
 use reqwest::Url;
 use revm::db::CacheDB;
 use tokio::runtime::Runtime;
@@ -114,14 +113,7 @@ fn mainnet_blocks_from_disk() {
                 block.clone(),
                 true,
             );
-            let on_disk_storage = OnDiskStorage::open(
-                mdbx_dir.clone(),
-                DatabaseOptions {
-                    max_tables: Some(16),
-                    ..DatabaseOptions::default()
-                },
-            )
-            .unwrap();
+            let on_disk_storage = OnDiskStorage::open(mdbx_dir).unwrap();
             common::test_execute_alloy(
                 &on_disk_storage,
                 &PevmEthereum::mainnet(),
