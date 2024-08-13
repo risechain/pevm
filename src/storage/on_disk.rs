@@ -1,8 +1,8 @@
-use std::path::Path;
+use std::{path::Path, thread::ThreadId};
 
 use alloy_primitives::{keccak256, Address, B256, B64, U256};
 use dashmap::{DashMap, Entry, OccupiedEntry};
-use reth_libmdbx::Environment;
+use reth_libmdbx::{Database, Environment, Transaction, RO};
 
 use super::{AccountBasic, EvmAccount, EvmCode, Storage};
 
@@ -13,16 +13,29 @@ pub struct OnDiskStorage {
     cache_accounts: DashMap<Address, Option<EvmAccount>>,
     cache_bytecodes: DashMap<B256, Option<EvmCode>>,
     cache_block_hashes: DashMap<u64, B256>,
+    cache_txs: DashMap<ThreadId, Transaction<RO>>,
+    table_accounts: Database,
+    table_bytecodes: Database,
+    table_block_hashes: Database,
 }
 
 impl OnDiskStorage {
     /// Opens the on-disk storage at the specified path.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, reth_libmdbx::Error> {
+        let env = Environment::builder().set_max_dbs(16).open(path.as_ref())?;
+        let tx = env.begin_ro_txn()?;
+        let table_accounts = tx.open_db(Some("accounts"))?;
+        let table_bytecodes = tx.open_db(Some("bytecodes"))?;
+        let table_block_hashes = tx.open_db(Some("block_hashes"))?;
         Ok(Self {
-            env: Environment::builder().set_max_dbs(16).open(path.as_ref())?,
+            env,
             cache_accounts: DashMap::default(),
             cache_bytecodes: DashMap::default(),
             cache_block_hashes: DashMap::default(),
+            cache_txs: DashMap::default(),
+            table_accounts,
+            table_bytecodes,
+            table_block_hashes,
         })
     }
 
@@ -33,10 +46,13 @@ impl OnDiskStorage {
         match self.cache_accounts.entry(address) {
             Entry::Occupied(occupied) => Ok(occupied),
             Entry::Vacant(vacant) => {
-                let tx = self.env.begin_ro_txn()?;
-                let table = tx.open_db(Some("accounts"))?;
-                let bytes: Option<Vec<u8>> = tx.get(table.dbi(), address.as_ref())?;
-                drop(tx);
+                let tx_ref = self
+                    .cache_txs
+                    .entry(std::thread::current().id())
+                    .or_insert_with(|| self.env.begin_ro_txn().unwrap());
+                let bytes: Option<Vec<u8>> = tx_ref
+                    .value()
+                    .get(self.table_accounts.dbi(), address.as_ref())?;
                 let account: Option<EvmAccount> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
@@ -70,10 +86,13 @@ impl Storage for OnDiskStorage {
         match self.cache_bytecodes.entry(*code_hash) {
             Entry::Occupied(occupied) => Ok(occupied.get().clone()),
             Entry::Vacant(vacant) => {
-                let tx = self.env.begin_ro_txn()?;
-                let table = tx.open_db(Some("bytecodes"))?;
-                let bytes: Option<Vec<u8>> = tx.get(table.dbi(), code_hash.as_ref())?;
-                drop(tx);
+                let tx_ref = self
+                    .cache_txs
+                    .entry(std::thread::current().id())
+                    .or_insert_with(|| self.env.begin_ro_txn().unwrap());
+                let bytes: Option<Vec<u8>> = tx_ref
+                    .value()
+                    .get(self.table_bytecodes.dbi(), code_hash.as_ref())?;
                 let code: Option<EvmCode> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
@@ -109,10 +128,13 @@ impl Storage for OnDiskStorage {
         match self.cache_block_hashes.entry(*number) {
             Entry::Occupied(occupied) => Ok(*occupied.get()),
             Entry::Vacant(vacant) => {
-                let tx = self.env.begin_ro_txn()?;
-                let table = tx.open_db(Some("block_hashes"))?;
-                let bytes: Option<[u8; 32]> = tx.get(table.dbi(), B64::from(*number).as_ref())?;
-                drop(tx);
+                let tx_ref = self
+                    .cache_txs
+                    .entry(std::thread::current().id())
+                    .or_insert_with(|| self.env.begin_ro_txn().unwrap());
+                let bytes: Option<[u8; 32]> = tx_ref
+                    .value()
+                    .get(self.table_block_hashes.dbi(), B64::from(*number).as_ref())?;
                 let block_hash = match bytes {
                     Some(bytes) => B256::from(bytes),
                     None => keccak256(number.to_string().as_bytes()),
