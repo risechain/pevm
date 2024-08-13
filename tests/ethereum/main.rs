@@ -141,7 +141,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 ),
             ) {
                 // EIP-2681
-                (Some("TR_NonceHasMaxValue"), Ok(exec_results)) => {
+                (Some("TR_NonceHasMaxValue"), Ok((exec_results, _bytecodes))) => {
                     assert!(exec_results.len() == 1);
                     assert!(exec_results[0].receipt.status.coerce_status());
                     // This is overly strict as we only need the newly created account's code to be empty.
@@ -188,7 +188,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     });
                 }
                 // Tests that exepect execution to succeed -> match post state root
-                (None, Ok(exec_results)) => {
+                (None, Ok((exec_results, _bytecodes))) => {
                     assert!(exec_results.len() == 1);
                     let PevmTxExecutionResult {receipt, state} = exec_results[0].clone();
 

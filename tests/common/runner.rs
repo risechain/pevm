@@ -67,7 +67,7 @@ pub fn test_execute_alloy<
     let parallel_result = pevm::execute(storage, chain, block.clone(), concurrency_level, false);
     assert_execution_result(&sequential_result, &parallel_result);
 
-    let tx_results = sequential_result.unwrap();
+    let (tx_results, _bytecodes) = sequential_result.unwrap();
     if must_match_block_header {
         let spec_id = chain.get_block_spec(&block.header).unwrap();
 

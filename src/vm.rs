@@ -1,7 +1,6 @@
 use ahash::{AHashMap, HashMapExt};
 use alloy_rpc_types::Receipt;
 use dashmap::DashMap;
-use defer_drop::DeferDrop;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
@@ -505,7 +504,7 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
-    new_bytecodes: DeferDrop<DashMap<B256, Bytecode>>,
+    new_bytecodes: DashMap<B256, Bytecode>,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
@@ -530,7 +529,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             reward_policy: chain.get_reward_policy(hasher),
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
-            new_bytecodes: DeferDrop::new(DashMap::default()),
+            new_bytecodes: DashMap::default(),
         }
     }
 
@@ -754,6 +753,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 write_set.push((recipient, MemoryValue::LazyRecipient(amount)));
             }
         }
+    }
+
+    pub(crate) fn take_new_bytecodes(&mut self) -> impl IntoIterator<Item = (B256, Bytecode)> {
+        std::mem::take(&mut self.new_bytecodes).into_iter()
     }
 }
 

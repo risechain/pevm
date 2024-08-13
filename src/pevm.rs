@@ -5,8 +5,8 @@ use std::{
     thread,
 };
 
-use ahash::AHashMap;
-use alloy_primitives::U256;
+use ahash::{AHashMap, AHashSet};
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types::{Block, BlockTransactions};
 use defer_drop::DeferDrop;
 use revm::{
@@ -26,7 +26,8 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
+    Bytecodes, EvmAccount, EvmCode, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task,
+    TxVersion,
 };
 
 /// Errors when executing a block with PEVM.
@@ -52,7 +53,8 @@ pub enum PevmError<C: PevmChain> {
 }
 
 /// Execution result of a block
-pub type PevmResult<C> = Result<Vec<PevmTxExecutionResult>, PevmError<C>>;
+pub type PevmResult<C> =
+    Result<(Vec<PevmTxExecutionResult>, AHashMap<B256, EvmCode>), PevmError<C>>;
 
 enum AbortReason {
     FallbackToSequential,
@@ -103,6 +105,26 @@ pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
     }
 }
 
+fn collect_bytecodes<'a, S: Storage, C: PevmChain>(
+    tx_results: impl Iterator<Item = &'a PevmTxExecutionResult>,
+    db: &S,
+) -> Result<Bytecodes, PevmError<C>> {
+    // We store the code hashes in a AHashSet to deduplicate values.
+    let code_hashes: AHashSet<B256> = tx_results
+        .flat_map(|tx_result| tx_result.state.values())
+        .flat_map(|account| account.as_ref().and_then(|account| account.code_hash))
+        .collect();
+    let bytecodes: AHashMap<B256, EvmCode> = code_hashes
+        .iter()
+        .filter_map(|code_hash| match db.code_by_hash(code_hash) {
+            Ok(Some(code)) => Some(Ok((*code_hash, code))),
+            Ok(None) => None,
+            Err(err) => Some(Err(PevmError::<C>::StorageError(err.to_string()))),
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(bytecodes)
+}
+
 /// Execute REVM transactions sequentially.
 // Useful for falling back for (small) blocks with many dependencies.
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
@@ -134,7 +156,9 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
             Err(err) => return Err(PevmError::ExecutionError(err.to_string())),
         }
     }
-    Ok(results)
+    drop(evm); // release db
+    let bytecodes = collect_bytecodes(results.iter(), &db)?;
+    Ok((results, bytecodes))
 }
 
 /// Execute an REVM block.
@@ -149,7 +173,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     concurrency_level: NonZeroUsize,
 ) -> PevmResult<C> {
     if txs.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), AHashMap::new()));
     }
 
     // Preprocess locations
@@ -160,7 +184,7 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
     // threads like this. For instance, to have a dedicated thread (pool) for cleanup.
     let mv_memory = DeferDrop::new(chain.build_mv_memory(&hasher, &block_env, &txs));
     let txs = DeferDrop::new(txs);
-    let vm = Vm::new(
+    let mut vm = Vm::new(
         &hasher, storage, &mv_memory, chain, &block_env, &txs, spec_id,
     );
     let scheduler = DeferDrop::new(Scheduler::new(block_size));
@@ -254,15 +278,6 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                 Ok(code_hash) => code_hash,
                 Err(err) => return Err(PevmError::StorageError(err.to_string())),
             };
-            let code = if let Some(code_hash) = &code_hash {
-                match storage.code_by_hash(code_hash) {
-                    Ok(code) => code,
-                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
-                }
-            } else {
-                None
-            };
-
             // TODO: Assert that the evaluated nonce matches the tx's.
             for (tx_idx, memory_entry) in write_history {
                 match memory_entry {
@@ -325,15 +340,20 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                         balance,
                         nonce,
                         code_hash,
-                        code: code.clone(),
+                        code: None,
                         storage: AHashMap::default(),
                     });
                 }
             }
         }
     }
-
-    Ok(fully_evaluated_results)
+    let mut bytecodes = collect_bytecodes(fully_evaluated_results.iter(), storage)?;
+    bytecodes.extend(
+        vm.take_new_bytecodes()
+            .into_iter()
+            .map(|(code_hash, bytecode)| (code_hash, bytecode.into())),
+    );
+    Ok((fully_evaluated_results, bytecodes))
 }
 
 fn try_execute<S: Storage, C: PevmChain>(

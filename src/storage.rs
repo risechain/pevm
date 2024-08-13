@@ -34,7 +34,7 @@ impl From<Account> for EvmAccount {
             balance: account.info.balance,
             nonce: account.info.nonce,
             code_hash: has_code.then_some(account.info.code_hash),
-            code: has_code.then(|| account.info.code.unwrap().into()),
+            code: None,
             storage: account
                 .storage
                 .into_iter()
