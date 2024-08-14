@@ -53,6 +53,7 @@ impl OnDiskStorage {
                 let bytes: Option<Vec<u8>> = tx_ref
                     .value()
                     .get(self.table_accounts.dbi(), address.as_ref())?;
+                drop(tx_ref);
                 let account: Option<EvmAccount> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
@@ -93,6 +94,7 @@ impl Storage for OnDiskStorage {
                 let bytes: Option<Vec<u8>> = tx_ref
                     .value()
                     .get(self.table_bytecodes.dbi(), code_hash.as_ref())?;
+                drop(tx_ref);
                 let code: Option<EvmCode> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
@@ -135,6 +137,7 @@ impl Storage for OnDiskStorage {
                 let bytes: Option<[u8; 32]> = tx_ref
                     .value()
                     .get(self.table_block_hashes.dbi(), B64::from(*number).as_ref())?;
+                drop(tx_ref);
                 let block_hash = match bytes {
                     Some(bytes) => B256::from(bytes),
                     None => keccak256(number.to_string().as_bytes()),
