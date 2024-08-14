@@ -220,7 +220,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         let location_hash = self.hash_basic(&address);
 
         // We return a mock for non-contract addresses (for lazy updates) to avoid
-        // unncessarily evaluating its balance here.
+        // unnecessarily evaluating its balance here.
         if self.is_lazy {
             if location_hash == self.from_hash {
                 return Ok(Some(AccountInfo {
