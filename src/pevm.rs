@@ -29,7 +29,7 @@ use crate::{
     EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
 };
 
-/// Errors when executing a block with PEVM.
+/// Errors when executing a block with pevm.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PevmError<C: PevmChain> {
     /// Cannot derive the chain spec from the block header.

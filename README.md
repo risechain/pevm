@@ -8,13 +8,13 @@ Blazingly fast Parallel EVM in Rust.
 
 ![Banner](./assets/banner.jpg)
 
-**RISE PEVM** is **a parallel execution engine for EVM transactions** heavily inspired by [Block-STM](https://arxiv.org/abs/2203.06871). Since Blockchain transactions are inherently sequential, a parallel execution engine must detect dependencies and conflicts to guarantee the same deterministic outcome with sequential execution. Block-STM optimistically executes transactions and re-executes when conflicts arise using a collaborative scheduler and a shared multi-version data structure. Since it does not require prior knowledge or constraints on the input transactions, **replacing an existing sequential executor with Block-STM is easy for substantial performance boosts**.
+**RISE pevm** is **a parallel execution engine for EVM transactions** heavily inspired by [Block-STM](https://arxiv.org/abs/2203.06871). Since Blockchain transactions are inherently sequential, a parallel execution engine must detect dependencies and conflicts to guarantee the same deterministic outcome with sequential execution. Block-STM optimistically executes transactions and re-executes when conflicts arise using a collaborative scheduler and a shared multi-version data structure. Since it does not require prior knowledge or constraints on the input transactions, **replacing an existing sequential executor with Block-STM is easy for substantial performance boosts**.
 
 Block-STM was initially designed for the Aptos blockchain that runs MoveVM. We must consider several modifications to make it work well with EVM. For instance, all EVM transactions in the same block read and write to the beneficiary account for gas payment, making all transactions interdependent by default. We must carefully monitor reads to this beneficiary account to lazily evaluate it at the end of the block or when an explicit read arises.
 
 While Polygon has adapted a version of Block-STM for EVM in Go, it is still slower than sequential execution in Rust & C++. On the other hand, our redesign & Rust implementation has achieved the fastest execution speed of any public EVM executor.
 
-Finally, while Aptos and Polygon embed their PEVM implementation directly into their nodes, **this dedicated repository provides robust versions and a playground for further advancements**. For instance, we can introduce static-analysed metadata from an optimised mempool, support multiple underlying executors, track read checkpoints to re-execute from upon conflicts and hyper-optimise the implementation at low system levels.
+Finally, while Aptos and Polygon embed their pevm implementation directly into their nodes, **this dedicated repository provides robust versions and a playground for further advancements**. For instance, we can introduce static-analysed metadata from an optimised mempool, support multiple underlying executors, track read checkpoints to re-execute from upon conflicts and hyper-optimise the implementation at low system levels.
 
 ## Goals
 
