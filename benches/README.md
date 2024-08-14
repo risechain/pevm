@@ -1,12 +1,16 @@
 # Benchmarks
 
-Current benchmarks are run on a Linux machine with an Intel i9-12900K (24 CPUs @5.20 GHz) and 32 GB RAM. Future benchmarks will be run on more standard cloud services on which operators tend to run nodes.
-
 We use [criterion.rs](https://github.com/bheisler/criterion.rs) to benchmark 100 samples for each sequential and parallel execution of a block. All state needed is loaded into memory before execution. We pick `rpmalloc` as the global memory allocator; it has beaten `jemalloc`, `mimalloc`, and `snmalloc` in these benchmarks.
 
 ## Gigagas Blocks
 
-This benchmark includes mocked 1-Gigagas blocks to see how PEVM aids in building and syncing large blocks going forward. All blocks are in the CANCUN spec with no dependencies to measure the maximum speedup. The benchmark runs with a single transaction type, not representing real-world blocks on a universal L2. However, it may be representative of application-specific L2s.
+This benchmark includes mocked 1-Gigagas blocks to see how pevm aids in building and syncing large blocks going forward. All blocks are in the CANCUN spec with no dependencies to measure the maximum speedup.
+
+The benchmark runs with a single transaction type, not representing real-world blocks on a universal L2. However, it may be representative of application-specific L2s.
+
+The table below was produced on an `c7g.8xlarge` EC2 instance with Graviton3 (32 vCPUs @2.6 GHz).
+
+To run the benchmark yourself:
 
 ```sh
 $ cargo bench --bench gigagas
@@ -14,9 +18,9 @@ $ cargo bench --bench gigagas
 
 |                 | No. Transactions | Gas Used      | Sequential (ms) | Parallel (ms) | Speedup     |
 | --------------- | ---------------- | ------------- | --------------- | ------------- | ----------- |
-| Raw Transfers   | 47,620           | 1,000,020,000 | 101.02          | 39.237        | 🟢2.57      |
-| ERC20 Transfers | 37,123           | 1,000,019,374 | 145.74          | 34.388        | 🟢4.24      |
-| Uniswap Swaps   | 6,413            | 1,000,004,742 | 363.59          | 27.685        | 🟢**13.13** |
+| Raw Transfers   | 47,620           | 1,000,020,000 | 169.70          | 57.509        | 🟢2.95      |
+| ERC20 Transfers | 37,123           | 1,000,019,374 | 260.30          | 66.020        | 🟢3.94      |
+| Uniswap Swaps   | 6,413            | 1,000,004,742 | 413.83          | 18.023        | 🟢**22.96** |
 
 ## Ethereum Mainnet Blocks
 
@@ -24,7 +28,9 @@ This benchmark includes several transactions for each Ethereum hardfork that alt
 
 The current hardcoded concurrency level is 8, which has performed best for Ethereum blocks thus far. Increasing it will improve results for blocks with more parallelism but hurt small or highly interdependent blocks due to thread overheads. Ideally, our static analysis will be smart enough to auto-tune this better.
 
-To run the benchmark:
+The table below was produced on a Linux machine with an Intel i9-12900K (24 CPUs @5.20 GHz).
+
+To run the benchmark yourself:
 
 ```sh
 $ cargo bench --bench mainnet

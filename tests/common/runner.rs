@@ -28,7 +28,7 @@ pub fn assert_execution_result<C: PevmChain + PartialEq>(
     assert_eq!(sequential_result, parallel_result);
 }
 
-// Execute an REVM block sequentially & with PEVM and assert that
+// Execute an REVM block sequentially & with pevm and assert that
 // the execution results match.
 pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
@@ -51,7 +51,7 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<
     );
 }
 
-// Execute an Alloy block sequentially & with PEVM and assert that
+// Execute an Alloy block sequentially & with pevm and assert that
 // the execution results match.
 pub fn test_execute_alloy<
     S: Storage + Clone + Send + Sync,

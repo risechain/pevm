@@ -6,7 +6,7 @@
 // - REVM doesn't test very tightly (not matching on expected failures, skipping tests, etc.).
 // - We must use a REVM fork (for distinguishing explicit & implicit reads, etc.).
 // - We use custom handlers (for lazy-updating the beneficiary account, etc.) that require "re-testing".
-// - Help outline the minimal state commitment logic for PEVM.
+// - Help outline the minimal state commitment logic for pevm.
 
 use ahash::AHashMap;
 use pevm::chain::PevmEthereum;
@@ -196,7 +196,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     assert_eq!(logs_root, test.logs, "Mismatched logs root for {path:?}");
 
                     // This is a good reference for a minimal state/DB commitment logic for
-                    // PEVM/REVM to meet the Ethereum specs throughout the eras.
+                    // pevm/revm to meet the Ethereum specs throughout the eras.
                     for (address, account) in state {
                         if let Some(account) = account {
                             let chain_state_account = chain_state.entry(address).or_default();
@@ -226,7 +226,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     assert_eq!(state_root, test.hash, "Mismatched state root for {path:?}");
                 }
                 unexpected_res => {
-                    panic!("PEVM doesn't match the test's expectation for {path:?}: {unexpected_res:?}")
+                    panic!("pevm doesn't match the test's expectation for {path:?}: {unexpected_res:?}")
                 }
             }
         });
