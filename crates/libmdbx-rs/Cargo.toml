@@ -12,7 +12,6 @@ bitflags = "2"
 byteorder = "1"
 derive_more = "0.99"
 indexmap = "2"
-parking_lot = "0.12"
 thiserror = "1"
 dashmap = { version = "6.0.1", features = ["inline"], optional = true }
 tracing = "0.1.0"

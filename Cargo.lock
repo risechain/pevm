@@ -3178,7 +3178,6 @@ dependencies = [
  "dashmap 6.0.1",
  "derive_more",
  "indexmap",
- "parking_lot",
  "pprof",
  "rand",
  "rand_xorshift",

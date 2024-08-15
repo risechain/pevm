@@ -8,13 +8,12 @@ use crate::{
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use indexmap::IndexSet;
-use parking_lot::{Mutex, MutexGuard};
 use std::{
     ffi::{c_uint, c_void},
     fmt::{self, Debug},
     mem::size_of,
     ptr, slice,
-    sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
+    sync::{atomic::AtomicBool, mpsc::sync_channel, Arc, Mutex, MutexGuard},
     time::Duration,
 };
 
@@ -173,7 +172,7 @@ where
     }
 
     pub fn prime_for_permaopen(&self, db: Database) {
-        self.inner.primed_dbis.lock().insert(db.dbi());
+        self.inner.primed_dbis.lock().unwrap().insert(db.dbi());
     }
 
     /// Commits the transaction and returns table handles permanently open until dropped.
@@ -211,6 +210,7 @@ where
                 self.inner
                     .primed_dbis
                     .lock()
+                    .unwrap()
                     .iter()
                     .map(|&dbi| Database::new_from_ptr(dbi, self.env().clone()))
                     .collect(),
@@ -607,7 +607,7 @@ impl TransactionPtr {
     }
 
     fn lock(&self) -> MutexGuard<'_, ()> {
-        if let Some(lock) = self.lock.try_lock() {
+        if let Ok(lock) = self.lock.try_lock() {
             lock
         } else {
             tracing::debug!(
@@ -616,7 +616,7 @@ impl TransactionPtr {
                 backtrace = %std::backtrace::Backtrace::force_capture(),
                 "Transaction lock is already acquired, blocking..."
             );
-            self.lock.lock()
+            self.lock.lock().unwrap()
         }
     }
 
