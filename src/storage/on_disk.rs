@@ -7,11 +7,13 @@ use reth_libmdbx::{Database, Environment, Transaction, RO};
 
 use super::{AccountBasic, EvmCode, Storage};
 
+type PackedAccount = (B256, U256, u64);
+
 /// A storage that reads data from an on-disk MDBX database.
 #[derive(Debug)]
 pub struct OnDiskStorage {
     env: Environment,
-    cache_encoded_accounts: DashMap<Address, Option<(B256, B64, B256)>>,
+    cache_encoded_accounts: DashMap<Address, Option<PackedAccount>>,
     cache_storage: DashMap<(Address, U256), U256>,
     cache_bytecodes: DashMap<B256, Option<EvmCode>>,
     cache_block_hashes: DashMap<u64, B256>,
@@ -49,7 +51,7 @@ impl OnDiskStorage {
     fn load_encoded_account(
         &self,
         address: Address,
-    ) -> Result<OccupiedEntry<Address, Option<(B256, B64, B256)>>, reth_libmdbx::Error> {
+    ) -> Result<OccupiedEntry<Address, Option<PackedAccount>>, reth_libmdbx::Error> {
         match self.cache_encoded_accounts.entry(address) {
             Entry::Occupied(occupied) => Ok(occupied),
             Entry::Vacant(vacant) => {
@@ -62,11 +64,11 @@ impl OnDiskStorage {
                     .get(self.table_encoded_accounts.dbi(), address.as_ref())?;
                 drop(tx_ref);
 
-                let decoded = bytes.map(|bytes| {
-                    let b = B256::from_slice(&bytes[0..32]);
-                    let n = B64::from_slice(&bytes[32..(32 + 8)]);
-                    let c = B256::from_slice(&bytes[(32 + 8)..(32 + 8 + 32)]);
-                    (b, n, c)
+                let decoded: Option<PackedAccount> = bytes.map(|bytes| {
+                    let c = B256::from_slice(&bytes[0..32]);
+                    let b = B256::from_slice(&bytes[32..64]).into();
+                    let n = B64::from_slice(&bytes[64..]).into();
+                    (c, b, n)
                 });
                 Ok(vacant.insert_entry(decoded))
             }
@@ -80,8 +82,8 @@ impl Storage for OnDiskStorage {
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
         let entry = self.load_encoded_account(*address)?;
         Ok(entry.get().as_ref().map(|account| AccountBasic {
-            balance: account.0.into(),
-            nonce: account.1.into(),
+            balance: account.1,
+            nonce: account.2,
         }))
     }
 
@@ -90,7 +92,7 @@ impl Storage for OnDiskStorage {
         Ok(entry
             .get()
             .as_ref()
-            .and_then(|(_, _, c)| (*c != KECCAK_EMPTY).then_some(*c)))
+            .and_then(|(c, _, _)| (*c != KECCAK_EMPTY).then_some(*c)))
     }
 
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {

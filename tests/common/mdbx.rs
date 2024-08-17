@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use alloy_primitives::{b256, Address, B256, B64};
+use alloy_primitives::{b256, Address, B256, B64, U256};
 use pevm::{EvmAccount, EvmCode};
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags,
@@ -40,6 +40,7 @@ fn write_table_to<K: AsRef<[u8]>, V: AsRef<[u8]>>(
 /// The Keccak-256 hash of the empty string `""`.
 const KECCAK_EMPTY: B256 =
     b256!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
+type PackedAccount = (B256, U256, u64);
 
 /// Create a temp dir containing MDBX
 pub(crate) fn create_db_dir<'a>(
@@ -56,15 +57,15 @@ pub(crate) fn create_db_dir<'a>(
     )?;
 
     // balance, nonce, code_hash (default: KECCAK_EMPTY)
-    let mut encoded_accounts = HashMap::<Address, (B256, B64, B256)>::new();
+    let mut encoded_accounts = HashMap::<Address, PackedAccount>::new();
     let mut storage = HashMap::<(Address, B256), B256>::new();
     for (&address, account) in pre_state {
         encoded_accounts.insert(
             address,
             (
-                B256::from(account.balance),
-                B64::from(account.nonce),
                 account.code_hash.unwrap_or(KECCAK_EMPTY),
+                account.balance,
+                account.nonce,
             ),
         );
         for (&index, &storage_value) in account.storage.iter() {
@@ -75,8 +76,16 @@ pub(crate) fn create_db_dir<'a>(
     write_table_to(
         &env,
         "encoded_accounts",
-        encoded_accounts.into_iter().map(|(address, (b, n, c))| {
-            (address, [b.as_slice(), n.as_slice(), c.as_slice()].concat())
+        encoded_accounts.into_iter().map(|(address, (c, b, n))| {
+            (
+                address,
+                [
+                    c.as_slice(),
+                    B256::from(b).as_slice(),
+                    B64::from(n).as_slice(),
+                ]
+                .concat(),
+            )
         }),
     )?;
 
