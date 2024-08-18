@@ -2,7 +2,7 @@ use std::{path::Path, thread::ThreadId};
 
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{keccak256, Address, FixedBytes, B256, B64, U256};
-use dashmap::{DashMap, Entry, OccupiedEntry};
+use dashmap::{mapref::one::RefMut, DashMap, Entry, OccupiedEntry};
 use reth_libmdbx::{Database, Environment, Transaction, RO};
 
 use super::{AccountBasic, EvmCode, Storage};
@@ -29,7 +29,6 @@ impl OnDiskStorage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, reth_libmdbx::Error> {
         let env = Environment::builder().set_max_dbs(16).open(path.as_ref())?;
         let tx = env.begin_ro_txn()?;
-        // let table_accounts = tx.open_db(Some("accounts"))?;
         let table_encoded_accounts = tx.open_db(Some("encoded_accounts"))?;
         let table_storage = tx.open_db(Some("storage"))?;
         let table_bytecodes = tx.open_db(Some("bytecodes"))?;
@@ -48,6 +47,12 @@ impl OnDiskStorage {
         })
     }
 
+    fn tx(&self) -> RefMut<ThreadId, Transaction<RO>> {
+        self.cache_txs
+            .entry(std::thread::current().id())
+            .or_insert_with(|| self.env.begin_ro_txn().unwrap())
+    }
+
     fn load_encoded_account(
         &self,
         address: Address,
@@ -55,15 +60,9 @@ impl OnDiskStorage {
         match self.cache_encoded_accounts.entry(address) {
             Entry::Occupied(occupied) => Ok(occupied),
             Entry::Vacant(vacant) => {
-                let tx_ref = self
-                    .cache_txs
-                    .entry(std::thread::current().id())
-                    .or_insert_with(|| self.env.begin_ro_txn().unwrap());
-                let bytes: Option<[u8; 32 + 8 + 32]> = tx_ref
-                    .value()
+                let bytes: Option<[u8; 32 + 8 + 32]> = self
+                    .tx()
                     .get(self.table_encoded_accounts.dbi(), address.as_ref())?;
-                drop(tx_ref);
-
                 let decoded: Option<PackedAccount> = bytes.map(|bytes| {
                     let c = B256::from_slice(&bytes[0..32]);
                     let b = B256::from_slice(&bytes[32..64]).into();
@@ -99,14 +98,9 @@ impl Storage for OnDiskStorage {
         match self.cache_bytecodes.entry(*code_hash) {
             Entry::Occupied(occupied) => Ok(occupied.get().clone()),
             Entry::Vacant(vacant) => {
-                let tx_ref = self
-                    .cache_txs
-                    .entry(std::thread::current().id())
-                    .or_insert_with(|| self.env.begin_ro_txn().unwrap());
-                let bytes: Option<Vec<u8>> = tx_ref
-                    .value()
+                let bytes: Option<Vec<u8>> = self
+                    .tx()
                     .get(self.table_bytecodes.dbi(), code_hash.as_ref())?;
-                drop(tx_ref);
                 let code: Option<EvmCode> = match bytes {
                     Some(bytes) => Some(
                         bincode::deserialize(bytes.as_slice())
@@ -128,18 +122,13 @@ impl Storage for OnDiskStorage {
         match self.cache_storage.entry((*address, *index)) {
             Entry::Occupied(occupied) => Ok(*occupied.get()),
             Entry::Vacant(vacant) => {
-                let tx_ref = self
-                    .cache_txs
-                    .entry(std::thread::current().id())
-                    .or_insert_with(|| self.env.begin_ro_txn().unwrap());
-                let bytes: Option<[u8; 32]> = tx_ref.value().get(
+                let bytes: Option<[u8; 32]> = self.tx().get(
                     self.table_storage.dbi(),
                     FixedBytes::<{ 20 + 32 }>::from_slice(
                         &[address.as_slice(), Into::<B256>::into(*index).as_slice()].concat(),
                     )
                     .as_ref(),
                 )?;
-                drop(tx_ref);
                 let storage_value = match bytes {
                     Some(bytes) => U256::from_be_bytes(bytes),
                     None => U256::ZERO,
@@ -154,14 +143,9 @@ impl Storage for OnDiskStorage {
         match self.cache_block_hashes.entry(*number) {
             Entry::Occupied(occupied) => Ok(*occupied.get()),
             Entry::Vacant(vacant) => {
-                let tx_ref = self
-                    .cache_txs
-                    .entry(std::thread::current().id())
-                    .or_insert_with(|| self.env.begin_ro_txn().unwrap());
-                let bytes: Option<[u8; 32]> = tx_ref
-                    .value()
+                let bytes: Option<[u8; 32]> = self
+                    .tx()
                     .get(self.table_block_hashes.dbi(), B64::from(*number).as_ref())?;
-                drop(tx_ref);
                 let block_hash = match bytes {
                     Some(bytes) => B256::from(bytes),
                     None => keccak256(number.to_string().as_bytes()),
