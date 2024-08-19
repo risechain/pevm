@@ -27,7 +27,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         // 8 seems to be the sweet max for Ethereum blocks. Any more
         // will yield many overheads and hurt execution on (small) blocks
         // with many dependencies.
-        .min(NonZeroUsize::new(8).unwrap());
+        .min(NonZeroUsize::new(12).unwrap());
 
     common::for_each_block_from_disk(|block, in_memory_storage, mdbx_dir| {
         let mut group = c.benchmark_group(format!(
