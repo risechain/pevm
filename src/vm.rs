@@ -295,10 +295,11 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                             new_origins.push(origin);
                             match value {
                                 MemoryValue::Basic(basic) => {
-                                    if basic.is_none() {
-                                        return Err(ReadError::SelfDestructedAccount);
-                                    }
-                                    final_account.clone_from(basic);
+                                    // TODO: Return [ReadError::SelfDestructedAccount] if [basic] is
+                                    // empty?
+                                    // For now we are betting on [code_hash] triggering the sequential
+                                    // fallback when we read a self-destructed contract.
+                                    final_account = Some(basic.clone());
                                     break;
                                 }
                                 MemoryValue::LazyRecipient(addition) => {
@@ -598,7 +599,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 let mut lazy_addresses = NewLazyAddresses::new();
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
-                        write_set.push((self.hash_basic(address), MemoryValue::Basic(None)));
+                        // TODO: Write an empty basic account to [write_set]?
+                        // For now we are betting on [code_hash] triggering the sequential
+                        // fallback when we read a self-destructed contract.
                         write_set.push((
                             self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
                             MemoryValue::CodeHash(None),
@@ -638,10 +641,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             } else {
                                 write_set.push((
                                     account_location_hash,
-                                    MemoryValue::Basic(Some(AccountBasic {
+                                    MemoryValue::Basic(AccountBasic {
                                         balance: account.info.balance,
                                         nonce: account.info.nonce,
-                                    })),
+                                    }),
                                 ));
                             }
                         }
@@ -744,9 +747,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 .find(|(location, _)| location == &recipient)
             {
                 match value {
-                    MemoryValue::Basic(basic) => {
-                        basic.get_or_insert(AccountBasic::default()).balance += amount
-                    }
+                    MemoryValue::Basic(basic) => basic.balance += amount,
                     MemoryValue::LazySender(addition) => *addition -= amount,
                     MemoryValue::LazyRecipient(addition) => *addition += amount,
                     _ => unreachable!(), // TODO: Better error handling
