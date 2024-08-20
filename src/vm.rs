@@ -9,6 +9,7 @@ use revm::{
     },
     Context, Database, Evm, EvmContext,
 };
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 use crate::{
@@ -238,7 +239,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         // We accumulate new origins to either:
         // - match with the previous origins to check consistency
         // - register origins on the first read
-        let mut new_origins = Vec::new();
+        let mut new_origins = SmallVec::new();
 
         let mut final_account = None;
         let mut balance_addition = U256::ZERO;

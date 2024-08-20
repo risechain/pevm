@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
 use alloy_primitives::{Address, B256, U256};
+use smallvec::SmallVec;
 
 // We take the last 8 bytes of an address as its hash. This
 // seems fine as the addresses themselves are hash suffixes,
@@ -151,7 +152,7 @@ enum ReadOrigin {
 
 // For validation: a list of read origins (previous transaction versions)
 // for each read memory location.
-type ReadSet = HashMap<MemoryLocationHash, Vec<ReadOrigin>, BuildIdentityHasher>;
+type ReadSet = HashMap<MemoryLocationHash, SmallVec<[ReadOrigin; 1]>, BuildIdentityHasher>;
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.
