@@ -2572,6 +2572,7 @@ dependencies = [
  "rpmalloc",
  "serde",
  "serde_json",
+ "smallvec",
  "tokio",
  "walkdir",
 ]
