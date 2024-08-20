@@ -25,29 +25,13 @@ def read_estimate(block, exec_type):
         return (estimates["slope"] or estimates["mean"])["point_estimate"]
 
 
-total_sequential = 0
-total_parallel = 0
-max_speed_up = 0
-min_speed_up = float("inf")
-
 for path in os.listdir(CRITERION_PATH):
     if path.startswith("Block"):
-        estimate_sequential = read_estimate(path, "Sequential_In Memory")
-        total_sequential += estimate_sequential
+        seq_ims = read_estimate(path, "Sequential_In Memory")
+        par_ims = read_estimate(path, "Parallel_In Memory")
+        seq_ods = read_estimate(path, "Sequential_On Disk")
+        par_ods = read_estimate(path, "Parallel_On Disk")
 
-        estimate_parallel = read_estimate(path, "Parallel_In Memory")
-        total_parallel += estimate_parallel
-
-        speed_up = round(estimate_sequential / estimate_parallel, 2)
-        max_speed_up = max(max_speed_up, speed_up)
-        min_speed_up = min(min_speed_up, speed_up)
-
-        print(f"{path}")
         print(
-            f"{format_ms(estimate_sequential)} {format_ms(estimate_parallel)} {speed_up}\n"
+            f"{path: <40}\t:{format_ms(seq_ims)}\t{format_ms(par_ims)}\t{format_ms(seq_ods)}\t{format_ms(par_ods)}"
         )
-
-
-print(f"Average: x{round(total_sequential / total_parallel, 2)}")
-print(f"Max: x{max_speed_up}")
-print(f"Min: x{min_speed_up}")
