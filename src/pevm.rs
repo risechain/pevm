@@ -267,12 +267,10 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
             for (tx_idx, memory_entry) in write_history {
                 match memory_entry {
                     MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                        if let Some(info) = info {
-                            balance = info.balance;
-                            nonce = info.nonce;
-                        }
                         // TODO: Assert that there must be no self-destructed
                         // accounts here.
+                        balance = info.balance;
+                        nonce = info.nonce;
                     }
                     MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
                         balance += addition;
