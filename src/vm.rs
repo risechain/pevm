@@ -185,20 +185,25 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
         if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
-            if let Some((
-                tx_idx,
-                MemoryEntry::Data(tx_incarnation, MemoryValue::CodeHash(code_hash)),
-            )) = written_transactions.range(..self.tx_idx).next_back()
+            if let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
+                written_transactions.range(..self.tx_idx).next_back()
             {
-                if code_hash.is_none() {
-                    return Err(ReadError::SelfDestructedAccount);
+                match value {
+                    MemoryValue::SelfDestructed => {
+                        return Err(ReadError::SelfDestructedAccount);
+                    }
+                    MemoryValue::CodeHash(code_hash) => {
+                        Self::push_origin(
+                            read_origins,
+                            ReadOrigin::MvMemory(TxVersion {
+                                tx_idx: *tx_idx,
+                                tx_incarnation: *tx_incarnation,
+                            }),
+                        )?;
+                        return Ok(Some(*code_hash));
+                    }
+                    _ => {}
                 }
-                let origin = ReadOrigin::MvMemory(TxVersion {
-                    tx_idx: *tx_idx,
-                    tx_incarnation: *tx_incarnation,
-                });
-                Self::push_origin(read_origins, origin)?;
-                return Ok(*code_hash);
             }
         };
 
@@ -276,10 +281,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                             new_origins.push(origin);
                             match value {
                                 MemoryValue::Basic(basic) => {
-                                    // TODO: Return [ReadError::SelfDestructedAccount] if [basic] is
-                                    // empty?
-                                    // For now we are betting on [code_hash] triggering the sequential
-                                    // fallback when we read a self-destructed contract.
+                                    // TODO: Return [SelfDestructedAccount] if [basic] is
+                                    // [SelfDestructed]?
+                                    // For now we are betting on [code_hash] triggering the
+                                    // sequential fallback when we read a self-destructed contract.
                                     final_account = Some(basic.clone());
                                     break;
                                 }
@@ -426,11 +431,13 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                 {
                     match entry {
                         MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
-                            let origin = ReadOrigin::MvMemory(TxVersion {
-                                tx_idx: *closest_idx,
-                                tx_incarnation: *tx_incarnation,
-                            });
-                            Self::push_origin(read_origins, origin)?;
+                            Self::push_origin(
+                                read_origins,
+                                ReadOrigin::MvMemory(TxVersion {
+                                    tx_idx: *closest_idx,
+                                    tx_incarnation: *tx_incarnation,
+                                }),
+                            )?;
                             return Ok(*value);
                         }
                         MemoryEntry::Estimate => {
@@ -559,12 +566,12 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 let mut write_set = WriteSet::with_capacity(3);
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
-                        // TODO: Write an empty basic account to [write_set]?
+                        // TODO: Also write [SelfDestructed] to the basic location?
                         // For now we are betting on [code_hash] triggering the sequential
                         // fallback when we read a self-destructed contract.
                         write_set.push((
                             self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
-                            MemoryValue::CodeHash(None),
+                            MemoryValue::SelfDestructed,
                         ));
                         continue;
                     }
@@ -612,7 +619,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         if is_new_code {
                             write_set.push((
                                 self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
-                                MemoryValue::CodeHash(Some(account.info.code_hash)),
+                                MemoryValue::CodeHash(account.info.code_hash),
                             ));
                             self.new_bytecodes
                                 .entry(account.info.code_hash)
