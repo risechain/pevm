@@ -82,15 +82,15 @@ pub(crate) enum VmExecutionResult {
         write_set: WriteSet,
         lazy_addresses: NewLazyAddresses,
         // From which transaction index do we need to validate from after
-        // this execution. This is [None] when no validation is required.
+        // this execution. This is [0] when no validation is required.
         // For instance, for transactions that only read and write to the
         // from and to addresses, which preprocessing & lazy evaluation has
         // already covered. Note that this is used to set the min validation
-        // index in the scheduler, meaning a `None` here will still be validated
+        // index in the scheduler, meaning a [0] here will still be validated
         // if there was a lower transaction that has broken the preprocessed
-        // dependency chain and returned [Some].
+        // dependency chain and returned a non-zero index.
         // TODO: Better name & doc
-        next_validation_idx: Option<TxIdx>,
+        next_validation_idx: TxIdx,
     },
 }
 
@@ -687,11 +687,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     read_set: db.read_set,
                     write_set,
                     lazy_addresses,
-                    next_validation_idx: if tx_idx == 0 || db.is_lazy {
-                        None
-                    } else {
-                        Some(tx_idx)
-                    },
+                    next_validation_idx: if db.is_lazy { 0 } else { tx_idx },
                 }
             }
             Err(EVMError::Database(ReadError::InconsistentRead)) => VmExecutionResult::Retry,
