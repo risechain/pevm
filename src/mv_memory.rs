@@ -90,37 +90,39 @@ impl MvMemory {
         read_set: ReadSet,
         write_set: WriteSet,
     ) -> bool {
-        // Update the multi-version as fast as possible for higher transactions to
-        // read from.
-        let new_locations: Vec<MemoryLocationHash> = write_set.iter().map(|(l, _)| *l).collect();
+        let mut last_locations = index_mutex!(self.last_locations, tx_version.tx_idx);
+        last_locations.read = read_set;
+
+        // TODO: Group updates by shard to avoid locking operations.
+        // Remove old locations that aren't written to anymore.
+        let mut last_location_idx = 0;
+        while last_location_idx < last_locations.write.len() {
+            let prev_location = unsafe { last_locations.write.get_unchecked(last_location_idx) };
+            if !write_set.iter().any(|(l, _)| l == prev_location) {
+                if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
+                    written_transactions.remove(&tx_version.tx_idx);
+                }
+                last_locations.write.swap_remove(last_location_idx);
+            } else {
+                last_location_idx += 1;
+            }
+        }
+
+        // Register new writes.
+        let mut wrote_new_location = false;
+
         for (location, value) in write_set {
             self.data.entry(location).or_default().insert(
                 tx_version.tx_idx,
                 MemoryEntry::Data(tx_version.tx_incarnation, value),
             );
-        }
-        // TODO: Faster "difference" function when there are many locations
-        let mut last_locations = index_mutex!(self.last_locations, tx_version.tx_idx);
-        for prev_location in last_locations.write.iter() {
-            if !new_locations.contains(prev_location) {
-                if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
-                    written_transactions.remove(&tx_version.tx_idx);
-                }
+            if !last_locations.write.contains(&location) {
+                last_locations.write.push(location);
+                wrote_new_location = true;
             }
         }
 
-        // Update this transaction's read & write set for the next validation.
-        last_locations.read = read_set;
-        for new_location in new_locations.iter() {
-            if !last_locations.write.contains(new_location) {
-                // We update right before returning to avoid an early clone.
-                last_locations.write = new_locations;
-                return true;
-            }
-        }
-        // We update right before returning to avoid an early clone.
-        last_locations.write = new_locations;
-        false
+        wrote_new_location
     }
 
     // Obtain the last read set recorded by an execution of [tx_idx] and check
