@@ -69,7 +69,7 @@ pub type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 #[derive(Debug, Clone)]
 enum MemoryValue {
     Basic(AccountBasic),
-    CodeHash(Option<B256>),
+    CodeHash(B256),
     Storage(U256),
     // We lazily update the beneficiary balance to avoid continuous
     // dependencies as all transactions read and write to it. We also
@@ -81,6 +81,8 @@ enum MemoryValue {
     LazyRecipient(U256),
     // Explicit balance subtraction & implicit nonce increment.
     LazySender(U256),
+    // The account was self-destructed.
+    SelfDestructed,
 }
 
 #[derive(Debug)]
