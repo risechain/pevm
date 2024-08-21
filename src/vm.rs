@@ -166,10 +166,24 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         }
     }
 
+    // a function to push read_origins
+    fn push_origin(
+        read_origins: &mut SmallVec<[ReadOrigin; 1]>,
+        origin: ReadOrigin,
+    ) -> Result<(), ReadError> {
+        if let Some(prev_origin) = read_origins.last() {
+            if prev_origin != &origin {
+                return Err(ReadError::InconsistentRead);
+            }
+        } else {
+            read_origins.push(origin);
+        }
+        Ok(())
+    }
+
     fn get_code_hash(&mut self, address: Address) -> Result<Option<B256>, ReadError> {
         let location_hash = self.vm.hasher.hash_one(MemoryLocation::CodeHash(address));
         let read_origins = self.read_set.entry(location_hash).or_default();
-        let prev_origin = read_origins.last();
 
         // Try to read the latest code hash in [MvMemory]
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
@@ -187,25 +201,13 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
                     tx_idx: *tx_idx,
                     tx_incarnation: *tx_incarnation,
                 });
-                if let Some(prev_origin) = prev_origin {
-                    if prev_origin != &origin {
-                        return Err(ReadError::InconsistentRead);
-                    }
-                } else {
-                    read_origins.push(origin);
-                }
+                Self::push_origin(read_origins, origin)?;
                 return Ok(*code_hash);
             }
         };
 
         // Fallback to storage
-        if let Some(prev_origin) = prev_origin {
-            if prev_origin != &ReadOrigin::Storage {
-                return Err(ReadError::InconsistentRead);
-            }
-        } else {
-            read_origins.push(ReadOrigin::Storage);
-        }
+        Self::push_origin(read_origins, ReadOrigin::Storage)?;
         self.vm
             .storage
             .code_hash(&address)
@@ -443,7 +445,6 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             .hash_one(MemoryLocation::Storage(address, index));
 
         let read_origins = self.read_set.entry(location_hash).or_default();
-        let prev_origin = read_origins.last();
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
@@ -457,13 +458,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                                 tx_idx: *closest_idx,
                                 tx_incarnation: *tx_incarnation,
                             });
-                            if let Some(prev_origin) = prev_origin {
-                                if prev_origin != &origin {
-                                    return Err(ReadError::InconsistentRead);
-                                }
-                            } else {
-                                read_origins.push(origin);
-                            }
+                            Self::push_origin(read_origins, origin)?;
                             return Ok(*value);
                         }
                         MemoryEntry::Estimate => {
@@ -476,13 +471,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         }
 
         // Fall back to storage
-        if let Some(prev_origin) = prev_origin {
-            if prev_origin != &ReadOrigin::Storage {
-                return Err(ReadError::InconsistentRead);
-            }
-        } else {
-            read_origins.push(ReadOrigin::Storage);
-        }
+        Self::push_origin(read_origins, ReadOrigin::Storage)?;
         self.vm
             .storage
             .storage(&address, &index)
