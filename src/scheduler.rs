@@ -206,7 +206,7 @@ impl Scheduler {
         &self,
         tx_version: TxVersion,
         wrote_new_location: bool,
-        next_validation_idx: Option<TxIdx>,
+        next_validation_idx: TxIdx,
     ) -> Option<Task> {
         let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
         if tx.status == IncarnationStatus::Executing {
@@ -232,10 +232,11 @@ impl Scheduler {
             }
 
             // Decide where to validate from next
-            let min_validation_idx = if let Some(tx_idx) = next_validation_idx {
+            let min_validation_idx = if next_validation_idx > 0 {
                 min(
-                    self.min_validation_idx.fetch_min(tx_idx, Ordering::Release),
-                    tx_idx,
+                    self.min_validation_idx
+                        .fetch_min(next_validation_idx, Ordering::Release),
+                    next_validation_idx,
                 )
             } else {
                 self.min_validation_idx.load(Ordering::Acquire)
