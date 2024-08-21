@@ -18,16 +18,23 @@ static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let chain = PevmEthereum::mainnet();
-    let concurrency_level = thread::available_parallelism()
-        .unwrap_or(NonZeroUsize::MIN)
-        // 8 seems to be the sweet max for Ethereum blocks. Any more
-        // will yield many overheads and hurt execution on (small) blocks
-        // with many dependencies.
-        .min(NonZeroUsize::new(8).unwrap());
 
     common::for_each_block_from_disk(|block, storage| {
+        let concurrency_level = thread::available_parallelism()
+            .unwrap_or(NonZeroUsize::MIN)
+            .min(
+                // Excessive threads can lead to unnecessary overhead and negatively impact performance.
+                // TODO: fine tune this condition
+                NonZeroUsize::new(if block.transactions.len() <= 140 {
+                    8
+                } else {
+                    13
+                })
+                .unwrap(),
+            );
+
         let mut group = c.benchmark_group(format!(
-            "Block {}({} txs, {} gas)",
+            "Block {} ({} txs, {} gas)",
             block.header.number.unwrap(),
             block.transactions.len(),
             block.header.gas_used
