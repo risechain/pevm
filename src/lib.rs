@@ -220,3 +220,4 @@ pub use storage::{
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};
+mod unsafe_vec;
