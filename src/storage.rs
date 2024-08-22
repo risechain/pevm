@@ -1,4 +1,4 @@
-use std::{fmt::Display, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -9,6 +9,11 @@ use revm::{
     DatabaseRef,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::{BuildIdentityHasher, BuildSuffixHasher};
+
+// TODO: Port EVM types to [primitives.rs] to focus solely
+// on the [Storage] interface here.
 
 /// An EVM account.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -101,8 +106,14 @@ impl From<Bytecode> for EvmCode {
     }
 }
 
-/// Mapping between code hashes and [EvmCode] values
-pub type Bytecodes = AHashMap<B256, EvmCode>;
+/// Mapping from address to [EvmAccount]
+pub type ChainState = HashMap<Address, EvmAccount, BuildSuffixHasher>;
+
+/// Mapping from code hashes to [EvmCode]s
+pub type Bytecodes = HashMap<B256, EvmCode, BuildSuffixHasher>;
+
+/// Mapping from block numbers to block hashes
+pub type BlockHashes = HashMap<u64, B256, BuildIdentityHasher>;
 
 /// An interface to provide chain state to Pevm for transaction execution.
 /// Staying close to the underlying REVM's Database trait while not leaking

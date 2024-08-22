@@ -1,9 +1,8 @@
 pub mod contract;
 
-use crate::{common::ChainState, erc20::contract::ERC20Token};
-use ahash::AHashMap;
+use crate::erc20::contract::ERC20Token;
 use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
-use pevm::{Bytecodes, EvmAccount};
+use pevm::{Bytecodes, ChainState, EvmAccount};
 use revm::primitives::{fixed_bytes, uint, Address, Bytes, TransactTo, TxEnv, B256, U256};
 
 pub const GAS_LIMIT: u64 = 155_934;
@@ -100,7 +99,7 @@ pub fn generate_cluster(
     let single_swap_account =
         SingleSwap::new(swap_router_address, dai_address, usdc_address).build();
 
-    let mut state = AHashMap::from([
+    let mut state = ChainState::from_iter([
         (weth9_address, weth9_account),
         (dai_address, dai_account),
         (usdc_address, usdc_account),
@@ -166,7 +165,7 @@ pub fn generate_cluster(
         }
     }
 
-    let mut bytecodes = Bytecodes::new();
+    let mut bytecodes = Bytecodes::default();
     for account in state.values_mut() {
         let code = account.code.take();
         if let Some(code) = code {

@@ -1,4 +1,4 @@
-use ahash::{AHashMap, HashMapExt};
+use ahash::HashMapExt;
 use alloy_rpc_types::Receipt;
 use dashmap::DashMap;
 use defer_drop::DeferDrop;
@@ -15,9 +15,9 @@ use std::collections::HashMap;
 use crate::{
     chain::{PevmChain, RewardPolicy},
     mv_memory::MvMemory,
-    AccountBasic, BuildIdentityHasher, EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash,
-    MemoryValue, NewLazyAddresses, ReadError, ReadOrigin, ReadSet, Storage, TxIdx, TxVersion,
-    WriteSet,
+    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, MemoryEntry, MemoryLocation,
+    MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError, ReadOrigin, ReadSet, Storage,
+    TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -27,7 +27,7 @@ pub type ExecutionError = EVMError<ReadError>;
 /// Represents the state transitions of the EVM accounts after execution.
 /// If the value is [None], it indicates that the account is marked for removal.
 /// If the value is [Some(new_state)], it indicates that the account has become [new_state].
-type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
+type EvmStateTransitions = HashMap<Address, Option<EvmAccount>, BuildSuffixHasher>;
 
 /// Execution result of a transaction
 #[derive(Debug, Clone, PartialEq)]
@@ -507,7 +507,7 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
-    new_bytecodes: DeferDrop<DashMap<B256, Bytecode>>,
+    new_bytecodes: DeferDrop<DashMap<B256, Bytecode, BuildSuffixHasher>>,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {

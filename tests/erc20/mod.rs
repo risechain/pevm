@@ -1,11 +1,8 @@
 pub mod contract;
 
-use ahash::AHashMap;
 use contract::ERC20Token;
-use pevm::{Bytecodes, EvmAccount};
+use pevm::{Bytecodes, ChainState, EvmAccount};
 use revm::primitives::{uint, Address, TransactTo, TxEnv, U256};
-
-use crate::common::ChainState;
 
 pub const GAS_LIMIT: u64 = 26_938;
 
@@ -33,7 +30,7 @@ pub fn generate_cluster(
         .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
         .build();
 
-    let mut state = AHashMap::from([(gld_address, gld_account)]);
+    let mut state = ChainState::from_iter([(gld_address, gld_account)]);
     let mut txs = Vec::new();
 
     for person in people_addresses.iter() {
@@ -65,7 +62,7 @@ pub fn generate_cluster(
         }
     }
 
-    let mut bytecodes = Bytecodes::new();
+    let mut bytecodes = Bytecodes::default();
     for account in state.values_mut() {
         let code = account.code.take();
         if let Some(code) = code {

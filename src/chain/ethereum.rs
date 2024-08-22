@@ -17,8 +17,7 @@ use revm::{
 
 use super::{PevmChain, RewardPolicy};
 use crate::{
-    mv_memory::{LazyAddresses, MvMemory},
-    BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx,
+    mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx,
 };
 
 /// Implementation of [PevmChain] for Ethereum
@@ -143,10 +142,7 @@ impl PevmChain for PevmEthereum {
             (0..block_size).collect::<Vec<TxIdx>>(),
         );
 
-        let mut lazy_addresses = LazyAddresses::default();
-        lazy_addresses.0.insert(block_env.coinbase);
-
-        MvMemory::new(block_size, estimated_locations, lazy_addresses)
+        MvMemory::new(block_size, estimated_locations, [block_env.coinbase])
     }
 
     fn get_handler<'a, EXT, DB: revm::Database>(

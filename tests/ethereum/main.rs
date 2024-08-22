@@ -10,7 +10,7 @@
 
 use ahash::AHashMap;
 use pevm::chain::PevmEthereum;
-use pevm::{EvmAccount, EvmCode, InMemoryStorage, PevmError, PevmTxExecutionResult};
+use pevm::{Bytecodes, EvmAccount, EvmCode, InMemoryStorage, PevmError, PevmTxExecutionResult};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
@@ -107,7 +107,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             }
 
             let mut chain_state = AHashMap::new();
-            let mut bytecodes = AHashMap::new();
+            let mut bytecodes = Bytecodes::default();
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
                 let code_hash = if code.is_empty() {

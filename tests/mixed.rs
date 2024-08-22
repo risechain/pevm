@@ -17,7 +17,7 @@ fn mixed_block() {
     let mut block_size = 0;
     let mut final_state = AHashMap::new();
     final_state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
-    let mut final_bytecodes = Bytecodes::new();
+    let mut final_bytecodes = Bytecodes::default();
     let mut final_txs = Vec::new();
     // 1 to 10
     let small_random = || (random::<u8>() % 10 + 1) as usize;

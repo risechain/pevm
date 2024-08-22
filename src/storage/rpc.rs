@@ -18,7 +18,7 @@ use tokio::runtime::Runtime;
 
 use crate::{AccountBasic, EvmAccount, Storage};
 
-use super::EvmCode;
+use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
 
 type RpcProvider<N> = RootProvider<Http<Client>, N>;
 
@@ -34,9 +34,9 @@ pub struct RpcStorage<N> {
     // execution on the same block.
     // Using a [Mutex] so we don't propagate mutability requirements back
     // to our [Storage] trait and meet [Send]/[Sync] requirements for Pevm.
-    cache_accounts: Mutex<AHashMap<Address, EvmAccount>>,
-    cache_bytecodes: Mutex<AHashMap<B256, EvmCode>>,
-    cache_block_hashes: Mutex<AHashMap<u64, B256>>,
+    cache_accounts: Mutex<ChainState>,
+    cache_bytecodes: Mutex<Bytecodes>,
+    cache_block_hashes: Mutex<BlockHashes>,
     // TODO: Better async handling.
     runtime: Runtime,
 }
@@ -57,17 +57,17 @@ impl<N> RpcStorage<N> {
     }
 
     /// Get a snapshot of accounts
-    pub fn get_cache_accounts(&self) -> AHashMap<Address, EvmAccount> {
+    pub fn get_cache_accounts(&self) -> ChainState {
         self.cache_accounts.lock().unwrap().clone()
     }
 
     /// Get a snapshot of bytecodes
-    pub fn get_cache_bytecodes(&self) -> AHashMap<B256, EvmCode> {
+    pub fn get_cache_bytecodes(&self) -> Bytecodes {
         self.cache_bytecodes.lock().unwrap().clone()
     }
 
     /// Get a snapshot of block hashes
-    pub fn get_cache_block_hashes(&self) -> AHashMap<u64, B256> {
+    pub fn get_cache_block_hashes(&self) -> BlockHashes {
         self.cache_block_hashes.lock().unwrap().clone()
     }
 }

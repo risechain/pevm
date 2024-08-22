@@ -23,7 +23,7 @@ fn uniswap_clusters() {
     const NUM_SWAPS_PER_PERSON: usize = 20;
 
     let mut final_state = AHashMap::from([(Address::ZERO, EvmAccount::default())]); // Beneficiary
-    let mut final_bytecodes = Bytecodes::new();
+    let mut final_bytecodes = Bytecodes::default();
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..NUM_CLUSTERS {
         let (state, bytecodes, txs) =
