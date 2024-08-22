@@ -61,6 +61,7 @@ impl<T> UnsafeVec<T> {
     ///
     /// 2. The caller must ensure that the index is within the bounds of the vector.
     ///    Accessing an out-of-bounds index can lead to undefined behavior.
+    #[allow(clippy::mut_from_ref)]
     pub(crate) fn get_mut(&self, index: usize) -> &mut T {
         unsafe { (*self.data.get()).get_unchecked_mut(index) }
     }
