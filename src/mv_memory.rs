@@ -5,8 +5,8 @@ use alloy_primitives::Address;
 use dashmap::{mapref::one::Ref, DashMap};
 
 use crate::{
-    BuildAddressHasher, BuildIdentityHasher, MemoryEntry, MemoryLocationHash, NewLazyAddresses,
-    ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
+    unsafe_vec::UnsafeVec, BuildAddressHasher, BuildIdentityHasher, MemoryEntry,
+    MemoryLocationHash, NewLazyAddresses, ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
 };
 
 #[derive(Default, Debug)]
@@ -37,7 +37,7 @@ pub struct MvMemory {
     // Nevertheless, the compiler should be good enough to optimize these cases anyway.
     data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
     /// Last read & written locations of each transaction
-    last_locations: Vec<Mutex<LastLocations>>,
+    last_locations: UnsafeVec<LastLocations>,
     /// Lazy addresses that need full evaluation at the end of the block
     lazy_addresses: Mutex<LazyAddresses>,
 }
@@ -66,7 +66,7 @@ impl MvMemory {
         }
         Self {
             data,
-            last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
+            last_locations: UnsafeVec::new((0..block_size).map(|_| Default::default()).collect()),
             lazy_addresses: Mutex::new(lazy_addresses),
         }
     }
@@ -92,7 +92,7 @@ impl MvMemory {
             );
         }
         // TODO: Faster "difference" function when there are many locations
-        let mut last_locations = index_mutex!(self.last_locations, tx_version.tx_idx);
+        let last_locations = self.last_locations.get_mut(tx_version.tx_idx);
         for prev_location in last_locations.write.iter() {
             if !new_locations.contains(prev_location) {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
@@ -136,7 +136,7 @@ impl MvMemory {
     // validations that successfully abort affect the state and each incarnation
     // can be aborted at most once).
     pub(crate) fn validate_read_locations(&self, tx_idx: TxIdx) -> bool {
-        for (location, prior_origins) in index_mutex!(self.last_locations, tx_idx).read.iter() {
+        for (location, prior_origins) in self.last_locations.get(tx_idx).read.iter() {
             if let Some(written_transactions) = self.read_location(location) {
                 let mut iter = written_transactions.range(..tx_idx);
                 for prior_origin in prior_origins {
@@ -177,7 +177,7 @@ impl MvMemory {
     // structure with special ESTIMATE markers to quickly abort higher transactions
     // that read them.
     pub(crate) fn convert_writes_to_estimates(&self, tx_idx: TxIdx) {
-        for location in index_mutex!(self.last_locations, tx_idx).write.iter() {
+        for location in self.last_locations.get(tx_idx).write.iter() {
             if let Some(mut written_transactions) = self.data.get_mut(location) {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }
