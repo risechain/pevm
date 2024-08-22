@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use alloy_primitives::{Address, B256, U256};
 use smallvec::SmallVec;
@@ -114,18 +115,102 @@ type TxIncarnation = usize;
 //   - Executing(i) --add_dependency--> Aborting(i)
 //   - Aborting(i) --resume--> ReadyToExecute(i+1)
 #[derive(PartialEq, Debug)]
+#[repr(usize)]
 enum IncarnationStatus {
-    ReadyToExecute,
-    Executing,
-    Executed,
-    Validated,
-    Aborting,
+    ReadyToExecute = 2,
+    Executing = 3,
+    Executed = 4,
+    Validated = 5,
+    Aborting = 6,
 }
 
-#[derive(PartialEq, Debug)]
-struct TxStatus {
-    incarnation: TxIncarnation,
-    status: IncarnationStatus,
+impl From<usize> for IncarnationStatus {
+    fn from(value: usize) -> Self {
+        unsafe { std::mem::transmute(value) }
+    }
+}
+
+impl From<IncarnationStatus> for usize {
+    fn from(value: IncarnationStatus) -> Self {
+        value as usize
+    }
+}
+
+struct TxStatusGuard<'a> {
+    lock: &'a AtomicUsize,
+    data: usize, // always equal to self.lock.load()
+}
+
+impl<'a> TxStatusGuard<'a> {
+    fn new(lock: &'a AtomicUsize, data: usize) -> TxStatusGuard<'a> {
+        Self { lock, data }
+    }
+
+    // fn get(&self) -> usize {
+    //     self.data
+    // }
+
+    fn set(&mut self, data: usize) {
+        self.data = data;
+        self.lock.store(data, Ordering::Release);
+    }
+
+    fn status(&self) -> IncarnationStatus {
+        IncarnationStatus::from(self.data & 0b111)
+    }
+
+    fn set_status(&mut self, status: IncarnationStatus) {
+        self.set((self.data & !0b111) | usize::from(status))
+    }
+
+    fn incarnation(&self) -> TxIncarnation {
+        self.data >> 4
+    }
+
+    // fn set_incarnation(&mut self, incarnation: TxIncarnation) {
+    //     self.set((self.data & 0b1111) | (incarnation << 4))
+    // }
+
+    fn add_incarnation(&mut self, incarnation_to_add: TxIncarnation, status: IncarnationStatus) {
+        let new_incarnation = (self.data >> 4) + incarnation_to_add;
+        self.set((new_incarnation << 4) | (self.data & 0b1000) | usize::from(status));
+    }
+}
+
+impl<'a> Drop for TxStatusGuard<'a> {
+    fn drop(&mut self) {
+        self.lock.fetch_and(!0b1000, Ordering::Release);
+    }
+}
+
+#[derive(Debug)]
+struct AtomicTxStatus(AtomicUsize);
+
+impl AtomicTxStatus {
+    fn new(incarnation: TxIncarnation, status: IncarnationStatus) -> Self {
+        Self(AtomicUsize::new((incarnation << 4) | usize::from(status)))
+    }
+
+    fn lock(&self) -> Option<TxStatusGuard> {
+        loop {
+            let old_unlocked = self.0.load(Ordering::Relaxed) & !0b1000;
+            let new_locked = old_unlocked | 0b1000;
+            if self
+                .0
+                .compare_exchange_weak(
+                    old_unlocked,
+                    new_locked,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return Some(TxStatusGuard::new(&self.0, new_locked));
+            } else {
+                std::hint::spin_loop();
+            }
+        }
+    }
 }
 
 // We maintain an in-memory multi-version data structure that stores for
