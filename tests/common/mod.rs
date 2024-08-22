@@ -4,17 +4,13 @@ use std::{
     io::BufReader,
 };
 
-use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
+use pevm::{BlockHashes, Bytecodes, EvmAccount, InMemoryStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
 pub mod storage;
-
-pub type ChainState = AHashMap<Address, EvmAccount>;
-pub type BlockHashes = AHashMap<u64, B256>;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     // Minimal requirements for execution
@@ -74,10 +70,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         let block_hashes: BlockHashes =
             File::open(format!("data/blocks/{block_number}/block_hashes.json"))
                 .map(|file| {
-                    type SerializedFormat = HashMap<u64, B256, ahash::RandomState>;
-                    serde_json::from_reader::<_, SerializedFormat>(BufReader::new(file))
-                        .unwrap()
-                        .into()
+                    serde_json::from_reader::<_, BlockHashes>(BufReader::new(file)).unwrap()
                 })
                 .unwrap_or_default();
 

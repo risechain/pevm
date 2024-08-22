@@ -1,11 +1,13 @@
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Mutex,
+};
 
-use ahash::AHashSet;
 use alloy_primitives::Address;
 use dashmap::{mapref::one::Ref, DashMap};
 
 use crate::{
-    BuildAddressHasher, BuildIdentityHasher, MemoryEntry, MemoryLocationHash, NewLazyAddresses,
+    BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocationHash, NewLazyAddresses,
     ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
 };
 
@@ -16,13 +18,7 @@ struct LastLocations {
     write: Vec<MemoryLocationHash>,
 }
 
-#[derive(Debug)]
-pub(crate) struct LazyAddresses(pub(crate) AHashSet<Address, BuildAddressHasher>);
-impl Default for LazyAddresses {
-    fn default() -> Self {
-        LazyAddresses(AHashSet::with_hasher(BuildAddressHasher::default()))
-    }
-}
+type LazyAddresses = HashSet<Address, BuildSuffixHasher>;
 
 /// The MvMemory contains shared memory in a form of a multi-version data
 /// structure for values written and read by different transactions. It stores
@@ -46,7 +42,7 @@ impl MvMemory {
     pub(crate) fn new(
         block_size: usize,
         estimated_locations: impl IntoIterator<Item = (MemoryLocationHash, Vec<TxIdx>)>,
-        lazy_addresses: LazyAddresses,
+        lazy_addresses: impl IntoIterator<Item = Address>,
     ) -> Self {
         // TODO: Fine-tune the number of shards, like to the next number of two from the
         // number of worker threads.
@@ -67,7 +63,7 @@ impl MvMemory {
         Self {
             data,
             last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
-            lazy_addresses: Mutex::new(lazy_addresses),
+            lazy_addresses: Mutex::new(LazyAddresses::from_iter(lazy_addresses)),
         }
     }
 
@@ -105,7 +101,7 @@ impl MvMemory {
         if !new_lazy_addresses.is_empty() {
             let mut lazy_addresses = self.lazy_addresses.lock().unwrap();
             for address in new_lazy_addresses {
-                lazy_addresses.0.insert(address);
+                lazy_addresses.insert(address);
             }
         }
 
@@ -196,9 +192,7 @@ impl MvMemory {
     }
 
     pub(crate) fn consume_lazy_addresses(&self) -> impl IntoIterator<Item = Address> {
-        std::mem::take(&mut *self.lazy_addresses.lock().unwrap())
-            .0
-            .into_iter()
+        std::mem::take(&mut *self.lazy_addresses.lock().unwrap()).into_iter()
     }
 
     pub(crate) fn consume_location(

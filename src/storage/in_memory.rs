@@ -1,19 +1,16 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::fmt::Debug;
 
-use ahash::AHashMap;
 use alloy_primitives::{keccak256, Address, B256, U256};
 
-use super::{Bytecodes, EvmCode};
-use crate::{AccountBasic, BuildAddressHasher, EvmAccount, Storage};
-
-type Accounts = HashMap<Address, EvmAccount, BuildAddressHasher>;
+use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
+use crate::{AccountBasic, EvmAccount, Storage};
 
 /// A storage that stores chain data in memory.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorage<'a> {
-    accounts: Accounts,
+    accounts: ChainState,
     bytecodes: Option<&'a Bytecodes>,
-    block_hashes: AHashMap<u64, B256>,
+    block_hashes: BlockHashes,
 }
 
 impl<'a> InMemoryStorage<'a> {

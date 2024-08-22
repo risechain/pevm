@@ -8,13 +8,12 @@ use std::hash::{BuildHasherDefault, Hasher};
 use alloy_primitives::{Address, B256, U256};
 use smallvec::SmallVec;
 
-// We take the last 8 bytes of an address as its hash. This
-// seems fine as the addresses themselves are hash suffixes,
-// and precomiles' suffix should be unique, too.
+/// We use the last 8 bytes of an existing hash like address
+/// or code hash instead of rehashing it.
 // TODO: Make sure this is acceptable for production
-#[derive(Default)]
-struct AddressHasher(u64);
-impl Hasher for AddressHasher {
+#[derive(Debug, Default)]
+pub struct SuffixHasher(u64);
+impl Hasher for SuffixHasher {
     fn write(&mut self, bytes: &[u8]) {
         let mut suffix = [0u8; 8];
         suffix.copy_from_slice(&bytes[bytes.len() - 8..]);
@@ -24,7 +23,9 @@ impl Hasher for AddressHasher {
         self.0
     }
 }
-type BuildAddressHasher = BuildHasherDefault<AddressHasher>;
+
+/// Build a suffix hasher
+pub type BuildSuffixHasher = BuildHasherDefault<SuffixHasher>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum MemoryLocation {
@@ -40,10 +41,10 @@ enum MemoryLocation {
 // on every single lookup & validation.
 type MemoryLocationHash = u64;
 
-// This is primarily used for memory location hash, but can also be used for
-// transaction indexes, etc.
-#[derive(Default)]
-struct IdentityHasher(u64);
+/// This is primarily used for memory location hash, but can also be used for
+/// transaction indexes, etc.
+#[derive(Debug, Default)]
+pub struct IdentityHasher(u64);
 impl Hasher for IdentityHasher {
     fn write_u64(&mut self, id: u64) {
         self.0 = id;
@@ -58,7 +59,9 @@ impl Hasher for IdentityHasher {
         unreachable!()
     }
 }
-type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
+
+/// Build an identity hasher
+pub type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 
 // TODO: It would be nice if we could tie the different cases of
 // memory locations & values at the type level, to prevent lots of
@@ -215,8 +218,8 @@ pub use pevm::{execute, execute_revm_parallel, execute_revm_sequential, PevmErro
 mod scheduler;
 mod storage;
 pub use storage::{
-    AccountBasic, Bytecodes, EvmAccount, EvmCode, InMemoryStorage, RpcStorage, Storage,
-    StorageWrapper,
+    AccountBasic, BlockHashes, Bytecodes, ChainState, EvmAccount, EvmCode, InMemoryStorage,
+    RpcStorage, Storage, StorageWrapper,
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};

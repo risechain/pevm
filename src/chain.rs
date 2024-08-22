@@ -1,6 +1,6 @@
 //! Chain specific utils
 
-use std::{collections::HashMap, fmt::Debug};
+use std::fmt::Debug;
 
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types::{BlockTransactions, Header, Transaction};
@@ -9,10 +9,7 @@ use revm::{
     Handler,
 };
 
-use crate::{
-    mv_memory::{LazyAddresses, MvMemory},
-    BuildIdentityHasher, PevmTxExecutionResult,
-};
+use crate::{mv_memory::MvMemory, PevmTxExecutionResult};
 
 /// Different chains may have varying reward policies.
 /// This enum specifies which policy to follow, with optional
@@ -47,11 +44,7 @@ pub trait PevmChain: Debug {
         _block_env: &BlockEnv,
         txs: &[TxEnv],
     ) -> MvMemory {
-        MvMemory::new(
-            txs.len(),
-            HashMap::with_hasher(BuildIdentityHasher::default()),
-            LazyAddresses::default(),
-        )
+        MvMemory::new(txs.len(), [], [])
     }
 
     /// Get [Handler]
