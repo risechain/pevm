@@ -7,8 +7,8 @@ use alloy_primitives::Address;
 use dashmap::{mapref::one::Ref, DashMap};
 
 use crate::{
-    BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocationHash, NewLazyAddresses,
-    ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
+    BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocationHash, ReadOrigin, ReadSet,
+    TxIdx, TxVersion, WriteSet,
 };
 
 #[derive(Default, Debug)]
@@ -67,6 +67,13 @@ impl MvMemory {
         }
     }
 
+    pub(crate) fn add_lazy_addresses(&self, new_lazy_addresses: impl IntoIterator<Item = Address>) {
+        let mut lazy_addresses = self.lazy_addresses.lock().unwrap();
+        for address in new_lazy_addresses {
+            lazy_addresses.insert(address);
+        }
+    }
+
     // Apply a new pair of read & write sets to the multi-version data structure.
     // Return whether a write occurred to a memory location not written to by
     // the previous incarnation of the same transaction. This determines whether
@@ -76,7 +83,6 @@ impl MvMemory {
         tx_version: &TxVersion,
         read_set: ReadSet,
         write_set: WriteSet,
-        new_lazy_addresses: NewLazyAddresses,
     ) -> bool {
         // Update the multi-version as fast as possible for higher transactions to
         // read from.
@@ -94,14 +100,6 @@ impl MvMemory {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
                     written_transactions.remove(&tx_version.tx_idx);
                 }
-            }
-        }
-
-        // Update lazy addresses
-        if !new_lazy_addresses.is_empty() {
-            let mut lazy_addresses = self.lazy_addresses.lock().unwrap();
-            for address in new_lazy_addresses {
-                lazy_addresses.insert(address);
             }
         }
 

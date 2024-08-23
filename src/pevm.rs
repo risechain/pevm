@@ -380,12 +380,10 @@ fn try_execute<S: Storage, C: PevmChain>(
                 execution_result,
                 read_set,
                 write_set,
-                lazy_addresses,
                 next_validation_idx,
             } => {
                 *index_mutex!(execution_results, tx_version.tx_idx) = Some(execution_result);
-                let wrote_new_location =
-                    mv_memory.record(&tx_version, read_set, write_set, lazy_addresses);
+                let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
                 scheduler.finish_execution(tx_version, wrote_new_location, next_validation_idx)
             }
         };

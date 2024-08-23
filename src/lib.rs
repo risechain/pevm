@@ -166,8 +166,6 @@ type ReadSet = HashMap<MemoryLocationHash, ReadOrigins, BuildIdentityHasher>;
 // to the multi-version data structure at the end of execution.
 type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
 
-type NewLazyAddresses = Vec<Address>;
-
 /// Errors when reading a memory location.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReadError {
