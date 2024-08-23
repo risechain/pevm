@@ -16,8 +16,8 @@ use crate::{
     chain::{PevmChain, RewardPolicy},
     mv_memory::MvMemory,
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, MemoryEntry, MemoryLocation,
-    MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError, ReadOrigin, ReadOrigins, ReadSet,
-    Storage, TxIdx, TxVersion, WriteSet,
+    MemoryLocationHash, MemoryValue, ReadError, ReadOrigin, ReadOrigins, ReadSet, Storage, TxIdx,
+    TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -80,7 +80,6 @@ pub(crate) enum VmExecutionResult {
         execution_result: PevmTxExecutionResult,
         read_set: ReadSet,
         write_set: WriteSet,
-        lazy_addresses: NewLazyAddresses,
         // From which transaction index do we need to validate from after
         // this execution. This is [0] when no validation is required.
         // For instance, for transactions that only read and write to the
@@ -583,7 +582,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
                 let mut write_set = WriteSet::with_capacity(3);
-                let mut lazy_addresses = NewLazyAddresses::new();
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
                         // TODO: Write an empty basic account to [write_set]?
@@ -624,7 +622,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                         MemoryValue::LazyRecipient(tx.value),
                                     ));
                                 }
-                                lazy_addresses.push(*address);
                             } else {
                                 write_set.push((
                                     account_location_hash,
@@ -666,6 +663,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
                 drop(evm); // release db
 
+                if db.is_lazy {
+                    self.mv_memory.add_lazy_addresses([*from, *to.unwrap()]);
+                }
+
                 VmExecutionResult::Ok {
                     execution_result: PevmTxExecutionResult::from_revm(
                         self.spec_id,
@@ -673,7 +674,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     ),
                     read_set: db.read_set,
                     write_set,
-                    lazy_addresses,
                     next_validation_idx: if db.is_lazy { 0 } else { tx_idx },
                 }
             }
