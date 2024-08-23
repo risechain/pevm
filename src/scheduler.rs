@@ -7,6 +7,8 @@ use std::{
     thread,
 };
 
+use smallvec::SmallVec;
+
 use crate::{IncarnationStatus, Task, TxIdx, TxStatus, TxVersion};
 
 // The Pevm collaborative scheduler coordinates execution & validation
@@ -45,7 +47,7 @@ pub(crate) struct Scheduler {
     transactions_status: Vec<Mutex<TxStatus>>,
     // The list of dependent transactions to resume when the
     // key transaction is re-executed.
-    transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
+    transactions_dependents: Vec<Mutex<SmallVec<[TxIdx; 1]>>>,
     // The next transaction to try and execute.
     execution_idx: AtomicUsize,
     // The next transaction to try and validate.
@@ -214,20 +216,11 @@ impl Scheduler {
 
         // Resume dependent transactions
         let mut dependents = index_mutex!(self.transactions_dependents, tx_version.tx_idx);
-        let mut min_dependent_idx = None;
-        for tx_idx in dependents.iter() {
-            self.set_ready_status(*tx_idx);
-            min_dependent_idx = match min_dependent_idx {
-                None => Some(*tx_idx),
-                Some(min_index) => Some(min(*tx_idx, min_index)),
-            }
+        for tx_idx in dependents.drain(..) {
+            self.set_ready_status(tx_idx);
+            self.execution_idx.fetch_min(tx_idx, Ordering::Release);
         }
-        dependents.clear();
         drop(dependents);
-
-        if let Some(min_idx) = min_dependent_idx {
-            self.execution_idx.fetch_min(min_idx, Ordering::Release);
-        }
 
         // Decide where to validate from next
         let min_validation_idx = if next_validation_idx > 0 {
