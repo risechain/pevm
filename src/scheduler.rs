@@ -54,7 +54,7 @@ pub(crate) struct Scheduler {
     min_validation_idx: AtomicUsize,
     // The number of validated transactions
     num_validated: AtomicUsize,
-    // True if the scheduler has been aborted, likely due to fatal exeuction
+    // True if the scheduler has been aborted, likely due to fatal execution
     // errors.
     aborted: AtomicBool,
 }
