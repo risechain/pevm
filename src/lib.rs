@@ -153,9 +153,14 @@ enum ReadOrigin {
     Storage,
 }
 
+// Most memory locations only have one read origin. Lazy updated ones like
+// the beneficiary balance, raw transfer senders & recipients, etc. have a
+// list of lazy updates all the way to the first strict/absolute value.
+type ReadOrigins = SmallVec<[ReadOrigin; 1]>;
+
 // For validation: a list of read origins (previous transaction versions)
 // for each read memory location.
-type ReadSet = HashMap<MemoryLocationHash, SmallVec<[ReadOrigin; 1]>, BuildIdentityHasher>;
+type ReadSet = HashMap<MemoryLocationHash, ReadOrigins, BuildIdentityHasher>;
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.

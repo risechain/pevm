@@ -16,8 +16,8 @@ use crate::{
     chain::{PevmChain, RewardPolicy},
     mv_memory::MvMemory,
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, MemoryEntry, MemoryLocation,
-    MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError, ReadOrigin, ReadSet, Storage,
-    TxIdx, TxVersion, WriteSet,
+    MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError, ReadOrigin, ReadOrigins, ReadSet,
+    Storage, TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -166,11 +166,9 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         }
     }
 
-    // a function to push read_origins
-    fn push_origin(
-        read_origins: &mut SmallVec<[ReadOrigin; 1]>,
-        origin: ReadOrigin,
-    ) -> Result<(), ReadError> {
+    // Push a new read origin. Return an error when there's already
+    // an origin but doesn't match the new one to force re-execution.
+    fn push_origin(read_origins: &mut ReadOrigins, origin: ReadOrigin) -> Result<(), ReadError> {
         if let Some(prev_origin) = read_origins.last() {
             if prev_origin != &origin {
                 return Err(ReadError::InconsistentRead);
