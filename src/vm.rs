@@ -9,7 +9,7 @@ use revm::{
     },
     Context, Database, Evm, EvmContext,
 };
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use std::collections::HashMap;
 
 use crate::{
@@ -710,7 +710,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
     // Apply rewards (balance increments) to beneficiary accounts, etc.
     fn apply_rewards(&self, write_set: &mut WriteSet, tx: &TxEnv, gas_used: U256) {
-        let rewards: Vec<(MemoryLocationHash, U256)> = match self.reward_policy {
+        let rewards: SmallVec<[(MemoryLocationHash, U256); 1]> = match self.reward_policy {
             RewardPolicy::Ethereum => {
                 let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
                     std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
@@ -720,7 +720,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 if self.spec_id.is_enabled_in(SpecId::LONDON) {
                     gas_price = gas_price.saturating_sub(self.block_env.basefee);
                 }
-                vec![(self.beneficiary_location_hash, gas_price * gas_used)]
+                smallvec![(self.beneficiary_location_hash, gas_price * gas_used)]
             }
         };
 
