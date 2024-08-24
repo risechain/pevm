@@ -51,7 +51,7 @@ impl From<Account> for EvmAccount {
 
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AccountBasic {
     /// The balance of the account.
     pub balance: U256,
