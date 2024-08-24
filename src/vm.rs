@@ -32,7 +32,7 @@ type EvmStateTransitions = HashMap<Address, Option<EvmAccount>, BuildSuffixHashe
 pub struct PevmTxExecutionResult {
     /// Receipt of execution
     // TODO: Consider promoting to [ReceiptEnvelope] if there is high demand
-    pub receipt: Receipt,
+    pub receipt: Box<Receipt>,
     /// State that got updated
     pub state: EvmStateTransitions,
 }
@@ -43,11 +43,11 @@ impl PevmTxExecutionResult {
     /// It should be post-processed with the remaining transactions in the block.
     pub fn from_revm(spec_id: SpecId, ResultAndState { result, state }: ResultAndState) -> Self {
         Self {
-            receipt: Receipt {
+            receipt: Box::new(Receipt {
                 status: result.is_success().into(),
                 cumulative_gas_used: result.gas_used() as u128,
                 logs: result.into_logs(),
-            },
+            }),
             state: state
                 .into_iter()
                 .filter(|(_, account)| account.is_touched())
