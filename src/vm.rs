@@ -78,8 +78,7 @@ pub(crate) enum VmExecutionResult {
     ExecutionError(ExecutionError),
     Ok {
         execution_result: PevmTxExecutionResult,
-        read_set: ReadSet,
-        write_set: WriteSet,
+        wrote_new_location: bool,
         // From which transaction index do we need to validate from after
         // this execution. This is [0] when no validation is required.
         // For instance, for transactions that only read and write to the
@@ -543,9 +542,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     // value are added to the write set, possibly replacing a pair with a prior value
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
-    pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
+    pub(crate) fn execute(&self, tx_version: &TxVersion) -> VmExecutionResult {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
-        let tx = unsafe { self.txs.get_unchecked(tx_idx) };
+        let tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
         let from = &tx.caller;
         let from_hash = self.hash_basic(from);
         let (to, to_hash) = match &tx.transact_to {
@@ -556,7 +555,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         // Execute
         let mut db = match VmDb::new(
             self,
-            &tx_idx,
+            &tx_version.tx_idx,
             tx.nonce.unwrap_or(1),
             from,
             from_hash,
@@ -667,14 +666,15 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     self.mv_memory.add_lazy_addresses([*from, *to.unwrap()]);
                 }
 
+                let wrote_new_location = self.mv_memory.record(tx_version, db.read_set, write_set);
+
                 VmExecutionResult::Ok {
                     execution_result: PevmTxExecutionResult::from_revm(
                         self.spec_id,
                         result_and_state,
                     ),
-                    read_set: db.read_set,
-                    write_set,
-                    next_validation_idx: if db.is_lazy { 0 } else { tx_idx },
+                    wrote_new_location,
+                    next_validation_idx: if db.is_lazy { 0 } else { tx_version.tx_idx },
                 }
             }
             Err(EVMError::Database(ReadError::InconsistentRead)) => VmExecutionResult::Retry,
@@ -691,7 +691,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 // Since this retry is safe for syncing canonical blocks but can deadlock
                 // on new or faulty blocks. We can skip the transaction for new blocks and
                 // error out after a number of tries for the latter.
-                if tx_idx > 0
+                if tx_version.tx_idx > 0
                     && matches!(
                         err,
                         EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee { .. })
@@ -699,7 +699,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     )
                 {
                     VmExecutionResult::ReadError {
-                        blocking_tx_idx: tx_idx - 1,
+                        blocking_tx_idx: tx_version.tx_idx - 1,
                     }
                 } else {
                     VmExecutionResult::ExecutionError(err)
