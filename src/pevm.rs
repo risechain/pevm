@@ -182,7 +182,6 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
                 while task.is_some() {
                     task = match task.unwrap() {
                         Task::Execution(tx_version) => try_execute(
-                            mv_memory,
                             &vm,
                             scheduler,
                             &abort_reason,
@@ -341,7 +340,6 @@ pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Syn
 }
 
 fn try_execute<S: Storage, C: PevmChain>(
-    mv_memory: &MvMemory,
     vm: &Vm<S, C>,
     scheduler: &Scheduler,
     abort_reason: &OnceLock<AbortReason>,
@@ -349,7 +347,7 @@ fn try_execute<S: Storage, C: PevmChain>(
     tx_version: TxVersion,
 ) -> Option<Task> {
     loop {
-        return match vm.execute(tx_version.tx_idx) {
+        return match vm.execute(&tx_version) {
             VmExecutionResult::Retry => {
                 if abort_reason.get().is_none() {
                     continue;
@@ -378,12 +376,10 @@ fn try_execute<S: Storage, C: PevmChain>(
             }
             VmExecutionResult::Ok {
                 execution_result,
-                read_set,
-                write_set,
+                wrote_new_location,
                 next_validation_idx,
             } => {
                 *index_mutex!(execution_results, tx_version.tx_idx) = Some(execution_result);
-                let wrote_new_location = mv_memory.record(&tx_version, read_set, write_set);
                 scheduler.finish_execution(tx_version, wrote_new_location, next_validation_idx)
             }
         };
