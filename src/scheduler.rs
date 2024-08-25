@@ -194,12 +194,9 @@ impl Scheduler {
 
     fn set_ready_status(&self, tx_idx: TxIdx) {
         let mut tx = index_mutex!(self.transactions_status, tx_idx);
-        if tx.status == IncarnationStatus::Aborting {
-            tx.status = IncarnationStatus::ReadyToExecute;
-            tx.incarnation += 1;
-        } else {
-            unreachable!("Trying to resume in non-aborting state!")
-        }
+        debug_assert_eq!(tx.status, IncarnationStatus::Aborting);
+        tx.status = IncarnationStatus::ReadyToExecute;
+        tx.incarnation += 1;
     }
 
     pub(crate) fn finish_execution(
@@ -209,61 +206,58 @@ impl Scheduler {
         next_validation_idx: TxIdx,
     ) -> Option<Task> {
         let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
-        if tx.status == IncarnationStatus::Executing {
-            debug_assert_eq!(tx.incarnation, tx_version.tx_incarnation);
-            tx.status = IncarnationStatus::Executed;
-            drop(tx);
+        debug_assert_eq!(tx.status, IncarnationStatus::Executing);
+        debug_assert_eq!(tx.incarnation, tx_version.tx_incarnation);
+        tx.status = IncarnationStatus::Executed;
+        drop(tx);
 
-            // Resume dependent transactions
-            let mut dependents = index_mutex!(self.transactions_dependents, tx_version.tx_idx);
-            let mut min_dependent_idx = None;
-            for tx_idx in dependents.iter() {
-                self.set_ready_status(*tx_idx);
-                min_dependent_idx = match min_dependent_idx {
-                    None => Some(*tx_idx),
-                    Some(min_index) => Some(min(*tx_idx, min_index)),
-                }
+        // Resume dependent transactions
+        let mut dependents = index_mutex!(self.transactions_dependents, tx_version.tx_idx);
+        let mut min_dependent_idx = None;
+        for tx_idx in dependents.iter() {
+            self.set_ready_status(*tx_idx);
+            min_dependent_idx = match min_dependent_idx {
+                None => Some(*tx_idx),
+                Some(min_index) => Some(min(*tx_idx, min_index)),
             }
-            dependents.clear();
-            drop(dependents);
+        }
+        dependents.clear();
+        drop(dependents);
 
-            if let Some(min_idx) = min_dependent_idx {
-                self.execution_idx.fetch_min(min_idx, Ordering::Release);
-            }
+        if let Some(min_idx) = min_dependent_idx {
+            self.execution_idx.fetch_min(min_idx, Ordering::Release);
+        }
 
-            // Decide where to validate from next
-            let min_validation_idx = if next_validation_idx > 0 {
-                min(
-                    self.min_validation_idx
-                        .fetch_min(next_validation_idx, Ordering::Release),
-                    next_validation_idx,
-                )
-            } else {
-                self.min_validation_idx.load(Ordering::Acquire)
-            };
-            // Have found a min validation index to even bother
-            if min_validation_idx < self.block_size {
-                // Must re-validate from min as this transaction is lower
-                if tx_version.tx_idx < min_validation_idx {
-                    if wrote_new_location {
-                        self.validation_idx
-                            .fetch_min(min_validation_idx, Ordering::Release);
-                    }
-                }
-                // Validate from this transaction as it's in between min and the current
-                // validation index.
-                else if tx_version.tx_idx < self.validation_idx.load(Ordering::Acquire) {
-                    if wrote_new_location {
-                        self.validation_idx
-                            .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
-                    }
-                    return Some(Task::Validation(tx_version));
-                }
-                // Don't need to validate anything if the current validation index is
-                // lower or equal -- it will catch up later.
-            }
+        // Decide where to validate from next
+        let min_validation_idx = if next_validation_idx > 0 {
+            min(
+                self.min_validation_idx
+                    .fetch_min(next_validation_idx, Ordering::Release),
+                next_validation_idx,
+            )
         } else {
-            unreachable!("Trying to finish execution in a non-executing state")
+            self.min_validation_idx.load(Ordering::Acquire)
+        };
+        // Have found a min validation index to even bother
+        if min_validation_idx < self.block_size {
+            // Must re-validate from min as this transaction is lower
+            if tx_version.tx_idx < min_validation_idx {
+                if wrote_new_location {
+                    self.validation_idx
+                        .fetch_min(min_validation_idx, Ordering::Release);
+                }
+            }
+            // Validate from this transaction as it's in between min and the current
+            // validation index.
+            else if tx_version.tx_idx < self.validation_idx.load(Ordering::Acquire) {
+                if wrote_new_location {
+                    self.validation_idx
+                        .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
+                }
+                return Some(Task::Validation(tx_version));
+            }
+            // Don't need to validate anything if the current validation index is
+            // lower or equal -- it will catch up later.
         }
         None
     }
