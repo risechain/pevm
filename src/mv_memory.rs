@@ -3,8 +3,9 @@ use std::{
     sync::Mutex,
 };
 
-use alloy_primitives::Address;
-use dashmap::{mapref::one::Ref, DashMap};
+use alloy_primitives::{Address, B256};
+use dashmap::DashMap;
+use revm::primitives::Bytecode;
 
 use crate::{
     BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocationHash, ReadOrigin, ReadSet,
@@ -31,11 +32,13 @@ pub struct MvMemory {
     // in the read & write sets. [dashmap] having a dedicated interface for this use case
     // (that skips hashing for [u64] keys) would make our code cleaner and "faster".
     // Nevertheless, the compiler should be good enough to optimize these cases anyway.
-    data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
+    pub(crate) data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
     /// Last read & written locations of each transaction
     last_locations: Vec<Mutex<LastLocations>>,
     /// Lazy addresses that need full evaluation at the end of the block
     lazy_addresses: Mutex<LazyAddresses>,
+    /// New bytecodes deployed in this block
+    pub(crate) new_bytecodes: DashMap<B256, Bytecode, BuildSuffixHasher>,
 }
 
 impl MvMemory {
@@ -64,6 +67,9 @@ impl MvMemory {
             data,
             last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
             lazy_addresses: Mutex::new(LazyAddresses::from_iter(lazy_addresses)),
+            // TODO: Fine-tune the number of shards, like to the next number of two from the
+            // number of worker threads.
+            new_bytecodes: DashMap::default(),
         }
     }
 
@@ -131,7 +137,7 @@ impl MvMemory {
     // can be aborted at most once).
     pub(crate) fn validate_read_locations(&self, tx_idx: TxIdx) -> bool {
         for (location, prior_origins) in index_mutex!(self.last_locations, tx_idx).read.iter() {
-            if let Some(written_transactions) = self.read_location(location) {
+            if let Some(written_transactions) = self.data.get(location) {
                 let mut iter = written_transactions.range(..tx_idx);
                 for prior_origin in prior_origins {
                     if let ReadOrigin::MvMemory(prior_version) = prior_origin {
@@ -176,17 +182,6 @@ impl MvMemory {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }
         }
-    }
-
-    pub(crate) fn read_location(
-        &self,
-        location: &MemoryLocationHash,
-    ) -> Option<Ref<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>>> {
-        self.data.get(location)
-    }
-
-    pub(crate) fn have_location(&self, location: &MemoryLocationHash) -> bool {
-        self.data.contains_key(location)
     }
 
     pub(crate) fn consume_lazy_addresses(&self) -> impl IntoIterator<Item = Address> {

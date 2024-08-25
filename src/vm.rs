@@ -1,7 +1,5 @@
 use ahash::HashMapExt;
 use alloy_rpc_types::Receipt;
-use dashmap::DashMap;
-use defer_drop::DeferDrop;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
@@ -148,8 +146,8 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         if let Some(to) = to {
             db.to_code_hash = db.get_code_hash(*to)?;
             db.is_lazy = db.to_code_hash.is_none()
-                && (vm.mv_memory.have_location(&from_hash)
-                    || vm.mv_memory.have_location(&to_hash.unwrap()));
+                && (vm.mv_memory.data.contains_key(&from_hash)
+                    || vm.mv_memory.data.contains_key(&to_hash.unwrap()));
         }
         Ok(db)
     }
@@ -184,7 +182,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // Try to read the latest code hash in [MvMemory]
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
-        if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
+        if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
             if let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
                 written_transactions.range(..self.tx_idx).next_back()
             {
@@ -252,7 +250,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
-            if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
+            if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
                 let mut iter = written_transactions.range(..self.tx_idx);
 
                 // Fully evaluate lazy updates
@@ -375,7 +373,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                 self.get_code_hash(address)?
             };
             let code = if let Some(code_hash) = &code_hash {
-                if let Some(code) = self.vm.new_bytecodes.get(code_hash) {
+                if let Some(code) = self.vm.mv_memory.new_bytecodes.get(code_hash) {
                     Some(code.clone())
                 } else {
                     match self.vm.storage.code_by_hash(code_hash) {
@@ -425,7 +423,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
-            if let Some(written_transactions) = self.vm.mv_memory.read_location(&location_hash) {
+            if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
                 if let Some((closest_idx, entry)) =
                     written_transactions.range(..self.tx_idx).next_back()
                 {
@@ -475,7 +473,6 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
-    new_bytecodes: DeferDrop<DashMap<B256, Bytecode, BuildSuffixHasher>>,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
@@ -498,9 +495,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             reward_policy: chain.get_reward_policy(hasher),
-            // TODO: Fine-tune the number of shards, like to the next number of two from the
-            // number of worker threads.
-            new_bytecodes: DeferDrop::new(DashMap::default()),
         }
     }
 
@@ -621,7 +615,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                 self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
                                 MemoryValue::CodeHash(account.info.code_hash),
                             ));
-                            self.new_bytecodes
+                            self.mv_memory
+                                .new_bytecodes
                                 .entry(account.info.code_hash)
                                 .or_insert_with(|| account.info.code.clone().unwrap());
                         }

@@ -115,6 +115,8 @@ impl Pevm {
     /// Execute an REVM block.
     // Ideally everyone would go through the [Alloy] interface. This one is currently
     // useful for testing, and for users that are heavily tied to Revm like Reth.
+    // TODO: Provide more explicit garbage collecting configs for defer-dropping.
+    // For instance, to have a dedicated thread (pool) for cleanup.
     pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
         &mut self,
         storage: &S,
@@ -129,28 +131,16 @@ impl Pevm {
         }
 
         let block_size = txs.len();
+        let scheduler = Scheduler::new(block_size);
 
-        // Accumulated data to be defer-dropped once.
-        // TODO: Provide more explicit garbage collecting configs for users.
-        // For instance, to have a dedicated thread (pool) for cleanup.
-        // Struct is also clearer than tuple here?
-        let data = DeferDrop::new((
-            chain.build_mv_memory(&self.hasher, &block_env, &txs),
-            Scheduler::new(block_size),
-            txs,
-        ));
-        let mv_memory = &data.0;
-        let scheduler = &data.1;
-        let txs = &data.2;
-        // End of accumulated defer-dropped data
-
+        let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
         let vm = Vm::new(
             &self.hasher,
             storage,
-            mv_memory,
+            &mv_memory,
             chain,
             &block_env,
-            txs,
+            &txs,
             spec_id,
         );
 
@@ -170,10 +160,10 @@ impl Pevm {
                     while task.is_some() {
                         task = match task.unwrap() {
                             Task::Execution(tx_version) => {
-                                self.try_execute(&vm, scheduler, tx_version)
+                                self.try_execute(&vm, &scheduler, tx_version)
                             }
                             Task::Validation(tx_version) => {
-                                try_validate(mv_memory, scheduler, &tx_version)
+                                try_validate(&mv_memory, &scheduler, &tx_version)
                             }
                         };
 
@@ -198,16 +188,12 @@ impl Pevm {
         if let Some(abort_reason) = self.abort_reason.take() {
             match abort_reason {
                 AbortReason::FallbackToSequential => {
-                    return execute_revm_sequential(
-                        storage,
-                        chain,
-                        spec_id,
-                        block_env,
-                        DeferDrop::into_inner(data).2,
-                    )
+                    DeferDrop::new((scheduler, mv_memory));
+                    return execute_revm_sequential(storage, chain, spec_id, block_env, txs);
                 }
                 AbortReason::ExecutionError(err) => {
-                    return Err(PevmError::ExecutionError(format!("{err:?}")))
+                    DeferDrop::new((scheduler, mv_memory, txs));
+                    return Err(PevmError::ExecutionError(format!("{err:?}")));
                 }
             }
         }
@@ -225,7 +211,7 @@ impl Pevm {
         // and raw transfer recipients that may have been atomically updated.
         for address in mv_memory.consume_lazy_addresses() {
             let location_hash = self.hasher.hash_one(MemoryLocation::Basic(address));
-            if let Some(write_history) = mv_memory.read_location(&location_hash) {
+            if let Some(write_history) = mv_memory.data.get(&location_hash) {
                 let mut balance = U256::ZERO;
                 let mut nonce = 0;
                 // Read from storage if the first multi-version entry is not an absolute value.
@@ -320,6 +306,8 @@ impl Pevm {
                 }
             }
         }
+
+        DeferDrop::new((scheduler, mv_memory, txs));
 
         Ok(fully_evaluated_results)
     }
