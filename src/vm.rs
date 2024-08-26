@@ -556,9 +556,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             self.chain,
             self.spec_id,
             self.block_env.clone(),
+            Some(tx.clone()),
             false,
         );
-        *evm.tx_mut() = tx.clone();
         match evm.transact() {
             Ok(result_and_state) => {
                 // There are at least three locations most of the time: the sender,
@@ -730,6 +730,7 @@ pub(crate) fn build_evm<'a, DB: Database, C: PevmChain>(
     chain: &C,
     spec_id: SpecId,
     block_env: BlockEnv,
+    tx_env: Option<TxEnv>,
     with_reward_beneficiary: bool,
 ) -> Evm<'a, (), DB> {
     // This is much uglier than the builder interface but can be up to 50% faster!!
@@ -739,7 +740,7 @@ pub(crate) fn build_evm<'a, DB: Database, C: PevmChain>(
             Env::boxed(
                 CfgEnv::default().with_chain_id(chain.id()),
                 block_env,
-                TxEnv::default(),
+                tx_env.unwrap_or_default(),
             ),
         ),
         external: (),
