@@ -225,7 +225,7 @@ impl Pevm {
         // and raw transfer recipients that may have been atomically updated.
         for address in mv_memory.consume_lazy_addresses() {
             let location_hash = self.hasher.hash_one(MemoryLocation::Basic(address));
-            if let Some(write_history) = mv_memory.consume_location(&location_hash) {
+            if let Some(write_history) = mv_memory.read_location(&location_hash) {
                 let mut balance = U256::ZERO;
                 let mut nonce = 0;
                 // Read from storage if the first multi-version entry is not an absolute value.
@@ -253,7 +253,7 @@ impl Pevm {
                 };
 
                 // TODO: Assert that the evaluated nonce matches the tx's.
-                for (tx_idx, memory_entry) in write_history {
+                for (tx_idx, memory_entry) in write_history.iter() {
                     match memory_entry {
                         MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                             // TODO: Assert that there must be no self-destructed
@@ -271,7 +271,7 @@ impl Pevm {
                             // TODO: Guard against overflows & underflows
                             // Ideally we would share these calculations with revm
                             // (using their utility functions).
-                            let tx = unsafe { txs.get_unchecked(tx_idx) };
+                            let tx = unsafe { txs.get_unchecked(*tx_idx) };
                             let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
                             if let Some(blob_fee) = tx.max_fee_per_blob_gas {
                                 max_fee +=
@@ -292,7 +292,7 @@ impl Pevm {
                     }
 
                     // SAFETY: The multi-version data structure should not leak an index over block size.
-                    let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(tx_idx) };
+                    let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
                     let account = tx_result.state.entry(address).or_default();
                     // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
                     if spec_id.is_enabled_in(SPURIOUS_DRAGON)

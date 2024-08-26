@@ -192,12 +192,4 @@ impl MvMemory {
     pub(crate) fn consume_lazy_addresses(&self) -> impl IntoIterator<Item = Address> {
         std::mem::take(&mut *self.lazy_addresses.lock().unwrap()).into_iter()
     }
-
-    pub(crate) fn consume_location(
-        &self,
-        location: &MemoryLocationHash,
-    ) -> Option<BTreeMap<TxIdx, MemoryEntry>> {
-        let (_, tree) = self.data.remove(location)?;
-        Some(tree)
-    }
 }
