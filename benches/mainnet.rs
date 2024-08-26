@@ -20,10 +20,19 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let chain = PevmEthereum::mainnet();
     let concurrency_level = thread::available_parallelism()
         .unwrap_or(NonZeroUsize::MIN)
-        // 8 seems to be the sweet max for Ethereum blocks. Any more
-        // will yield many overheads and hurt execution on (small) blocks
-        // with many dependencies.
-        .min(NonZeroUsize::new(8).unwrap());
+        // This max should be tuned to the running machine,
+        // ideally also per block depending on the number of
+        // transactions, gas usage, etc. ARM machines seem to
+        // go higher thanks to their low thread overheads.
+        .min(
+            NonZeroUsize::new(
+                #[cfg(target_arch = "aarch64")]
+                12,
+                #[cfg(not(target_arch = "aarch64"))]
+                8,
+            )
+            .unwrap(),
+        );
     let mut pevm = Pevm::default();
 
     common::for_each_block_from_disk(|block, storage| {
