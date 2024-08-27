@@ -1,14 +1,13 @@
 use std::{
     fmt::Debug,
     num::NonZeroUsize,
-    sync::{Mutex, OnceLock},
+    sync::{mpsc, Mutex, OnceLock},
     thread,
 };
 
 use ahash::AHashMap;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Block, BlockTransactions};
-use defer_drop::DeferDrop;
 use revm::{
     db::CacheDB,
     primitives::{
@@ -60,6 +59,30 @@ enum AbortReason {
     ExecutionError(ExecutionError),
 }
 
+// TODO: Better implementation
+#[derive(Debug)]
+struct AsyncDropper<T> {
+    sender: mpsc::Sender<T>,
+    _handle: thread::JoinHandle<()>,
+}
+
+impl<T: Send + 'static> Default for AsyncDropper<T> {
+    fn default() -> Self {
+        let (sender, receiver) = mpsc::channel();
+        Self {
+            sender,
+            _handle: std::thread::spawn(move || receiver.into_iter().for_each(drop)),
+        }
+    }
+}
+
+impl<T> AsyncDropper<T> {
+    fn drop(&self, t: T) {
+        // TODO: Better error handling
+        self.sender.send(t).unwrap();
+    }
+}
+
 // TODO: Port more recyclable resources into here.
 #[derive(Debug, Default)]
 /// The main pevm struct that executes blocks.
@@ -67,6 +90,7 @@ pub struct Pevm {
     hasher: ahash::RandomState,
     execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
     abort_reason: OnceLock<AbortReason>,
+    dropper: AsyncDropper<(MvMemory, Scheduler, Vec<TxEnv>)>,
 }
 
 impl Pevm {
@@ -115,8 +139,6 @@ impl Pevm {
     /// Execute an REVM block.
     // Ideally everyone would go through the [Alloy] interface. This one is currently
     // useful for testing, and for users that are heavily tied to Revm like Reth.
-    // TODO: Provide more explicit garbage collecting configs for defer-dropping.
-    // For instance, to have a dedicated thread (pool) for cleanup.
     pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
         &mut self,
         storage: &S,
@@ -188,11 +210,11 @@ impl Pevm {
         if let Some(abort_reason) = self.abort_reason.take() {
             match abort_reason {
                 AbortReason::FallbackToSequential => {
-                    DeferDrop::new((scheduler, mv_memory));
+                    self.dropper.drop((mv_memory, scheduler, Vec::new()));
                     return execute_revm_sequential(storage, chain, spec_id, block_env, txs);
                 }
                 AbortReason::ExecutionError(err) => {
-                    DeferDrop::new((scheduler, mv_memory, txs));
+                    self.dropper.drop((mv_memory, scheduler, txs));
                     return Err(PevmError::ExecutionError(format!("{err:?}")));
                 }
             }
@@ -307,7 +329,7 @@ impl Pevm {
             }
         }
 
-        DeferDrop::new((scheduler, mv_memory, txs));
+        self.dropper.drop((mv_memory, scheduler, txs));
 
         Ok(fully_evaluated_results)
     }
