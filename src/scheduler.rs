@@ -34,6 +34,7 @@ use crate::{IncarnationStatus, Task, TxIdx, TxStatus, TxVersion};
 // transactions. Threads that perform these tasks can already detect validation
 // failure due to the ESTIMATE markers on memory locations, instead of waiting
 // for a subsequent incarnation to finish.
+#[derive(Debug)]
 pub(crate) struct Scheduler {
     // The number of transactions in this block.
     block_size: usize,
