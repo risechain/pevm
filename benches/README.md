@@ -1,19 +1,21 @@
 # Benchmarks
 
-We use [criterion.rs](https://github.com/bheisler/criterion.rs) to benchmark 100 samples for each sequential and parallel execution of a block. All state needed is loaded into memory before execution. We pick `rpmalloc` as the global memory allocator; it has beaten `jemalloc`, `mimalloc`, and `snmalloc` in these benchmarks.
+We use [criterion.rs](https://github.com/bheisler/criterion.rs) to benchmark 100 samples for each sequential and parallel execution of a block.
+
+For simplicity, the chain state is loaded into memory before execution. **In practice**, the chain state would be loaded from disk with some in-memory cache, **increasing speedup for parallel execution** as only the reading thread would be blocked by disk I/O, while others still execute and validate with in-memory data. On the other hand, sequential execution would be fully blocked every time it reads new data from the disk.
 
 ## Gigagas Blocks
 
-This benchmark includes mocked 1-Gigagas blocks to see how pevm aids in building and syncing large blocks going forward. All blocks are in the CANCUN spec with no dependencies to measure the maximum speedup.
+This benchmark includes mocked 1-Gigagas blocks to see how pevm aids in building and syncing large blocks going forward. All blocks are in the CANCUN spec with no dependencies to measure the maximum speedup. We pick `jemalloc` with THP as the global memory allocator, which performs the best for big blocks. `rpmalloc` is much better for the Uniswap case, but much worse on the others and is not stable on AWS Graviton.
 
 The benchmark runs with a single transaction type, not representing real-world blocks on a universal L2. However, it may be representative of application-specific L2s.
 
-The table below was produced on an `c7g.8xlarge` EC2 instance with Graviton3 (32 vCPUs @2.6 GHz).
+The table below was produced on a `c7g.8xlarge` EC2 instance with Graviton3 (32 vCPUs @2.6 GHz).
 
 To run the benchmark yourself:
 
 ```sh
-$ cargo bench --bench gigagas
+$ JEMALLOC_SYS_WITH_MALLOC_CONF="thp:always,metadata_thp:always" cargo bench --bench gigagas
 ```
 
 |                 | No. Transactions | Gas Used      | Sequential (ms) | Parallel (ms) | Speedup     |
@@ -26,7 +28,9 @@ $ cargo bench --bench gigagas
 
 This benchmark includes several transactions for each Ethereum hardfork that alters the EVM spec. We include blocks with high parallelism, highly inter-dependent blocks, and some random blocks to ensure we benchmark against all scenarios. It is also a good testing platform for aggressively running blocks to find race conditions if there are any.
 
-The current hardcoded concurrency level is 8, which has performed best for Ethereum blocks thus far. Increasing it will improve results for blocks with more parallelism but hurt small or highly interdependent blocks due to thread overheads. Ideally, our static analysis will be smart enough to auto-tune this better.
+The current hardcoded concurrency level is 8 on x86 and 12 on ARM, which have performed best for Ethereum blocks thus far. Increasing it will improve results for blocks with more parallelism but hurt small or highly interdependent blocks due to thread overheads. Ideally, our static analysis will be smart enough to auto-tune this better.
+
+We pick `rpmalloc` for x86 and `snmalloc` for ARM as the global memory allocator. `rpmalloc` is generally better but can crash on AWS Graviton.
 
 The table below was produced on a Linux machine with an Intel i9-12900K (24 CPUs @5.20 GHz).
 

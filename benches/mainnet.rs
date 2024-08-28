@@ -13,6 +13,11 @@ use pevm::{chain::PevmEthereum, Pevm};
 #[path = "../tests/common/mod.rs"]
 pub mod common;
 
+// [rpmalloc] is generally better but can crash on AWS Graviton.
+#[cfg(target_arch = "aarch64")]
+#[global_allocator]
+static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+#[cfg(not(target_arch = "aarch64"))]
 #[global_allocator]
 static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
