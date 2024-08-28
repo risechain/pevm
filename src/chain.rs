@@ -70,6 +70,9 @@ pub trait PevmChain: Debug {
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> B256;
+
+    /// Check if a tx is ERC20 transfer
+    fn is_erc20_transfer(&self, tx: &TxEnv) -> bool;
 }
 
 mod ethereum;

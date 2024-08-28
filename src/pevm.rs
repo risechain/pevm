@@ -227,103 +227,189 @@ impl Pevm {
 
         // We fully evaluate (the balance and nonce of) the beneficiary account
         // and raw transfer recipients that may have been atomically updated.
-        for address in mv_memory.consume_lazy_addresses() {
-            let location_hash = self.hasher.hash_one(MemoryLocation::Basic(address));
-            if let Some(write_history) = mv_memory.data.get(&location_hash) {
-                let mut balance = U256::ZERO;
-                let mut nonce = 0;
-                // Read from storage if the first multi-version entry is not an absolute value.
-                if !matches!(
-                    write_history.first_key_value(),
-                    Some((_, MemoryEntry::Data(_, MemoryValue::Basic(_))))
-                ) {
-                    if let Ok(Some(account)) = storage.basic(&address) {
-                        balance = account.balance;
-                        nonce = account.nonce;
+        for memory_location in mv_memory.lazy_locations.lock().unwrap().iter() {
+            match memory_location {
+                MemoryLocation::Basic(address) => {
+                    let location_hash = self.hasher.hash_one(MemoryLocation::Basic(*address));
+                    if let Some(write_history) = mv_memory.data.get(&location_hash) {
+                        let mut balance = U256::ZERO;
+                        let mut nonce = 0;
+                        // Read from storage if the first multi-version entry is not an absolute value.
+                        if !matches!(
+                            write_history.first_key_value(),
+                            Some((_, MemoryEntry::Data(_, MemoryValue::Basic(_))))
+                        ) {
+                            if let Ok(Some(account)) = storage.basic(address) {
+                                balance = account.balance;
+                                nonce = account.nonce;
+                            }
+                        }
+                        // Accounts that take implicit writes like the beneficiary account can be contract!
+                        let code_hash = match storage.code_hash(address) {
+                            Ok(code_hash) => code_hash,
+                            Err(err) => return Err(PevmError::StorageError(err.to_string())),
+                        };
+                        let code = if let Some(code_hash) = &code_hash {
+                            match storage.code_by_hash(code_hash) {
+                                Ok(code) => code,
+                                Err(err) => return Err(PevmError::StorageError(err.to_string())),
+                            }
+                        } else {
+                            None
+                        };
+
+                        // TODO: Assert that the evaluated nonce matches the tx's.
+                        for (tx_idx, memory_entry) in write_history.iter() {
+                            match memory_entry {
+                                MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
+                                    // We fall back to sequential execution when reading a self-destructed account,
+                                    // so an empty account here would be a bug
+                                    debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
+                                    balance = info.balance;
+                                    nonce = info.nonce;
+                                }
+                                MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
+                                    balance += addition;
+                                }
+                                MemoryEntry::Data(_, MemoryValue::LazySender(addition)) => {
+                                    // We must re-do extra sender balance checks as we mock
+                                    // the max value in [Vm] during execution. Ideally we
+                                    // can turn off these redundant checks in revm.
+                                    // TODO: Guard against overflows & underflows
+                                    // Ideally we would share these calculations with revm
+                                    // (using their utility functions).
+                                    let tx = unsafe { txs.get_unchecked(*tx_idx) };
+                                    let mut max_fee =
+                                        U256::from(tx.gas_limit) * tx.gas_price + tx.value;
+                                    if let Some(blob_fee) = tx.max_fee_per_blob_gas {
+                                        max_fee += U256::from(tx.get_total_blob_gas())
+                                            * U256::from(blob_fee);
+                                    }
+                                    if balance < max_fee {
+                                        return Err(PevmError::ExecutionError(
+                                            "Transaction(LackOfFundForMaxFee)".to_string(),
+                                        ));
+                                    }
+                                    balance -= addition;
+                                    // End of overflow TODO
+
+                                    nonce += 1;
+                                }
+                                // TODO: Better error handling
+                                _ => unreachable!(),
+                            }
+
+                            // SAFETY: The multi-version data structure should not leak an index over block size.
+                            let tx_result =
+                                unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
+                            let account = tx_result.state.entry(*address).or_default();
+                            // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
+                            if spec_id.is_enabled_in(SPURIOUS_DRAGON)
+                                && code_hash.is_none()
+                                && nonce == 0
+                                && balance == U256::ZERO
+                            {
+                                *account = None;
+                            } else if let Some(account) = account {
+                                // Explicit write: only overwrite the account info in case there are storage changes
+                                // Code cannot change midblock here as we're falling back to sequential execution
+                                // on reading a self-destructed contract.
+                                account.balance = balance;
+                                account.nonce = nonce;
+                            } else {
+                                // Implicit write: e.g. gas payments to the beneficiary account,
+                                // which doesn't have explicit writes in [tx_result.state]
+                                *account = Some(EvmAccount {
+                                    balance,
+                                    nonce,
+                                    code_hash,
+                                    code: code.clone(),
+                                    storage: AHashMap::default(),
+                                });
+                            }
+                        }
                     }
                 }
-                // Accounts that take implicit writes like the beneficiary account can be contract!
-                let code_hash = match storage.code_hash(&address) {
-                    Ok(code_hash) => code_hash,
-                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
-                };
-                let code = if let Some(code_hash) = &code_hash {
-                    match storage.code_by_hash(code_hash) {
-                        Ok(code) => code,
-                        Err(err) => return Err(PevmError::StorageError(err.to_string())),
-                    }
-                } else {
-                    None
-                };
+                MemoryLocation::Storage(address, index) => {
+                    let location_hash = self
+                        .hasher
+                        .hash_one(MemoryLocation::Storage(*address, *index));
+                    if let Some(write_history) = mv_memory.data.get(&location_hash) {
+                        let mut storage_value = U256::ZERO;
 
-                // TODO: Assert that the evaluated nonce matches the tx's.
-                for (tx_idx, memory_entry) in write_history.iter() {
-                    match memory_entry {
-                        MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                            // We fall back to sequential execution when reading a self-destructed account,
-                            // so an empty account here would be a bug
-                            debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
-                            balance = info.balance;
-                            nonce = info.nonce;
-                        }
-                        MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
-                            balance += addition;
-                        }
-                        MemoryEntry::Data(_, MemoryValue::LazySender(addition)) => {
-                            // We must re-do extra sender balance checks as we mock
-                            // the max value in [Vm] during execution. Ideally we
-                            // can turn off these redundant checks in revm.
-                            // TODO: Guard against overflows & underflows
-                            // Ideally we would share these calculations with revm
-                            // (using their utility functions).
-                            let tx = unsafe { txs.get_unchecked(*tx_idx) };
-                            let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
-                            if let Some(blob_fee) = tx.max_fee_per_blob_gas {
-                                max_fee +=
-                                    U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee);
+                        // Read from storage if the first multi-version entry is not an absolute value.
+                        if !matches!(
+                            write_history.first_key_value(),
+                            Some((_, MemoryEntry::Data(_, MemoryValue::Storage(_))))
+                        ) {
+                            if let Ok(value) = storage.storage(address, index) {
+                                storage_value = value
                             }
-                            if balance < max_fee {
-                                return Err(PevmError::ExecutionError(
-                                    "Transaction(LackOfFundForMaxFee)".to_string(),
-                                ));
-                            }
-                            balance -= addition;
-                            // End of overflow TODO
-
-                            nonce += 1;
                         }
-                        // TODO: Better error handling
-                        _ => unreachable!(),
-                    }
 
-                    // SAFETY: The multi-version data structure should not leak an index over block size.
-                    let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
-                    let account = tx_result.state.entry(address).or_default();
-                    // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
-                    if spec_id.is_enabled_in(SPURIOUS_DRAGON)
-                        && code_hash.is_none()
-                        && nonce == 0
-                        && balance == U256::ZERO
-                    {
-                        *account = None;
-                    } else if let Some(account) = account {
-                        // Explicit write: only overwrite the account info in case there are storage changes
-                        // Code cannot change midblock here as we're falling back to sequential execution
-                        // on reading a self-destructed contract.
-                        account.balance = balance;
-                        account.nonce = nonce;
-                    } else {
-                        // Implicit write: e.g. gas payments to the beneficiary account,
-                        // which doesn't have explicit writes in [tx_result.state]
-                        *account = Some(EvmAccount {
-                            balance,
-                            nonce,
-                            code_hash,
-                            code: code.clone(),
-                            storage: AHashMap::default(),
-                        });
+                        for (tx_idx, memory_entry) in write_history.iter() {
+                            match memory_entry {
+                                MemoryEntry::Data(_, MemoryValue::Storage(value)) => {
+                                    storage_value = *value
+                                }
+                                MemoryEntry::Data(
+                                    _,
+                                    MemoryValue::ERC20TransferRecipient {
+                                        amount,
+                                        zeroness_before,
+                                        zeroness_after,
+                                    },
+                                ) => {
+                                    let new_storage_value = storage_value + amount;
+                                    if storage_value.is_zero() != *zeroness_before
+                                        || new_storage_value.is_zero() != *zeroness_after
+                                    {
+                                        // There is hardly anything we can do here, because our initial assumption has failed.
+                                        // TODO: Instead of re-run everything sequentially, we can re-run in parallel with
+                                        // an option to disable lazy updates for ERC20 transfers.
+                                        return execute_revm_sequential(
+                                            storage, chain, spec_id, block_env, txs,
+                                        );
+                                    }
+                                    storage_value = new_storage_value;
+                                }
+                                MemoryEntry::Data(
+                                    _,
+                                    MemoryValue::ERC20TransferSender {
+                                        amount,
+                                        zeroness_before,
+                                        zeroness_after,
+                                    },
+                                ) => {
+                                    let new_storage_value = storage_value - amount;
+                                    if storage_value.is_zero() != *zeroness_before
+                                        || new_storage_value.is_zero() != *zeroness_after
+                                        || storage_value < *amount
+                                    {
+                                        // There is hardly anything we can do here, because our initial assumption has failed.
+                                        // TODO: Instead of re-run everything sequentially, we can re-run in parallel with
+                                        // an option to disable lazy updates for ERC20 transfers.
+                                        return execute_revm_sequential(
+                                            storage, chain, spec_id, block_env, txs,
+                                        );
+                                    }
+                                    storage_value = new_storage_value;
+                                }
+                                _ => unreachable!(),
+                            }
+
+                            let tx_result =
+                                unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
+                            let account = tx_result.state.entry(*address).or_default();
+                            if let Some(account) = account {
+                                account.storage.insert(*index, storage_value);
+                            } else {
+                                unreachable!()
+                            }
+                        }
                     }
                 }
+                MemoryLocation::CodeHash(_) => unreachable!(),
             }
         }
 
