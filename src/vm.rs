@@ -373,7 +373,14 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                 self.get_code_hash(address)?
             };
             let code = if let Some(code_hash) = &code_hash {
-                if let Some(code) = self.vm.mv_memory.new_bytecodes.get(code_hash) {
+                if let Some(code) = self
+                    .vm
+                    .mv_memory
+                    .new_bytecodes
+                    .read()
+                    .unwrap()
+                    .get(code_hash)
+                {
                     Some(code.clone())
                 } else {
                     match self.vm.storage.code_by_hash(code_hash) {
@@ -617,6 +624,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             ));
                             self.mv_memory
                                 .new_bytecodes
+                                .write()
+                                .unwrap()
                                 .entry(account.info.code_hash)
                                 .or_insert_with(|| account.info.code.clone().unwrap());
                         }

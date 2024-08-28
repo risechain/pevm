@@ -1,6 +1,6 @@
 use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Mutex,
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::{Mutex, RwLock},
 };
 
 use alloy_primitives::{Address, B256};
@@ -38,7 +38,7 @@ pub struct MvMemory {
     /// Lazy addresses that need full evaluation at the end of the block
     lazy_addresses: Mutex<LazyAddresses>,
     /// New bytecodes deployed in this block
-    pub(crate) new_bytecodes: DashMap<B256, Bytecode, BuildSuffixHasher>,
+    pub(crate) new_bytecodes: RwLock<HashMap<B256, Bytecode, BuildSuffixHasher>>,
 }
 
 impl MvMemory {
@@ -67,9 +67,7 @@ impl MvMemory {
             data,
             last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
             lazy_addresses: Mutex::new(LazyAddresses::from_iter(lazy_addresses)),
-            // TODO: Fine-tune the number of shards, like to the next number of two from the
-            // number of worker threads.
-            new_bytecodes: DashMap::default(),
+            new_bytecodes: RwLock::default(),
         }
     }
 
