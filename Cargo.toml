@@ -41,7 +41,9 @@ rand = "0.8.5"
 rayon = "1.10.0"
 revme = { git = "https://github.com/risechain/revm", rev = "171c1fa5e78df7f88c3bacbaae49ceac578d5f18" }
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
+snmalloc-rs = "0.3.6"
 serde_json = "1.0.127"
+tikv-jemallocator = "0.6.0"
 walkdir = "2.5.0"
 
 [lints]
