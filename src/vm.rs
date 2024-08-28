@@ -94,6 +94,7 @@ pub(crate) enum VmExecutionResult {
 enum LazyStrategy {
     None,
     RawTransfer,
+    ERC20Transfer { sender: Address, recipient: Address },
 }
 
 // A database interface that intercepts reads while executing a specific
@@ -612,6 +613,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                         ));
                                     }
                                 }
+                                LazyStrategy::ERC20Transfer { .. } => todo!(),
                                 LazyStrategy::None => {
                                     write_set.push((
                                         account_location_hash,
@@ -657,6 +659,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
                 match db.lazy_strategy {
                     LazyStrategy::None => {}
+                    LazyStrategy::ERC20Transfer { .. } => todo!(),
                     LazyStrategy::RawTransfer => {
                         self.mv_memory.add_lazy_locations([
                             MemoryLocation::Basic(*from),
@@ -675,6 +678,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     wrote_new_location,
                     next_validation_idx: match db.lazy_strategy {
                         LazyStrategy::None => tx_version.tx_idx,
+                        LazyStrategy::ERC20Transfer { .. } => todo!(),
                         LazyStrategy::RawTransfer => 0,
                     },
                 }
