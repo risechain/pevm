@@ -142,7 +142,11 @@ impl PevmChain for PevmEthereum {
             (0..block_size).collect::<Vec<TxIdx>>(),
         );
 
-        MvMemory::new(block_size, estimated_locations, [block_env.coinbase])
+        MvMemory::new(
+            block_size,
+            estimated_locations,
+            [MemoryLocation::Basic(block_env.coinbase)],
+        )
     }
 
     fn get_handler<'a, EXT, DB: revm::Database>(

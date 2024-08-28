@@ -658,7 +658,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 match db.lazy_strategy {
                     LazyStrategy::None => {}
                     LazyStrategy::RawTransfer => {
-                        self.mv_memory.add_lazy_addresses([*from, *to.unwrap()]);
+                        self.mv_memory.add_lazy_locations([
+                            MemoryLocation::Basic(*from),
+                            MemoryLocation::Basic(*to.unwrap()),
+                        ]);
                     }
                 }
 
