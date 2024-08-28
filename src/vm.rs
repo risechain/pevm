@@ -90,6 +90,12 @@ pub(crate) enum VmExecutionResult {
     },
 }
 
+#[derive(Debug)]
+enum LazyStrategy {
+    None,
+    RawTransfer,
+}
+
 // A database interface that intercepts reads while executing a specific
 // transaction with Revm. It provides values from the multi-version data
 // structure & storage, and tracks the read set of the current execution.
@@ -104,9 +110,7 @@ struct VmDb<'a, S: Storage, C: PevmChain> {
     to: Option<&'a Address>,
     to_hash: Option<MemoryLocationHash>,
     to_code_hash: Option<B256>,
-    // Indicates if we lazy update this transaction.
-    // Only applied to raw transfers' senders & recipients at the moment.
-    is_lazy: bool,
+    lazy_strategy: LazyStrategy,
     read_set: ReadSet,
     // TODO: Clearer type for [AccountBasic] plus code hash
     read_accounts: HashMap<MemoryLocationHash, (AccountBasic, Option<B256>), BuildIdentityHasher>,
@@ -131,7 +135,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
             to,
             to_hash,
             to_code_hash: None,
-            is_lazy: false,
+            lazy_strategy: LazyStrategy::None,
             // Unless it is a raw transfer that is lazy updated, we'll
             // read at least from the sender and recipient accounts.
             read_set: ReadSet::with_capacity(2),
@@ -145,9 +149,15 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // building.
         if let Some(to) = to {
             db.to_code_hash = db.get_code_hash(*to)?;
-            db.is_lazy = db.to_code_hash.is_none()
-                && (vm.mv_memory.data.contains_key(&from_hash)
-                    || vm.mv_memory.data.contains_key(&to_hash.unwrap()));
+            db.lazy_strategy = if let Some(_to_code_hash) = db.to_code_hash {
+                LazyStrategy::None
+            } else if vm.mv_memory.data.contains_key(&from_hash)
+                || vm.mv_memory.data.contains_key(&to_hash.unwrap())
+            {
+                LazyStrategy::RawTransfer
+            } else {
+                LazyStrategy::None
+            };
         }
         Ok(db)
     }
@@ -222,7 +232,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // We return a mock for non-contract addresses (for lazy updates) to avoid
         // unnecessarily evaluating its balance here.
-        if self.is_lazy {
+        if matches!(self.lazy_strategy, LazyStrategy::RawTransfer) {
             if location_hash == self.from_hash {
                 return Ok(Some(AccountInfo {
                     nonce: self.nonce,
@@ -586,26 +596,31 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                     || basic.balance != account.info.balance
                             })
                         {
-                            if evm.db().is_lazy {
-                                if account_location_hash == from_hash {
+                            match evm.db().lazy_strategy {
+                                LazyStrategy::RawTransfer => {
+                                    if account_location_hash == from_hash {
+                                        write_set.push((
+                                            account_location_hash,
+                                            MemoryValue::LazySender(
+                                                U256::MAX - account.info.balance,
+                                            ),
+                                        ));
+                                    } else if Some(account_location_hash) == to_hash {
+                                        write_set.push((
+                                            account_location_hash,
+                                            MemoryValue::LazyRecipient(tx.value),
+                                        ));
+                                    }
+                                }
+                                LazyStrategy::None => {
                                     write_set.push((
                                         account_location_hash,
-                                        MemoryValue::LazySender(U256::MAX - account.info.balance),
-                                    ));
-                                } else if Some(account_location_hash) == to_hash {
-                                    write_set.push((
-                                        account_location_hash,
-                                        MemoryValue::LazyRecipient(tx.value),
+                                        MemoryValue::Basic(AccountBasic {
+                                            balance: account.info.balance,
+                                            nonce: account.info.nonce,
+                                        }),
                                     ));
                                 }
-                            } else {
-                                write_set.push((
-                                    account_location_hash,
-                                    MemoryValue::Basic(AccountBasic {
-                                        balance: account.info.balance,
-                                        nonce: account.info.nonce,
-                                    }),
-                                ));
                             }
                         }
 
@@ -640,8 +655,11 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
                 drop(evm); // release db
 
-                if db.is_lazy {
-                    self.mv_memory.add_lazy_addresses([*from, *to.unwrap()]);
+                match db.lazy_strategy {
+                    LazyStrategy::None => {}
+                    LazyStrategy::RawTransfer => {
+                        self.mv_memory.add_lazy_addresses([*from, *to.unwrap()]);
+                    }
                 }
 
                 let wrote_new_location = self.mv_memory.record(tx_version, db.read_set, write_set);
@@ -652,7 +670,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         result_and_state,
                     ),
                     wrote_new_location,
-                    next_validation_idx: if db.is_lazy { 0 } else { tx_version.tx_idx },
+                    next_validation_idx: match db.lazy_strategy {
+                        LazyStrategy::None => tx_version.tx_idx,
+                        LazyStrategy::RawTransfer => 0,
+                    },
                 }
             }
             Err(EVMError::Database(ReadError::InconsistentRead)) => VmExecutionResult::Retry,
