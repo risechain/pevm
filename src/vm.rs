@@ -1,4 +1,5 @@
 use ahash::HashMapExt;
+use alloy_primitives::{keccak256, Bytes};
 use alloy_rpc_types::Receipt;
 use revm::{
     primitives::{
@@ -90,11 +91,42 @@ pub(crate) enum VmExecutionResult {
     },
 }
 
+// https://docs.soliditylang.org/en/v0.8.26/internals/layout_in_storage.html#mappings-and-dynamic-arrays
+fn get_erc20_balance_slot(address: Address) -> U256 {
+    let mut buf = [0u8; 64];
+    buf[12..32].copy_from_slice(address.as_slice());
+    keccak256(buf).into()
+}
+
 #[derive(Debug)]
 enum LazyStrategy {
     None,
     RawTransfer,
-    ERC20Transfer { sender: Address, recipient: Address },
+    ERC20Transfer {
+        sender_balance_slot: U256,
+        recipient_balance_slot: U256,
+        amount: U256,
+    },
+}
+
+impl LazyStrategy {
+    fn from(tx_sender: &Address, tx_recipient_code_hash: &Option<B256>, input: &Bytes) -> Self {
+        if tx_recipient_code_hash.is_none() {
+            return LazyStrategy::RawTransfer;
+        };
+
+        // TODO: We cannot blindly trust method_id. Use a whitelist of tx_recipient_code_hash.
+        // 0xa9059cbb: transfer(address,uint256)
+        if input.starts_with(&[0xa9, 0x05, 0x9c, 0xbb]) && input.len() == 4 + 32 + 32 {
+            return LazyStrategy::ERC20Transfer {
+                sender_balance_slot: get_erc20_balance_slot(*tx_sender),
+                recipient_balance_slot: get_erc20_balance_slot(Address::from_slice(&input[16..36])),
+                amount: U256::from_be_slice(&input[36..68]),
+            };
+        }
+
+        LazyStrategy::None
+    }
 }
 
 // A database interface that intercepts reads while executing a specific
@@ -142,23 +174,22 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
             read_set: ReadSet::with_capacity(2),
             read_accounts: HashMap::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
         };
-        // We only lazy update raw transfers that already have the sender
-        // or recipient in [MvMemory] since sequentially evaluating memory
-        // locations with only one entry is much costlier than fully
-        // evaluating it concurrently.
         // TODO: Only lazy update in block syncing mode, not for block
         // building.
         if let Some(to) = to {
             db.to_code_hash = db.get_code_hash(*to)?;
-            db.lazy_strategy = if let Some(_to_code_hash) = db.to_code_hash {
-                LazyStrategy::None
-            } else if vm.mv_memory.data.contains_key(&from_hash)
-                || vm.mv_memory.data.contains_key(&to_hash.unwrap())
-            {
-                LazyStrategy::RawTransfer
-            } else {
-                LazyStrategy::None
-            };
+            db.lazy_strategy = LazyStrategy::from(from, &db.to_code_hash, &vm.txs[*tx_idx].data);
+            if matches!(db.lazy_strategy, LazyStrategy::RawTransfer) {
+                // We only lazy update raw transfers that already have the sender
+                // or recipient in [MvMemory] since sequentially evaluating memory
+                // locations with only one entry is much costlier than fully
+                // evaluating it concurrently.
+                if !vm.mv_memory.data.contains_key(&from_hash)
+                    && !vm.mv_memory.data.contains_key(&to_hash.unwrap())
+                {
+                    db.lazy_strategy = LazyStrategy::None
+                }
+            }
         }
         Ok(db)
     }
@@ -425,34 +456,68 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        if let LazyStrategy::ERC20Transfer {
+            sender_balance_slot,
+            recipient_balance_slot,
+            amount,
+        } = self.lazy_strategy
+        {
+            if index == sender_balance_slot {
+                return Ok(amount);
+            }
+            if index == recipient_balance_slot {
+                return Ok(U256::ZERO);
+            }
+        }
+
         let location_hash = self
             .vm
             .hasher
             .hash_one(MemoryLocation::Storage(address, index));
 
         let read_origins = self.read_set.entry(location_hash).or_default();
+        read_origins.clear();
+
+        let mut accumulated_addition = U256::ZERO;
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
             if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
-                if let Some((closest_idx, entry)) =
-                    written_transactions.range(..self.tx_idx).next_back()
-                {
-                    match entry {
-                        MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
-                            Self::push_origin(
-                                read_origins,
-                                ReadOrigin::MvMemory(TxVersion {
-                                    tx_idx: *closest_idx,
-                                    tx_incarnation: *tx_incarnation,
-                                }),
-                            )?;
-                            return Ok(*value);
+                let mut iter = written_transactions.range(..self.tx_idx);
+                loop {
+                    match iter.next_back() {
+                        Some((blocking_idx, MemoryEntry::Estimate)) => {
+                            return Err(ReadError::BlockingIndex(*blocking_idx))
                         }
-                        MemoryEntry::Estimate => {
-                            return Err(ReadError::BlockingIndex(*closest_idx))
+                        Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                            read_origins.push(ReadOrigin::MvMemory(TxVersion {
+                                tx_idx: *closest_idx,
+                                tx_incarnation: *tx_incarnation,
+                            }));
+                            match value {
+                                MemoryValue::Storage(storage_value) => {
+                                    return Ok(storage_value.wrapping_add(accumulated_addition));
+                                }
+                                MemoryValue::ERC20TransferRecipient(addition) => {
+                                    accumulated_addition =
+                                        accumulated_addition.wrapping_add(*addition);
+                                }
+                                MemoryValue::ERC20TransferSender(subtraction) => {
+                                    accumulated_addition =
+                                        accumulated_addition.wrapping_sub(*subtraction);
+                                }
+                                _ => return Err(ReadError::InvalidMemoryLocationType),
+                            }
                         }
-                        _ => return Err(ReadError::InvalidMemoryLocationType),
+                        None => {
+                            read_origins.push(ReadOrigin::Storage);
+                            let value_from_storage = self
+                                .vm
+                                .storage
+                                .storage(&address, &index)
+                                .map_err(|err| ReadError::StorageError(err.to_string()))?;
+                            return Ok(value_from_storage.wrapping_add(accumulated_addition));
+                        }
                     }
                 }
             }
@@ -613,8 +678,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                         ));
                                     }
                                 }
-                                LazyStrategy::ERC20Transfer { .. } => todo!(),
-                                LazyStrategy::None => {
+                                LazyStrategy::ERC20Transfer { .. } | LazyStrategy::None => {
                                     write_set.push((
                                         account_location_hash,
                                         MemoryValue::Basic(AccountBasic {
@@ -640,12 +704,45 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     }
 
                     // TODO: We should move this changed check to our read set like for account info?
-                    for (slot, value) in account.changed_storage_slots() {
-                        write_set.push((
-                            self.hasher
-                                .hash_one(MemoryLocation::Storage(*address, *slot)),
-                            MemoryValue::Storage(value.present_value),
-                        ));
+                    for (&slot, value) in account.changed_storage_slots() {
+                        let memory_location_hash = self
+                            .hasher
+                            .hash_one(MemoryLocation::Storage(*address, slot));
+                        match evm.db().lazy_strategy {
+                            LazyStrategy::None => {
+                                write_set.push((
+                                    memory_location_hash,
+                                    MemoryValue::Storage(value.present_value),
+                                ));
+                            }
+                            LazyStrategy::RawTransfer => unreachable!(),
+                            LazyStrategy::ERC20Transfer {
+                                sender_balance_slot,
+                                recipient_balance_slot,
+                                amount,
+                            } => {
+                                if slot == sender_balance_slot {
+                                    write_set.push((
+                                        memory_location_hash,
+                                        MemoryValue::ERC20TransferSender(amount),
+                                    ));
+                                } else if slot == recipient_balance_slot {
+                                    write_set.push((
+                                        memory_location_hash,
+                                        MemoryValue::ERC20TransferRecipient(amount),
+                                    ));
+                                } else {
+                                    println!(
+                                        "changed slot address={:?} slot={:?} value={:?}",
+                                        address, slot, value.present_value
+                                    );
+                                    write_set.push((
+                                        memory_location_hash,
+                                        MemoryValue::Storage(value.present_value),
+                                    ));
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -659,7 +756,14 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
                 match db.lazy_strategy {
                     LazyStrategy::None => {}
-                    LazyStrategy::ERC20Transfer { .. } => todo!(),
+                    LazyStrategy::ERC20Transfer {
+                        sender_balance_slot,
+                        recipient_balance_slot,
+                        amount: _,
+                    } => self.mv_memory.add_lazy_locations([
+                        MemoryLocation::Storage(*to.unwrap(), sender_balance_slot),
+                        MemoryLocation::Storage(*to.unwrap(), recipient_balance_slot),
+                    ]),
                     LazyStrategy::RawTransfer => {
                         self.mv_memory.add_lazy_locations([
                             MemoryLocation::Basic(*from),
@@ -678,7 +782,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     wrote_new_location,
                     next_validation_idx: match db.lazy_strategy {
                         LazyStrategy::None => tx_version.tx_idx,
-                        LazyStrategy::ERC20Transfer { .. } => todo!(),
+                        LazyStrategy::ERC20Transfer { .. } => 0,
                         LazyStrategy::RawTransfer => 0,
                     },
                 }
