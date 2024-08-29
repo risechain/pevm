@@ -105,7 +105,6 @@ enum LazyStrategy {
     ERC20Transfer {
         sender_balance_slot: U256,
         recipient_balance_slot: U256,
-        amount: U256,
     },
 }
 
@@ -121,7 +120,6 @@ impl LazyStrategy {
             return LazyStrategy::ERC20Transfer {
                 sender_balance_slot: get_erc20_balance_slot(*tx_sender),
                 recipient_balance_slot: get_erc20_balance_slot(Address::from_slice(&input[16..36])),
-                amount: U256::from_be_slice(&input[36..68]),
             };
         }
 
@@ -459,14 +457,21 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         if let LazyStrategy::ERC20Transfer {
             sender_balance_slot,
             recipient_balance_slot,
-            amount,
         } = self.lazy_strategy
         {
             if index == sender_balance_slot {
-                return Ok(amount);
+                return self
+                    .vm
+                    .storage
+                    .storage(&address, &index)
+                    .map_err(|err| ReadError::StorageError(err.to_string()));
             }
             if index == recipient_balance_slot {
-                return Ok(U256::ZERO);
+                return self
+                    .vm
+                    .storage
+                    .storage(&address, &index)
+                    .map_err(|err| ReadError::StorageError(err.to_string()));
             }
         }
 
@@ -719,23 +724,22 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             LazyStrategy::ERC20Transfer {
                                 sender_balance_slot,
                                 recipient_balance_slot,
-                                amount,
                             } => {
                                 if slot == sender_balance_slot {
                                     write_set.push((
                                         memory_location_hash,
-                                        MemoryValue::ERC20TransferSender(amount),
+                                        MemoryValue::ERC20TransferSender(
+                                            value.original_value - value.present_value,
+                                        ),
                                     ));
                                 } else if slot == recipient_balance_slot {
                                     write_set.push((
                                         memory_location_hash,
-                                        MemoryValue::ERC20TransferRecipient(amount),
+                                        MemoryValue::ERC20TransferRecipient(
+                                            value.present_value - value.original_value,
+                                        ),
                                     ));
                                 } else {
-                                    println!(
-                                        "changed slot address={:?} slot={:?} value={:?}",
-                                        address, slot, value.present_value
-                                    );
                                     write_set.push((
                                         memory_location_hash,
                                         MemoryValue::Storage(value.present_value),
@@ -759,7 +763,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     LazyStrategy::ERC20Transfer {
                         sender_balance_slot,
                         recipient_balance_slot,
-                        amount: _,
                     } => self.mv_memory.add_lazy_locations([
                         MemoryLocation::Storage(*to.unwrap(), sender_balance_slot),
                         MemoryLocation::Storage(*to.unwrap(), recipient_balance_slot),
