@@ -7,7 +7,9 @@ use std::{
     thread,
 };
 
-use crate::{IncarnationStatus, Task, TxIdx, TxStatus, TxVersion};
+use smallvec::SmallVec;
+
+use crate::{FinishExecFlags, IncarnationStatus, Task, TxIdx, TxStatus, TxVersion};
 
 // The Pevm collaborative scheduler coordinates execution & validation
 // tasks among work threads.
@@ -45,13 +47,13 @@ pub(crate) struct Scheduler {
     transactions_status: Vec<Mutex<TxStatus>>,
     // The list of dependent transactions to resume when the
     // key transaction is re-executed.
-    transactions_dependents: Vec<Mutex<Vec<TxIdx>>>,
+    transactions_dependents: Vec<Mutex<SmallVec<[TxIdx; 1]>>>,
     // The next transaction to try and execute.
     execution_idx: AtomicUsize,
     // The next transaction to try and validate.
     validation_idx: AtomicUsize,
-    // We won't validate until we find the first transaction that
-    // reads or writes outside of its preprocessed dependencies.
+    // We won't validate until we find the first non-lazy transaction that
+    // needs to read explicit values. We also skip the first transaction.
     min_validation_idx: AtomicUsize,
     // The number of validated transactions
     num_validated: AtomicUsize,
@@ -76,8 +78,8 @@ impl Scheduler {
                 })
                 .collect(),
             transactions_dependents: (0..block_size).map(|_| Mutex::default()).collect(),
-            // We won't validate until we find the first transaction that
-            // reads or writes outside of its preprocessed dependencies.
+            // We won't validate until we find the first non-lazy transaction that
+            // needs to read explicit values. We also skip the first transaction.
             validation_idx: AtomicUsize::new(block_size),
             min_validation_idx: AtomicUsize::new(block_size),
             num_validated: AtomicUsize::new(0),
@@ -178,19 +180,13 @@ impl Scheduler {
         }
 
         let mut tx = index_mutex!(self.transactions_status, tx_idx);
-        if tx.status == IncarnationStatus::Executing {
-            tx.status = IncarnationStatus::Aborting;
-            drop(tx);
+        debug_assert_eq!(tx.status, IncarnationStatus::Executing);
+        tx.status = IncarnationStatus::Aborting;
 
-            let mut blocking_dependents =
-                index_mutex!(self.transactions_dependents, blocking_tx_idx);
-            blocking_dependents.push(tx_idx);
-            drop(blocking_dependents);
+        let mut blocking_dependents = index_mutex!(self.transactions_dependents, blocking_tx_idx);
+        blocking_dependents.push(tx_idx);
 
-            return true;
-        }
-
-        unreachable!("Trying to abort & add dependency in non-executing state!")
+        true
     }
 
     fn set_ready_status(&self, tx_idx: TxIdx) {
@@ -203,38 +199,26 @@ impl Scheduler {
     pub(crate) fn finish_execution(
         &self,
         tx_version: TxVersion,
-        wrote_new_location: bool,
-        next_validation_idx: TxIdx,
+        flags: FinishExecFlags,
     ) -> Option<Task> {
         let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
         debug_assert_eq!(tx.status, IncarnationStatus::Executing);
         debug_assert_eq!(tx.incarnation, tx_version.tx_incarnation);
-        tx.status = IncarnationStatus::Executed;
-        drop(tx);
 
         // Resume dependent transactions
         let mut dependents = index_mutex!(self.transactions_dependents, tx_version.tx_idx);
-        let mut min_dependent_idx = None;
-        for tx_idx in dependents.iter() {
-            self.set_ready_status(*tx_idx);
-            min_dependent_idx = match min_dependent_idx {
-                None => Some(*tx_idx),
-                Some(min_index) => Some(min(*tx_idx, min_index)),
-            }
-        }
-        dependents.clear();
-        drop(dependents);
-
-        if let Some(min_idx) = min_dependent_idx {
-            self.execution_idx.fetch_min(min_idx, Ordering::Release);
+        for tx_idx in dependents.drain(..) {
+            self.set_ready_status(tx_idx);
+            self.execution_idx.fetch_min(tx_idx, Ordering::Release);
         }
 
+        // TODO: Simplify or better document this logic.
         // Decide where to validate from next
-        let min_validation_idx = if next_validation_idx > 0 {
+        let min_validation_idx = if flags.contains(FinishExecFlags::NeedValidation) {
             min(
                 self.min_validation_idx
-                    .fetch_min(next_validation_idx, Ordering::Release),
-                next_validation_idx,
+                    .fetch_min(tx_version.tx_idx, Ordering::Release),
+                tx_version.tx_idx,
             )
         } else {
             self.min_validation_idx.load(Ordering::Acquire)
@@ -243,7 +227,7 @@ impl Scheduler {
         if min_validation_idx < self.block_size {
             // Must re-validate from min as this transaction is lower
             if tx_version.tx_idx < min_validation_idx {
-                if wrote_new_location {
+                if flags.contains(FinishExecFlags::WroteNewLocation) {
                     self.validation_idx
                         .fetch_min(min_validation_idx, Ordering::Release);
                 }
@@ -251,14 +235,27 @@ impl Scheduler {
             // Validate from this transaction as it's in between min and the current
             // validation index.
             else if tx_version.tx_idx < self.validation_idx.load(Ordering::Acquire) {
-                if wrote_new_location {
+                if flags.contains(FinishExecFlags::WroteNewLocation) {
                     self.validation_idx
                         .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
                 }
-                return Some(Task::Validation(tx_version));
+                if flags.contains(FinishExecFlags::NeedValidation) {
+                    tx.status = IncarnationStatus::Executed;
+                    return Some(Task::Validation(tx_version));
+                } else {
+                    tx.status = IncarnationStatus::Validated;
+                    self.num_validated.fetch_add(1, Ordering::Release);
+                }
             }
             // Don't need to validate anything if the current validation index is
             // lower or equal -- it will catch up later.
+        }
+
+        if flags.contains(FinishExecFlags::NeedValidation) {
+            tx.status = IncarnationStatus::Executed;
+        } else {
+            tx.status = IncarnationStatus::Validated;
+            self.num_validated.fetch_add(1, Ordering::Release);
         }
         None
     }

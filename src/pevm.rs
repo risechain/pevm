@@ -372,12 +372,11 @@ impl Pevm {
                 }
                 VmExecutionResult::Ok {
                     execution_result,
-                    wrote_new_location,
-                    next_validation_idx,
+                    flags,
                 } => {
                     *index_mutex!(self.execution_results, tx_version.tx_idx) =
                         Some(execution_result);
-                    scheduler.finish_execution(tx_version, wrote_new_location, next_validation_idx)
+                    scheduler.finish_execution(tx_version, flags)
                 }
             };
         }

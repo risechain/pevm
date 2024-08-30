@@ -2601,6 +2601,7 @@ dependencies = [
  "alloy-transport-http",
  "alloy-trie",
  "bincode",
+ "bitflags 2.6.0",
  "bitvec",
  "criterion",
  "dashmap",
