@@ -13,9 +13,9 @@ use std::collections::HashMap;
 use crate::{
     chain::{PevmChain, RewardPolicy},
     mv_memory::MvMemory,
-    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, MemoryEntry, MemoryLocation,
-    MemoryLocationHash, MemoryValue, ReadError, ReadOrigin, ReadOrigins, ReadSet, Storage, TxIdx,
-    TxVersion, WriteSet,
+    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
+    MemoryLocation, MemoryLocationHash, MemoryValue, ReadError, ReadOrigin, ReadOrigins, ReadSet,
+    Storage, TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -76,17 +76,7 @@ pub(crate) enum VmExecutionResult {
     ExecutionError(ExecutionError),
     Ok {
         execution_result: PevmTxExecutionResult,
-        wrote_new_location: bool,
-        // From which transaction index do we need to validate from after
-        // this execution. This is [0] when no validation is required.
-        // For instance, for transactions that only read and write to the
-        // from and to addresses, which preprocessing & lazy evaluation has
-        // already covered. Note that this is used to set the min validation
-        // index in the scheduler, meaning a [0] here will still be validated
-        // if there was a lower transaction that has broken the preprocessed
-        // dependency chain and returned a non-zero index.
-        // TODO: Better name & doc
-        next_validation_idx: TxIdx,
+        flags: FinishExecFlags,
     },
 }
 
@@ -644,15 +634,22 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     self.mv_memory.add_lazy_addresses([*from, *to.unwrap()]);
                 }
 
-                let wrote_new_location = self.mv_memory.record(tx_version, db.read_set, write_set);
+                let mut flags = if tx_version.tx_idx > 0 && !db.is_lazy {
+                    FinishExecFlags::NeedValidation
+                } else {
+                    FinishExecFlags::empty()
+                };
+
+                if self.mv_memory.record(tx_version, db.read_set, write_set) {
+                    flags |= FinishExecFlags::WroteNewLocation;
+                }
 
                 VmExecutionResult::Ok {
                     execution_result: PevmTxExecutionResult::from_revm(
                         self.spec_id,
                         result_and_state,
                     ),
-                    wrote_new_location,
-                    next_validation_idx: if db.is_lazy { 0 } else { tx_version.tx_idx },
+                    flags,
                 }
             }
             Err(EVMError::Database(ReadError::InconsistentRead)) => VmExecutionResult::Retry,

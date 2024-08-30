@@ -14,6 +14,8 @@ alloy-primitives = { version = "0.8.0", features = ["asm-keccak"] }
 alloy-rlp = "0.3.8"
 alloy-rpc-types = "0.3.1"
 alloy-trie = "0.5.1"
+# We can roll our own but [revm] depends on this anyway.
+bitflags = "2.6.0"
 bitvec = "1.0.1"
 dashmap = "6.0.1"
 serde = "1.0.209"

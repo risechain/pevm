@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
 use alloy_primitives::{Address, B256, U256};
+use bitflags::bitflags;
 use smallvec::SmallVec;
 
 /// We use the last 8 bytes of an existing hash like address
@@ -201,6 +202,21 @@ pub enum ReadError {
 enum Task {
     Execution(TxVersion),
     Validation(TxVersion),
+}
+
+bitflags! {
+    struct FinishExecFlags: u8 {
+        // Do we need to validate from this transaction?
+        // The first and lazy transactions don't need validation. Note
+        // that this is used to tune the min validation index in the
+        // scheduler, meaning a [false] here will still be validated if
+        // there was a lower transaction that has broken the preprocessed
+        // dependency chain and returned [true]
+        const NeedValidation = 0;
+        // We need to validate from the next transaction if this execution
+        // wrote to a new location.
+        const WroteNewLocation = 1;
+    }
 }
 
 // This optimization is desired as we constantly index into many
