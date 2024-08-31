@@ -1,10 +1,7 @@
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Mutex,
-};
+use std::{collections::BTreeMap, sync::Mutex};
 
 use alloy_primitives::B256;
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use revm::primitives::Bytecode;
 
 use crate::{
@@ -34,7 +31,7 @@ pub struct MvMemory {
     /// Last read & written locations of each transaction
     last_locations: Vec<Mutex<LastLocations>>,
     /// Lazy locations that need full evaluation at the end of the block
-    lazy_locations: Mutex<HashSet<MemoryLocation, BuildSuffixHasher>>,
+    pub(crate) lazy_locations: DashSet<MemoryLocation>,
     /// New bytecodes deployed in this block
     pub(crate) new_bytecodes: DashMap<B256, Bytecode, BuildSuffixHasher>,
 }
@@ -64,20 +61,10 @@ impl MvMemory {
         Self {
             data,
             last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
-            lazy_locations: Mutex::new(HashSet::from_iter(lazy_locations)),
+            lazy_locations: DashSet::from_iter(lazy_locations),
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DashMap::default(),
-        }
-    }
-
-    pub(crate) fn add_lazy_locations(
-        &self,
-        new_lazy_locations: impl IntoIterator<Item = MemoryLocation>,
-    ) {
-        let mut lazy_locations = self.lazy_locations.lock().unwrap();
-        for memory_location in new_lazy_locations {
-            lazy_locations.insert(memory_location);
         }
     }
 
@@ -183,9 +170,5 @@ impl MvMemory {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }
         }
-    }
-
-    pub(crate) fn consume_lazy_locations(&self) -> impl IntoIterator<Item = MemoryLocation> {
-        std::mem::take(&mut *self.lazy_locations.lock().unwrap()).into_iter()
     }
 }

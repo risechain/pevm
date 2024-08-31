@@ -1,5 +1,5 @@
 use ahash::HashMapExt;
-use alloy_primitives::{fixed_bytes, Bytes};
+use alloy_primitives::keccak256;
 use alloy_rpc_types::Receipt;
 use revm::{
     primitives::{
@@ -9,7 +9,7 @@ use revm::{
     Context, Database, Evm, EvmContext,
 };
 use smallvec::{smallvec, SmallVec};
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use crate::{
     chain::{PevmChain, RewardPolicy},
@@ -91,44 +91,11 @@ pub(crate) enum VmExecutionResult {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum LazyStrategy {
     None,
     RawTransfer,
-    ERC20Transfer,
-}
-
-const ERC20_BLACK_LIST: [B256; 10] = [
-    fixed_bytes!("7643c7b2b6fb528148258f2df24a4886a16ef4ef0c24a66d450b30c3745e037e"),
-    fixed_bytes!("b44fb4e949d0f78f87f79ee46428f23a2a5713ce6fc6e0beb3dda78c2ac1ea55"),
-    fixed_bytes!("46b6363fd10967e323492ece76ce977179b72b9ea7fb33b63ee241923182ec5c"),
-    fixed_bytes!("d80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505"),
-    fixed_bytes!("6ac913439c1c74e794a62468f323dd463b65a0e1a4f2d63d7eb970bfcc2a35db"),
-    fixed_bytes!("5120ab7aa1e15bf94988b32fe3e97399d65617f278fdf558d42f84e793d72c8c"),
-    fixed_bytes!("e619adf5d647d7167756e3208a4bae86d3db708ce8b32434be4bb5b485d94733"),
-    fixed_bytes!("fc89fe2a6b60196aa6c5a0e608fdde255917c4e8a8c2fb1f69f4b6c8aee38164"),
-    fixed_bytes!("2e92e1fe6db9b5ab985295d2d34275c4121f8f65724eb0eec85c7d662debc2f1"),
-    fixed_bytes!("7aaf7616174bab59b5a8986db1cb18615324bb01dee029b3b9a72d1c77a0841d"),
-];
-
-impl LazyStrategy {
-    fn from(tx_recipient_code_hash: &Option<B256>, input: &Bytes) -> Self {
-        let Some(code_hash) = tx_recipient_code_hash else {
-            return LazyStrategy::RawTransfer;
-        };
-
-        // TODO: We cannot blindly trust method_id. Use a whitelist of tx_recipient_code_hash.
-        // 0xa9059cbb: transfer(address,uint256)
-        if input.starts_with(&[0xa9, 0x05, 0x9c, 0xbb]) && input.len() == 4 + 32 + 32 {
-            if ERC20_BLACK_LIST.contains(code_hash) {
-                return LazyStrategy::None;
-            }
-
-            return LazyStrategy::ERC20Transfer;
-        }
-
-        LazyStrategy::None
-    }
+    ERC20Transfer { amount: U256, recipient: Address },
 }
 
 // A database interface that intercepts reads while executing a specific
@@ -180,16 +147,23 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // building.
         if let Some(to) = to {
             db.to_code_hash = db.get_code_hash(*to)?;
-            db.lazy_strategy = LazyStrategy::from(&db.to_code_hash, &vm.txs[*tx_idx].data);
-            if matches!(db.lazy_strategy, LazyStrategy::RawTransfer) {
+            if db.to_code_hash.is_none() {
                 // We only lazy update raw transfers that already have the sender
                 // or recipient in [MvMemory] since sequentially evaluating memory
                 // locations with only one entry is much costlier than fully
                 // evaluating it concurrently.
-                if !vm.mv_memory.data.contains_key(&from_hash)
-                    && !vm.mv_memory.data.contains_key(&to_hash.unwrap())
+                db.lazy_strategy = if vm.mv_memory.data.contains_key(&from_hash)
+                    || vm.mv_memory.data.contains_key(&to_hash.unwrap())
                 {
-                    db.lazy_strategy = LazyStrategy::None
+                    LazyStrategy::RawTransfer
+                } else {
+                    LazyStrategy::None
+                }
+            } else if vm.chain.is_erc20_transfer(&vm.txs[*tx_idx]) {
+                let input = &vm.txs[*tx_idx].data;
+                db.lazy_strategy = LazyStrategy::ERC20Transfer {
+                    amount: U256::from_be_slice(&input[36..68]),
+                    recipient: Address::from_slice(&input[16..36]),
                 }
             }
         }
@@ -458,13 +432,38 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        if let LazyStrategy::ERC20Transfer { .. } = self.lazy_strategy {
+        if let LazyStrategy::ERC20Transfer { amount, recipient } = self.lazy_strategy {
             if Some(&address) == self.to {
-                return self
+                // Using the storage value is the best guess to match the zeroness.
+                // The zeroness of the storage slot (before and after tx) affects the gas used.
+                let storage_value = self
                     .vm
                     .storage
                     .storage(&address, &index)
-                    .map_err(|err| ReadError::StorageError(err.to_string()));
+                    .map_err(|err| ReadError::StorageError(err.to_string()))?;
+
+                // If the storage_value is big enough, we don't need to care
+                // whether the storage slot is sender or recipient.
+                if storage_value >= amount {
+                    return Ok(storage_value);
+                }
+
+                // Otherwise, if this storage slot belongs to the sender,
+                // the execution will fail because of insufficient balance.
+                // We must assume that the sender has just enough balance,
+                // so that the execution succeed.
+                // Although our prediction might be wrong, at least
+                // the guarding logic later can handle gracefully.
+                let mut buf = [0u8; 64];
+                buf[12..32].copy_from_slice(recipient.as_slice());
+                let recipient_balance_slot = keccak256(buf); // this operation is expensive
+                if index == recipient_balance_slot.into() {
+                    return Ok(amount);
+                }
+
+                // Here we know that the storage slot belongs to the recipient.
+                // Therefore, storage_value is the best guess.
+                return Ok(storage_value);
             }
         }
 
@@ -477,6 +476,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         read_origins.clear();
 
         let mut accumulated_addition = U256::ZERO;
+        let mut accumulated_subtraction = U256::ZERO;
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
@@ -488,33 +488,37 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                             return Err(ReadError::BlockingIndex(*blocking_idx))
                         }
                         Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
-                            read_origins.push(ReadOrigin::MvMemory(TxVersion {
-                                tx_idx: *closest_idx,
-                                tx_incarnation: *tx_incarnation,
-                            }));
+                            Self::push_origin(
+                                read_origins,
+                                ReadOrigin::MvMemory(TxVersion {
+                                    tx_idx: *closest_idx,
+                                    tx_incarnation: *tx_incarnation,
+                                }),
+                            )?;
                             match value {
                                 MemoryValue::Storage(storage_value) => {
-                                    return Ok(storage_value.wrapping_add(accumulated_addition));
+                                    return Ok(storage_value + accumulated_addition
+                                        - accumulated_subtraction);
                                 }
-                                MemoryValue::ERC20TransferRecipient(addition) => {
-                                    accumulated_addition =
-                                        accumulated_addition.wrapping_add(*addition);
+                                MemoryValue::ERC20TransferRecipient { amount, .. } => {
+                                    accumulated_addition += amount;
                                 }
-                                MemoryValue::ERC20TransferSender(subtraction) => {
-                                    accumulated_addition =
-                                        accumulated_addition.wrapping_sub(*subtraction);
+                                MemoryValue::ERC20TransferSender { amount, .. } => {
+                                    accumulated_subtraction += amount;
                                 }
                                 _ => return Err(ReadError::InvalidMemoryLocationType),
                             }
                         }
                         None => {
-                            read_origins.push(ReadOrigin::Storage);
+                            Self::push_origin(read_origins, ReadOrigin::Storage)?;
                             let value_from_storage = self
                                 .vm
                                 .storage
                                 .storage(&address, &index)
                                 .map_err(|err| ReadError::StorageError(err.to_string()))?;
-                            return Ok(value_from_storage.wrapping_add(accumulated_addition));
+                            return Ok(
+                                value_from_storage + accumulated_addition - accumulated_subtraction
+                            );
                         }
                     }
                 }
@@ -602,7 +606,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             TransactTo::Call(address) => (Some(address), Some(self.hash_basic(address))),
             TransactTo::Create => (None, None),
         };
-        let mut lazy_locations = SmallVec::<[MemoryLocation; 2]>::new();
 
         // Execute
         let mut db = match VmDb::new(
@@ -664,7 +667,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             match evm.db().lazy_strategy {
                                 LazyStrategy::RawTransfer => {
                                     if account_location_hash == from_hash {
-                                        lazy_locations.push(MemoryLocation::Basic(*address));
+                                        self.mv_memory
+                                            .lazy_locations
+                                            .insert(MemoryLocation::Basic(*address));
                                         write_set.push((
                                             account_location_hash,
                                             MemoryValue::LazySender(
@@ -672,7 +677,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                             ),
                                         ));
                                     } else if Some(account_location_hash) == to_hash {
-                                        lazy_locations.push(MemoryLocation::Basic(*address));
+                                        self.mv_memory
+                                            .lazy_locations
+                                            .insert(MemoryLocation::Basic(*address));
                                         write_set.push((
                                             account_location_hash,
                                             MemoryValue::LazyRecipient(tx.value),
@@ -707,7 +714,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     // TODO: We should move this changed check to our read set like for account info?
                     for (&slot, value) in account.changed_storage_slots() {
                         let memory_location = MemoryLocation::Storage(*address, slot);
-                        let memory_location_hash = self.hasher.hash_one(memory_location.clone());
+                        let memory_location_hash = self.hasher.hash_one(&memory_location);
                         match evm.db().lazy_strategy {
                             LazyStrategy::None => {
                                 write_set.push((
@@ -715,32 +722,36 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                     MemoryValue::Storage(value.present_value),
                                 ));
                             }
-                            LazyStrategy::RawTransfer => unreachable!(),
                             LazyStrategy::ERC20Transfer { .. } => {
+                                self.mv_memory.lazy_locations.insert(memory_location);
                                 match Ord::cmp(&value.present_value, &value.original_value) {
-                                    std::cmp::Ordering::Less => {
-                                        lazy_locations.push(memory_location);
+                                    Ordering::Less => {
                                         write_set.push((
                                             memory_location_hash,
-                                            MemoryValue::ERC20TransferSender(
-                                                value.original_value - value.present_value,
-                                            ),
+                                            MemoryValue::ERC20TransferSender {
+                                                amount: value.original_value - value.present_value,
+                                                zeroness_before: value.original_value.is_zero(),
+                                                zeroness_after: value.present_value.is_zero(),
+                                            },
                                         ));
                                     }
-                                    std::cmp::Ordering::Equal => {
+                                    Ordering::Greater => {
+                                        write_set.push((
+                                            memory_location_hash,
+                                            MemoryValue::ERC20TransferRecipient {
+                                                amount: value.present_value - value.original_value,
+                                                zeroness_before: value.original_value.is_zero(),
+                                                zeroness_after: value.present_value.is_zero(),
+                                            },
+                                        ));
+                                    }
+                                    Ordering::Equal => {
+                                        // Unreachable because we are iterating `account.CHANGED_storage_slots()`.
                                         unreachable!();
-                                    }
-                                    std::cmp::Ordering::Greater => {
-                                        lazy_locations.push(memory_location);
-                                        write_set.push((
-                                            memory_location_hash,
-                                            MemoryValue::ERC20TransferRecipient(
-                                                value.present_value - value.original_value,
-                                            ),
-                                        ));
                                     }
                                 }
                             }
+                            LazyStrategy::RawTransfer => unreachable!(),
                         }
                     }
                 }
@@ -752,8 +763,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 );
 
                 drop(evm); // release db
-
-                self.mv_memory.add_lazy_locations(lazy_locations);
 
                 let wrote_new_location = self.mv_memory.record(tx_version, db.read_set, write_set);
 

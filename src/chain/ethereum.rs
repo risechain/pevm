@@ -7,7 +7,7 @@ use std::{
 
 use alloy_chains::NamedChain;
 use alloy_consensus::{ReceiptEnvelope, TxType};
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{address, Address, TxKind, B256, U256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{BlockTransactions, Header, Transaction};
 use revm::{
@@ -201,5 +201,18 @@ impl PevmChain for PevmEthereum {
             hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
         }
         hash_builder.root()
+    }
+
+    fn is_erc20_transfer(&self, tx: &TxEnv) -> bool {
+        static ERC20_KNOWN_ADDRESSES: [Address; 1] =
+            [address!("b131f4a55907b10d1f0a50d8ab8fa09ec342cd74")];
+
+        let TxKind::Call(contract_address) = tx.transact_to else {
+            return false;
+        };
+
+        tx.data.len() == 4 + 32 + 32
+            && tx.data.starts_with(&[0xa9, 0x05, 0x9c, 0xbb])
+            && ERC20_KNOWN_ADDRESSES.contains(&contract_address)
     }
 }

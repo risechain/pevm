@@ -82,9 +82,17 @@ enum MemoryValue {
     // Explicit balance subtraction & implicit nonce increment.
     LazySender(U256),
     // ERC20 balance addition
-    ERC20TransferRecipient(U256),
+    ERC20TransferRecipient {
+        amount: U256,
+        zeroness_before: bool,
+        zeroness_after: bool,
+    },
     // ERC20 balance subtraction
-    ERC20TransferSender(U256),
+    ERC20TransferSender {
+        amount: U256,
+        zeroness_before: bool,
+        zeroness_after: bool,
+    },
     // The account was self-destructed.
     SelfDestructed,
 }
