@@ -689,6 +689,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
                 let mut write_set = WriteSet::with_capacity(3);
+                let mut lazy_locations: SmallVec<[MemoryLocation; 2]> = SmallVec::new();
+
                 for (address, account) in result_and_state.state.iter() {
                     if account.is_selfdestructed() {
                         // TODO: Also write [SelfDestructed] to the basic location?
@@ -720,9 +722,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             match evm.db().lazy_strategy {
                                 LazyStrategy::RawTransfer => {
                                     if account_location_hash == from_hash {
-                                        self.mv_memory
-                                            .lazy_locations
-                                            .insert(MemoryLocation::Basic(*address));
+                                        lazy_locations.push(MemoryLocation::Basic(*address));
                                         write_set.push((
                                             account_location_hash,
                                             MemoryValue::LazySender(
@@ -730,9 +730,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                             ),
                                         ));
                                     } else if Some(account_location_hash) == to_hash {
-                                        self.mv_memory
-                                            .lazy_locations
-                                            .insert(MemoryLocation::Basic(*address));
+                                        lazy_locations.push(MemoryLocation::Basic(*address));
                                         write_set.push((
                                             account_location_hash,
                                             MemoryValue::LazyRecipient(tx.value),
@@ -776,7 +774,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                 ));
                             }
                             LazyStrategy::ERC20Transfer { .. } => {
-                                self.mv_memory.lazy_locations.insert(memory_location);
+                                lazy_locations.push(memory_location);
                                 match Ord::cmp(&value.present_value, &value.original_value) {
                                     Ordering::Less => {
                                         write_set.push((
@@ -807,6 +805,12 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             LazyStrategy::RawTransfer => unreachable!(),
                         }
                     }
+                }
+
+                if !lazy_locations.is_empty() {
+                    let mut guard = self.mv_memory.lazy_locations.lock().unwrap();
+                    guard.extend(lazy_locations);
+                    drop(guard)
                 }
 
                 self.apply_rewards(

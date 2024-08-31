@@ -1,7 +1,8 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
+use ahash::AHashSet;
 use alloy_primitives::B256;
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
 use revm::primitives::Bytecode;
 
 use crate::{
@@ -31,7 +32,7 @@ pub struct MvMemory {
     /// Last read & written locations of each transaction
     last_locations: Vec<Mutex<LastLocations>>,
     /// Lazy locations that need full evaluation at the end of the block
-    pub(crate) lazy_locations: DashSet<MemoryLocation>,
+    pub(crate) lazy_locations: Mutex<AHashSet<MemoryLocation>>,
     /// New bytecodes deployed in this block
     pub(crate) new_bytecodes: DashMap<B256, Bytecode, BuildSuffixHasher>,
 }
@@ -61,7 +62,7 @@ impl MvMemory {
         Self {
             data,
             last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
-            lazy_locations: DashSet::from_iter(lazy_locations),
+            lazy_locations: Mutex::new(AHashSet::from_iter(lazy_locations)),
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DashMap::default(),

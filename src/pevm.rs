@@ -231,8 +231,8 @@ impl Pevm {
 
         // We fully evaluate (the balance and nonce of) the beneficiary account
         // and raw transfer recipients that may have been atomically updated.
-        for memory_location in mv_memory.lazy_locations.iter() {
-            match memory_location.key() {
+        for memory_location in mv_memory.lazy_locations.lock().unwrap().iter() {
+            match memory_location {
                 MemoryLocation::Basic(address) => {
                     let location_hash = self.hasher.hash_one(MemoryLocation::Basic(*address));
                     if let Some(write_history) = mv_memory.data.get(&location_hash) {
