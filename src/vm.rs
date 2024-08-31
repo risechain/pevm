@@ -1,5 +1,5 @@
 use ahash::{AHashMap, HashMapExt};
-use alloy_primitives::{keccak256, TxKind};
+use alloy_primitives::TxKind;
 use alloy_rpc_types::Receipt;
 use revm::{
     primitives::{
@@ -95,7 +95,7 @@ pub(crate) enum VmExecutionResult {
 enum LazyStrategy {
     None,
     RawTransfer,
-    ERC20Transfer { amount: U256, recipient: Address },
+    ERC20Transfer { amount: U256 },
 }
 
 // A database interface that intercepts reads while executing a specific
@@ -167,7 +167,6 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
                         let input = &vm.txs[*tx_idx].data;
                         LazyStrategy::ERC20Transfer {
                             amount: U256::from_be_slice(&input[36..68]),
-                            recipient: Address::from_slice(&input[16..36]),
                         }
                     } else {
                         LazyStrategy::None
@@ -439,7 +438,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        if let LazyStrategy::ERC20Transfer { amount, recipient } = self.lazy_strategy {
+        if let LazyStrategy::ERC20Transfer { amount } = self.lazy_strategy {
             if Some(&address) == self.to {
                 // Using the storage value is the best guess to match the zeroness.
                 // The zeroness of the storage slot (before and after tx) affects the gas used.
@@ -455,22 +454,15 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                     return Ok(storage_value);
                 }
 
-                // Otherwise, if this storage slot belongs to the sender,
-                // the execution will fail because of insufficient balance.
-                // We must assume that the sender has just enough balance,
-                // so that the execution succeed.
-                // Although our prediction might be wrong, at least
-                // the guarding logic later can handle gracefully.
-                let mut buf = [0u8; 64];
-                buf[12..32].copy_from_slice(recipient.as_slice());
-                let recipient_balance_slot = keccak256(buf); // this operation is expensive
-                if index == recipient_balance_slot.into() {
-                    return Ok(amount);
+                // If the storage_value is zero, it should be a recipient.
+                // We should not touch.
+                if storage_value.is_zero() {
+                    return Ok(storage_value);
                 }
 
-                // Here we know that the storage slot belongs to the recipient.
-                // Therefore, storage_value is the best guess.
-                return Ok(storage_value);
+                // Otherwise, let's assume that this is a recipient.
+                // In this case, an arbitrarily large value is okay.
+                return Ok(U256::from(1).wrapping_shl(255));
             }
         }
 

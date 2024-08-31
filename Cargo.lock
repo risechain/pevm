@@ -2562,6 +2562,7 @@ dependencies = [
  "bitvec",
  "criterion",
  "dashmap 6.0.1",
+ "once_cell",
  "rand",
  "rayon",
  "reqwest 0.12.7",
