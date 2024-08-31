@@ -1,5 +1,5 @@
-use ahash::HashMapExt;
-use alloy_primitives::keccak256;
+use ahash::{AHashMap, HashMapExt};
+use alloy_primitives::{keccak256, TxKind};
 use alloy_rpc_types::Receipt;
 use revm::{
     primitives::{
@@ -160,11 +160,18 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
                     LazyStrategy::None
                 }
             } else if vm.chain.is_erc20_transfer(&vm.txs[*tx_idx]) {
-                let input = &vm.txs[*tx_idx].data;
-                db.lazy_strategy = LazyStrategy::ERC20Transfer {
-                    amount: U256::from_be_slice(&input[36..68]),
-                    recipient: Address::from_slice(&input[16..36]),
-                }
+                // Similarly, we don't want to lazy update for ERC20 transfers
+                // if the contract address is not being called too many times.
+                db.lazy_strategy =
+                    if vm.recipient_frequency.get(to).copied().unwrap_or_default() >= 4 {
+                        let input = &vm.txs[*tx_idx].data;
+                        LazyStrategy::ERC20Transfer {
+                            amount: U256::from_be_slice(&input[36..68]),
+                            recipient: Address::from_slice(&input[16..36]),
+                        }
+                    } else {
+                        LazyStrategy::None
+                    }
             }
         }
         Ok(db)
@@ -240,7 +247,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // We return a mock for non-contract addresses (for lazy updates) to avoid
         // unnecessarily evaluating its balance here.
-        if matches!(self.lazy_strategy, LazyStrategy::RawTransfer) {
+        if self.lazy_strategy == LazyStrategy::RawTransfer {
             if location_hash == self.from_hash {
                 return Ok(Some(AccountInfo {
                     nonce: self.nonce,
@@ -596,6 +603,7 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
+    recipient_frequency: AHashMap<Address, usize>,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
@@ -608,6 +616,13 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         txs: &'a [TxEnv],
         spec_id: SpecId,
     ) -> Self {
+        let mut recipient_frequency = AHashMap::new();
+        for tx in txs.iter() {
+            if let TxKind::Call(address) = tx.transact_to {
+                *recipient_frequency.entry(address).or_default() += 1;
+            }
+        }
+
         Self {
             hasher,
             storage,
@@ -618,6 +633,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             reward_policy: chain.get_reward_policy(hasher),
+            recipient_frequency,
         }
     }
 
