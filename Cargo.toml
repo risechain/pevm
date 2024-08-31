@@ -18,6 +18,7 @@ bitvec = "1.0.1"
 dashmap = "6.0.1"
 serde = "1.0.209"
 smallvec = "1.13.2"
+phf = { version = "0.11.2", features = ["macros"] }
 
 # Let's do our best to port needed REVM changes upstream
 revm = { git = "https://github.com/risechain/revm", rev = "171c1fa5e78df7f88c3bacbaae49ceac578d5f18", features = [
@@ -32,7 +33,6 @@ alloy-transport = "0.2.1"
 alloy-transport-http = "0.2.1"
 reqwest = "0.12.7"
 tokio = { version = "1.39.3", features = ["rt-multi-thread"] }
-once_cell = "1.19.0"
 
 [dev-dependencies]
 bincode = "1.3.3"
