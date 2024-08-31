@@ -473,8 +473,11 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             .hash_one(MemoryLocation::Storage(address, index));
 
         let read_origins = self.read_set.entry(location_hash).or_default();
-        read_origins.clear();
-
+        let has_prev_origins = !read_origins.is_empty();
+        // We accumulate new origins to either:
+        // - match with the previous origins to check consistency
+        // - register origins on the first read
+        let mut new_origins = SmallVec::new();
         let mut accumulated_addition = U256::ZERO;
         let mut accumulated_subtraction = U256::ZERO;
 
@@ -488,15 +491,29 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                             return Err(ReadError::BlockingIndex(*blocking_idx))
                         }
                         Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
-                            Self::push_origin(
-                                read_origins,
-                                ReadOrigin::MvMemory(TxVersion {
-                                    tx_idx: *closest_idx,
-                                    tx_incarnation: *tx_incarnation,
-                                }),
-                            )?;
+                            // About to push a new origin
+                            // Inconsistent: new origin will be longer than the previous!
+                            if has_prev_origins && read_origins.len() == new_origins.len() {
+                                return Err(ReadError::InconsistentRead);
+                            }
+                            let origin = ReadOrigin::MvMemory(TxVersion {
+                                tx_idx: *closest_idx,
+                                tx_incarnation: *tx_incarnation,
+                            });
+                            // Inconsistent: new origin is different from the previous!
+                            if has_prev_origins
+                                && unsafe { read_origins.get_unchecked(new_origins.len()) }
+                                    != &origin
+                            {
+                                return Err(ReadError::InconsistentRead);
+                            }
+                            new_origins.push(origin);
+
                             match value {
                                 MemoryValue::Storage(storage_value) => {
+                                    if !has_prev_origins {
+                                        *read_origins = new_origins;
+                                    }
                                     return Ok(storage_value + accumulated_addition
                                         - accumulated_subtraction);
                                 }
@@ -510,12 +527,27 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                             }
                         }
                         None => {
-                            Self::push_origin(read_origins, ReadOrigin::Storage)?;
+                            // Populate [Storage] on the first read
+                            if !has_prev_origins {
+                                new_origins.push(ReadOrigin::Storage);
+                            }
+                            // Inconsistent: previous origin is longer or didn't read
+                            // from storage for the last origin.
+                            else if read_origins.len() != new_origins.len() + 1
+                                || read_origins.last() != Some(&ReadOrigin::Storage)
+                            {
+                                return Err(ReadError::InconsistentRead);
+                            }
                             let value_from_storage = self
                                 .vm
                                 .storage
                                 .storage(&address, &index)
                                 .map_err(|err| ReadError::StorageError(err.to_string()))?;
+                            // Populate read origins on the first read.
+                            // Otherwise [read_origins] matches [new_origins] already.
+                            if !has_prev_origins {
+                                *read_origins = new_origins;
+                            }
                             return Ok(
                                 value_from_storage + accumulated_addition - accumulated_subtraction
                             );
@@ -526,7 +558,20 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         }
 
         // Fall back to storage
-        Self::push_origin(read_origins, ReadOrigin::Storage)?;
+        // Populate [Storage] on the first read
+        if !has_prev_origins {
+            new_origins.push(ReadOrigin::Storage);
+        }
+        // Inconsistent: previous origin is longer or didn't read
+        // from storage for the last origin.
+        else if read_origins.len() != new_origins.len() + 1
+            || read_origins.last() != Some(&ReadOrigin::Storage)
+        {
+            return Err(ReadError::InconsistentRead);
+        }
+        if !has_prev_origins {
+            *read_origins = new_origins;
+        }
         self.vm
             .storage
             .storage(&address, &index)
