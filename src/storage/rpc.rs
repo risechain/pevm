@@ -5,7 +5,10 @@ use std::{fmt::Debug, future::IntoFuture, sync::Mutex};
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, B256, U256};
-use alloy_provider::{Network, Provider, RootProvider};
+use alloy_provider::{
+    network::{BlockResponse, HeaderResponse},
+    Network, Provider, RootProvider,
+};
 use alloy_rpc_types::{BlockId, BlockNumberOrTag};
 use alloy_transport::TransportError;
 use alloy_transport_http::Http;
@@ -193,7 +196,7 @@ impl<N: Network> Storage for RpcStorage<N> {
                     .get_block_by_number(BlockNumberOrTag::Number(*number), false)
                     .into_future(),
             )
-            .map(|block| block.unwrap().header.hash.unwrap())?;
+            .map(|block| block.unwrap().header().hash())?;
 
         self.cache_block_hashes
             .lock()

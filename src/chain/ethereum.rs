@@ -40,8 +40,6 @@ impl PevmEthereum {
 /// Error type for [PevmEthereum::get_block_spec].
 #[derive(Debug, Clone, PartialEq)]
 pub enum EthereumBlockSpecError {
-    /// When [header.number] is none.
-    MissingBlockNumber,
     /// When [header.total_difficulty] is none.
     MissingTotalDifficulty,
 }
@@ -72,36 +70,32 @@ impl PevmChain for PevmEthereum {
     // TODO: Better error handling & properly test this.
     // TODO: Only Ethereum Mainnet is supported at the moment.
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError> {
-        let number = header
-            .number
-            .ok_or(EthereumBlockSpecError::MissingBlockNumber)?;
-        let total_difficulty = header
-            .total_difficulty
-            .ok_or(EthereumBlockSpecError::MissingTotalDifficulty)?;
-
         Ok(if header.timestamp >= 1710338135 {
             SpecId::CANCUN
         } else if header.timestamp >= 1681338455 {
             SpecId::SHANGHAI
-        } else if total_difficulty.saturating_sub(header.difficulty)
+        } else if (header
+            .total_difficulty
+            .ok_or(EthereumBlockSpecError::MissingTotalDifficulty)?)
+        .saturating_sub(header.difficulty)
             >= U256::from(58_750_000_000_000_000_000_000_u128)
         {
             SpecId::MERGE
-        } else if number >= 12965000 {
+        } else if header.number >= 12965000 {
             SpecId::LONDON
-        } else if number >= 12244000 {
+        } else if header.number >= 12244000 {
             SpecId::BERLIN
-        } else if number >= 9069000 {
+        } else if header.number >= 9069000 {
             SpecId::ISTANBUL
-        } else if number >= 7280000 {
+        } else if header.number >= 7280000 {
             SpecId::PETERSBURG
-        } else if number >= 4370000 {
+        } else if header.number >= 4370000 {
             SpecId::BYZANTIUM
-        } else if number >= 2675000 {
+        } else if header.number >= 2675000 {
             SpecId::SPURIOUS_DRAGON
-        } else if number >= 2463000 {
+        } else if header.number >= 2463000 {
             SpecId::TANGERINE
-        } else if number >= 1150000 {
+        } else if header.number >= 1150000 {
             SpecId::HOMESTEAD
         } else {
             SpecId::FRONTIER
@@ -119,7 +113,7 @@ impl PevmChain for PevmEthereum {
                 .gas_price
                 .map(U256::from)
                 .ok_or(EthereumGasPriceError::MissingGasPrice),
-            TxType::Eip1559 | TxType::Eip4844 => tx
+            TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => tx
                 .max_fee_per_gas
                 .map(U256::from)
                 .ok_or(EthereumGasPriceError::MissingMaxFeePerGas),
@@ -178,6 +172,7 @@ impl PevmChain for PevmEthereum {
                 TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
                 TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
                 TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
+                TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt),
             });
 
         // 2. Create a trie then calculate the root hash
