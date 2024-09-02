@@ -43,7 +43,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     common::for_each_block_from_disk(|block, storage| {
         let mut group = c.benchmark_group(format!(
             "Block {}({} txs, {} gas)",
-            block.header.number.unwrap(),
+            block.header.number,
             block.transactions.len(),
             block.header.gas_used
         ));

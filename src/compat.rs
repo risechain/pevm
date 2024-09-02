@@ -12,7 +12,7 @@ use crate::chain::PevmChain;
 // [blob_excess_gas_and_price].
 pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
     Some(BlockEnv {
-        number: U256::from(header.number?),
+        number: U256::from(header.number),
         coinbase: header.miner,
         timestamp: U256::from(header.timestamp),
         gas_limit: U256::from(header.gas_limit),

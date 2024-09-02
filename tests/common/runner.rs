@@ -69,7 +69,7 @@ pub fn test_execute_alloy<
         // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
         // receipt root is calculated with the post transaction state root,
         // which we don't have in these tests.
-        if block.header.number.unwrap() >= 4370000 {
+        if block.header.number >= 4370000 {
             assert_eq!(
                 block.header.receipts_root,
                 chain.calculate_receipt_root(spec_id, &block.transactions, &tx_results)

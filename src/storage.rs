@@ -102,6 +102,7 @@ impl From<Bytecode> for EvmCode {
                 jump_table: code.jump_table.0,
             },
             Bytecode::Eof(_) => unimplemented!("TODO: Support EOF"),
+            Bytecode::Eip7702(_) => unimplemented!("TODO: Support EIP-7702"),
         }
     }
 }

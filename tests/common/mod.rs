@@ -14,13 +14,13 @@ pub mod storage;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     // Minimal requirements for execution
-    number: Some(1),
+    number: 1,
     timestamp: 1710338135,
     mix_hash: Some(B256::ZERO),
     excess_blob_gas: Some(0),
     gas_limit: u128::MAX,
     // Defaults
-    hash: None,
+    hash: B256::ZERO,
     parent_hash: B256::ZERO,
     uncles_hash: B256::ZERO,
     miner: Address::ZERO,

@@ -8,37 +8,37 @@ edition = "2021"
 # that need more security guarantees even for internally hashing
 # EVM memory locations (we do not persist these hashes).
 ahash = { version = "0.8.11", features = ["serde"] }
-alloy-chains = "0.1.27"
-alloy-consensus = "0.2.1"
-alloy-primitives = { version = "0.7.7", features = ["asm-keccak"] }
+alloy-chains = "0.1.29"
+alloy-consensus = "0.3.1"
+alloy-primitives = { version = "0.8.0", features = ["asm-keccak"] }
 alloy-rlp = "0.3.8"
-alloy-rpc-types = "0.2.1"
-alloy-trie = "0.4.1"
+alloy-rpc-types = "0.3.1"
+alloy-trie = "0.5.1"
 bitvec = "1.0.1"
 dashmap = "6.0.1"
 serde = "1.0.209"
 smallvec = "1.13.2"
 
 # Let's do our best to port needed REVM changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "171c1fa5e78df7f88c3bacbaae49ceac578d5f18", features = [
+revm = { git = "https://github.com/risechain/revm", rev = "eb232edf0403ebb33847782fda7a14aaf4f86ab2", features = [
     "serde",
 ] }
 
 # RPC Storage dependencies
 # TODO: Put these behind an RPC flag to not pollute the core
 # library with RPC network & transport dependencies, etc.
-alloy-provider = "0.2.1"
-alloy-transport = "0.2.1"
-alloy-transport-http = "0.2.1"
+alloy-provider = "0.3.1"
+alloy-transport = "0.3.1"
+alloy-transport-http = "0.3.1"
 reqwest = "0.12.7"
-tokio = { version = "1.39.3", features = ["rt-multi-thread"] }
+tokio = { version = "1.40.0", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 bincode = "1.3.3"
 criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"
-revme = { git = "https://github.com/risechain/revm", rev = "171c1fa5e78df7f88c3bacbaae49ceac578d5f18" }
+revme = { git = "https://github.com/risechain/revm", rev = "eb232edf0403ebb33847782fda7a14aaf4f86ab2" }
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
 snmalloc-rs = "0.3.6"
 serde_json = "1.0.127"
