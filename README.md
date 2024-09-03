@@ -24,6 +24,13 @@ Finally, while Aptos and Polygon embed their pevm implementation directly into t
 - Complete a robust version for syncing and building blocks for Ethereum, RISE, Optimism, and more EVM chains.
 - Get integrated into Ethereum clients and ZK provers like [Reth](https://github.com/paradigmxyz/reth), [Helios](https://github.com/a16z/helios), and [Zeth](https://github.com/risc0/zeth) to help make the Ethereum ecosystem blazingly fast.
 
+## Development
+
+> :warning: **Warning**
+> pevm is performing poorly in recent Linux kernel versions. We noticed huge performance degradation after updating a machine to Ubuntu 24.04 with Linux kernel 6.8. The current suspect is the new EEVDF scheduler which doesn't go well with pevm's scheduler & thread management. Until we fully fix the issue, it is advised to **build and run pevm on Linux kernel 6.5**.
+
+- Install [cmake](https://cmake.org) for building `snmalloc` (highly performant memory allocator).
+
 ### V1 Done
 
 - Build a Block-STM foundation to improve on.
@@ -54,6 +61,10 @@ Finally, while Aptos and Polygon embed their pevm implementation directly into t
 - Hyper-optimise at low system levels.
 - Propose an EIP to “tax” late dependencies in blocks for validators to put them up front to maximize parallelism.
 
+```
+$ cargo build
+```
+
 ## Testing
 
 We have three test groups:
@@ -69,6 +80,6 @@ $ git submodule update --init
 $ cargo test --release -- --test-threads=1
 ```
 
-## Benchmarks
+### Benchmarks
 
 See the dedicated doc [here](./benches/README.md).
