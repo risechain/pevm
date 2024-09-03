@@ -1,4 +1,4 @@
-//! Benchemark mocked blocks that exceed 1 Gigagas.
+//! Benchmark mocked blocks that exceed 1 Gigagas.
 
 // TODO: More fancy benchmarks & plots.
 
