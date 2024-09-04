@@ -1,4 +1,4 @@
-//! Benchemark mainnet blocks with needed state loaded in memory.
+//! Benchmark mainnet blocks with needed state loaded in memory.
 
 // TODO: More fancy benchmarks & plots.
 
