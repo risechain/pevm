@@ -9,12 +9,11 @@ use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use reqwest::Url;
-use revm::db::CacheDB;
 use tokio::runtime::Runtime;
 
 use pevm::{
     chain::{PevmChain, PevmEthereum},
-    EvmAccount, EvmCode, RpcStorage, StorageWrapper,
+    EvmAccount, EvmCode, RpcStorage,
 };
 
 pub mod common;
@@ -55,9 +54,7 @@ fn mainnet_blocks_from_rpc() {
         let chain = PevmEthereum::mainnet();
         let spec_id = chain.get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
-        let wrapped_storage = StorageWrapper(&rpc_storage);
-        let db = CacheDB::new(&wrapped_storage);
-        common::test_execute_alloy(&db, &chain, block.clone(), true);
+        common::test_execute_alloy(&rpc_storage, &chain, block.clone(), true);
 
         // Snapshot blocks (for benchmark)
         // TODO: Port to a dedicated CLI instead?
