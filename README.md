@@ -12,7 +12,7 @@ Blazingly fast Parallel EVM in Rust.
 
 Block-STM was initially designed for the Aptos blockchain that runs MoveVM. We must consider several modifications to make it work well with EVM. For instance, all EVM transactions in the same block read and write to the beneficiary account for gas payment, making all transactions interdependent by default. We must carefully monitor reads to this beneficiary account to lazily evaluate it at the end of the block or when an explicit read arises.
 
-While Polygon has adapted a version of Block-STM for EVM in Go, it is still slower than sequential execution in Rust & C++. On the other hand, our redesign & Rust implementation has achieved the fastest execution speed of any public EVM executor.
+While Polygon has adapted a version of Block-STM for EVM in Go, it is still slower than sequential execution in Rust and C++. On the other hand, our redesign and Rust implementation have achieved the fastest execution speed of any public EVM executor.
 
 Finally, while Aptos and Polygon embed their pevm implementation directly into their nodes, **this dedicated repository provides robust versions and a playground for further advancements**. For instance, we can introduce static-analysed metadata from an optimised mempool, support multiple underlying executors, track read checkpoints to re-execute from upon conflicts and hyper-optimise the implementation at low system levels.
 
@@ -27,39 +27,38 @@ Finally, while Aptos and Polygon embed their pevm implementation directly into t
 ## Development
 
 > :warning: **Warning**
-> pevm is performing poorly in recent Linux kernel versions. We noticed huge performance degradation after updating a machine to Ubuntu 24.04 with Linux kernel 6.8. The current suspect is the new EEVDF scheduler which doesn't go well with pevm's scheduler & thread management. Until we fully fix the issue, it is advised to **build and run pevm on Linux kernel 6.5**.
+> pevm is performing poorly in recent Linux kernel versions. We noticed huge performance degradation after updating a machine to Ubuntu 24.04 with Linux kernel 6.8. The current suspect is the new EEVDF scheduler, which does not go well with pevm's scheduler & thread management. Until we fully fix the issue, it is advised to **build and run pevm on Linux kernel 6.5**.
 
-- Install [cmake](https://cmake.org) for building `snmalloc` (highly performant memory allocator).
+- Install [cmake](https://cmake.org) to build `snmalloc` (a highly performant memory allocator).
 
-### V1 Done
+### Alpha Done
 
 - Build a Block-STM foundation to improve on.
-- Atomically update gas payments to the beneficiary account as implicit reads & writes.
-- Atomically update raw transfer senders & recipients as implicit reads & writes.
+- Lazily update gas payments to the beneficiary account as implicit reads & writes.
+- Lazily update raw transfer senders & recipients as implicit reads & writes.
 - Improve scheduler design & aggressively find tasks to save scheduling cycles.
-- Complete the first test & benchmark suites.
+- Many low-level optimisations.
+- Complete foundation test & benchmark suites.
 
-### V1 TODO
+### Alpha TODO
 
-- Complete a vital test suite.
-- More granular memory locations (like breaking `AccountInfo` down into `balance`, `nonce`, and `code_hash`) to avoid false positive dependencies.
-- More low-hanging fruit optimizations.
+- Complete OP & RISE support.
+- Lazily update ERC-20 transfers.
 - Robust error handling.
 - Better types and API for integration.
-- Benchmark a [Reth](https://github.com/paradigmxyz/reth) integration for syncing and building Ethereum and RISE blocks.
+- More low-hanging fruit optimisations.
+- Complete a [Reth](https://github.com/paradigmxyz/reth) integration for syncing and building Ethereum and RISE blocks.
 
-### V2 TODO
+### Future Plans
 
-- Optimize concurrent data structures to maximize CPU cache and stack memory.
-- Optimize the scheduler, worker threads, and synchronization based on common block scenarios.
-- Add pre-provided metadata from a statically analysed mempool or upstream nodes.
-- Better memory management:
-  - Custom memory allocators for the whole execution phase and the multi-version data structure.
-  - Dedicated thread (pool) for cleaning up memory between blocks' execution.
+- Optimise concurrent data structures to maximise CPU cache and stack memory.
+- Optimise the scheduler & worker threads to minimise synchronization.
+- Add pre-provided metadata (DAG, states to preload, etc.) from a statically analysed mempool and upstream nodes.
+- Custom memory allocators for the whole execution phase and the multi-version data structure.
 - Track read checkpoints to re-execute from instead of re-executing the whole transaction upon conflicts.
 - Support multiple EVM executors (REVM, JIT & AOT compilers, etc.).
-- Hyper-optimise at low system levels.
-- Propose an EIP to “tax” late dependencies in blocks for validators to put them up front to maximize parallelism.
+- Hyper-optimise at low system levels (kernel configurations, writing hot paths in Assembly, etc.).
+- Propose an EIP to "tax" blocks with low parallelism.
 
 ```
 $ cargo build
@@ -75,8 +74,8 @@ We have three test groups:
 
 ```sh
 $ git submodule update --init
-# Running our heavy tests simultaneously would congest resources.
-# Each parallel test still executes parallelly anyway.
+# Running our heavy tests in parallel would congest resources.
+# Each test still executes parallelly anyway.
 $ cargo test --release -- --test-threads=1
 ```
 

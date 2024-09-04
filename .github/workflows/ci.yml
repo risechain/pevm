@@ -30,8 +30,8 @@ jobs:
       - name: Test
         env:
           RPC_URL: ${{ secrets.RPC_URL }}
-        # Running our heavy tests simultaneously would congest resources.
-        # Each parallel test still executes parallelly anyway.
+        # Running our heavy tests in parallel would congest resources.
+        # Each test still executes parallelly anyway.
         run: |
           git submodule update --init
           cargo test --release -- --test-threads=1
