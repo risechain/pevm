@@ -143,51 +143,6 @@ pub trait Storage {
     fn block_hash(&self, number: &u64) -> Result<B256, Self::Error>;
 }
 
-// We can use any [revm] database as storage provider for ease of integration.
-impl<D: DatabaseRef> Storage for D
-where
-    D::Error: Display,
-{
-    type Error = D::Error;
-
-    fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
-        self.basic_ref(*address).map(|a| {
-            a.map(|info| AccountBasic {
-                balance: info.balance,
-                nonce: info.nonce,
-            })
-        })
-    }
-
-    fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error> {
-        self.basic_ref(*address).map(|info| {
-            info.and_then(|info| (!info.is_empty_code_hash()).then_some(info.code_hash))
-        })
-    }
-
-    fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
-        self.code_by_hash_ref(*code_hash).map(|bytecode| {
-            if bytecode.is_empty() {
-                None
-            } else {
-                Some(EvmCode::from(bytecode))
-            }
-        })
-    }
-
-    fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
-        self.has_storage_ref(*address)
-    }
-
-    fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
-        self.storage_ref(*address, *index)
-    }
-
-    fn block_hash(&self, number: &u64) -> Result<B256, Self::Error> {
-        self.block_hash_ref(*number)
-    }
-}
-
 /// A Storage wrapper that implements REVM's [DatabaseRef] for ease of
 /// integration.
 #[derive(Debug)]
