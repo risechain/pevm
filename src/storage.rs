@@ -143,10 +143,7 @@ pub trait Storage {
     fn block_hash(&self, number: &u64) -> Result<B256, Self::Error>;
 }
 
-// We can use any REVM database as storage provider. Convenient for
-// testing blocks fetched from RPC via REVM's [CachedDB]. Otherwise, use
-// our [Storage] types to avoid redundant conversions.
-// TODO: Do something equivalent to [CachedDB] ourselves and remove this.
+// We can use any [revm] database as storage provider for ease of integration.
 impl<D: DatabaseRef> Storage for D
 where
     D::Error: Display,
@@ -191,8 +188,8 @@ where
     }
 }
 
-/// A Storage wrapper that implements REVM's [DatabaseRef], mainly used to
-/// provide data for REVM's [CachedDB] for sequential fallback or via RPC.
+/// A Storage wrapper that implements REVM's [DatabaseRef] for ease of
+/// integration.
 #[derive(Debug)]
 pub struct StorageWrapper<'a, S: Storage>(pub &'a S);
 

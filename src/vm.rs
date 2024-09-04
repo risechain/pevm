@@ -293,7 +293,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                                     }
                                     nonce_addition += 1;
                                 }
-                                _ => return Err(ReadError::InvalidMemoryLocationType),
+                                _ => return Err(ReadError::InvalidMemoryValueType),
                             }
                         }
                         None => {
@@ -431,7 +431,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                         MemoryEntry::Estimate => {
                             return Err(ReadError::BlockingIndex(*closest_idx))
                         }
-                        _ => return Err(ReadError::InvalidMemoryLocationType),
+                        _ => return Err(ReadError::InvalidMemoryValueType),
                     }
                 }
             }
@@ -533,7 +533,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             // TODO: Handle different errors differently
             Err(_) => return VmExecutionResult::FallbackToSequential,
         };
-        // TODO: Share as much Evm, Context, Handler, etc. among threads as possible
+        // TODO: Share as much [Evm], [Context], [Handler], etc. among threads as possible
         // as creating them is very expensive.
         let mut evm = build_evm(
             &mut db,

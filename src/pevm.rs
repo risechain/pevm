@@ -307,7 +307,8 @@ impl Pevm {
                         *account = None;
                     } else if let Some(account) = account {
                         // Explicit write: only overwrite the account info in case there are storage changes
-                        // TODO: Can code be changed mid-block?
+                        // Code cannot change midblock here as we're falling back to sequential execution
+                        // on reading a self-destructed contract.
                         account.balance = balance;
                         account.nonce = nonce;
                     } else {
