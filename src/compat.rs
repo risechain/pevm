@@ -10,8 +10,8 @@ use crate::chain::PevmChain;
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L23-L48
 // TODO: Better error handling & properly test this, especially
 // [blob_excess_gas_and_price].
-pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
-    Some(BlockEnv {
+pub(crate) fn get_block_env(header: &Header) -> BlockEnv {
+    BlockEnv {
         number: U256::from(header.number),
         coinbase: header.miner,
         timestamp: U256::from(header.timestamp),
@@ -22,7 +22,7 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
         blob_excess_gas_and_price: header
             .excess_blob_gas
             .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64)),
-    })
+    }
 }
 
 /// Represents errors that can occur when parsing transactions
