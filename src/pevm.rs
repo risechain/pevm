@@ -33,8 +33,6 @@ use crate::{
 pub enum PevmError<C: PevmChain> {
     /// Cannot derive the chain spec from the block header.
     BlockSpecError(C::BlockSpecError),
-    /// Block header lacks information for execution.
-    MissingHeaderData,
     /// Transactions lack information for execution.
     MissingTransactionData,
     /// Invalid input transaction.
@@ -107,9 +105,7 @@ impl Pevm {
         let spec_id = chain
             .get_block_spec(&block.header)
             .map_err(PevmError::BlockSpecError)?;
-        let Some(block_env) = get_block_env(&block.header) else {
-            return Err(PevmError::MissingHeaderData);
-        };
+        let block_env = get_block_env(&block.header);
         let tx_envs = match block.transactions {
             BlockTransactions::Full(txs) => txs
                 .into_iter()
