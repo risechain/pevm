@@ -184,8 +184,7 @@ pub enum ReadError {
     InconsistentRead,
     /// Found an invalid nonce, like the first transaction of a sender
     /// not having a (+1) nonce from storage.
-    /// TODO: Add the tx index to the error.
-    InvalidNonce,
+    InvalidNonce(TxIdx),
     /// Read a self-destructed account that is very hard to handle, as
     /// there is no performant way to mark all storage slots as cleared.
     SelfDestructedAccount,
