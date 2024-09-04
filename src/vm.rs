@@ -340,7 +340,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                     // closest sender tx, to the missing sender tx, etc.
                     return Err(ReadError::BlockingIndex(self.tx_idx - 1));
                 } else {
-                    return Err(ReadError::InvalidNonce);
+                    return Err(ReadError::InvalidNonce(self.tx_idx));
                 }
             }
 
