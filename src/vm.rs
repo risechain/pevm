@@ -1,4 +1,5 @@
 use ahash::HashMapExt;
+use alloy_primitives::TxKind;
 use alloy_rpc_types::Receipt;
 use revm::{
     primitives::{
@@ -83,15 +84,11 @@ pub(crate) enum VmExecutionResult {
 // A database interface that intercepts reads while executing a specific
 // transaction with Revm. It provides values from the multi-version data
 // structure & storage, and tracks the read set of the current execution.
-// TODO: Simplify this type, like grouping [from] and [to] into a
-// [preprocessed_addresses] or a [preprocessed_locations] vector.
 struct VmDb<'a, S: Storage, C: PevmChain> {
     vm: &'a Vm<'a, S, C>,
-    tx_idx: &'a TxIdx,
-    nonce: u64,
-    from: &'a Address,
+    tx_idx: TxIdx,
+    tx: &'a TxEnv,
     from_hash: MemoryLocationHash,
-    to: Option<&'a Address>,
     to_hash: Option<MemoryLocationHash>,
     to_code_hash: Option<B256>,
     // Indicates if we lazy update this transaction.
@@ -105,20 +102,16 @@ struct VmDb<'a, S: Storage, C: PevmChain> {
 impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
     fn new(
         vm: &'a Vm<'a, S, C>,
-        tx_idx: &'a TxIdx,
-        nonce: u64,
-        from: &'a Address,
+        tx_idx: TxIdx,
+        tx: &'a TxEnv,
         from_hash: MemoryLocationHash,
-        to: Option<&'a Address>,
         to_hash: Option<MemoryLocationHash>,
     ) -> Result<Self, ReadError> {
         let mut db = Self {
             vm,
             tx_idx,
-            nonce,
-            from,
+            tx,
             from_hash,
-            to,
             to_hash,
             to_code_hash: None,
             is_lazy: false,
@@ -133,8 +126,8 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // evaluating it concurrently.
         // TODO: Only lazy update in block syncing mode, not for block
         // building.
-        if let Some(to) = to {
-            db.to_code_hash = db.get_code_hash(*to)?;
+        if let TxKind::Call(to) = tx.transact_to {
+            db.to_code_hash = db.get_code_hash(to)?;
             db.is_lazy = db.to_code_hash.is_none()
                 && (vm.mv_memory.data.contains_key(&from_hash)
                     || vm.mv_memory.data.contains_key(&to_hash.unwrap()));
@@ -143,13 +136,15 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
     }
 
     fn hash_basic(&self, address: &Address) -> MemoryLocationHash {
-        if address == self.from {
-            self.from_hash
-        } else if Some(address) == self.to {
-            self.to_hash.unwrap()
-        } else {
-            self.vm.hash_basic(address)
+        if address == &self.tx.caller {
+            return self.from_hash;
         }
+        if let TxKind::Call(to) = &self.tx.transact_to {
+            if to == address {
+                return self.to_hash.unwrap();
+            }
+        }
+        self.vm.hash_basic(address)
     }
 
     // Push a new read origin. Return an error when there's already
@@ -215,7 +210,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         if self.is_lazy {
             if location_hash == self.from_hash {
                 return Ok(Some(AccountInfo {
-                    nonce: self.nonce,
+                    nonce: self.tx.nonce.unwrap_or(1),
                     balance: U256::MAX,
                     code: None,
                     code_hash: KECCAK_EMPTY,
@@ -239,7 +234,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         let mut nonce_addition = 0;
 
         // Try reading from multi-version data
-        if self.tx_idx > &0 {
+        if self.tx_idx > 0 {
             if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
                 let mut iter = written_transactions.range(..self.tx_idx);
 
@@ -339,8 +334,8 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         if let Some(mut account) = final_account {
             // Check sender nonce
             account.nonce += nonce_addition;
-            if location_hash == self.from_hash && account.nonce != self.nonce {
-                if self.tx_idx > &0 {
+            if location_hash == self.from_hash && account.nonce != self.tx.nonce.unwrap_or(1) {
+                if self.tx_idx > 0 {
                     // TODO: Better retry strategy -- immediately, to the
                     // closest sender tx, to the missing sender tx, etc.
                     return Err(ReadError::BlockingIndex(self.tx_idx - 1));
@@ -412,7 +407,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         let read_origins = self.read_set.entry(location_hash).or_default();
 
         // Try reading from multi-version data
-        if self.tx_idx > &0 {
+        if self.tx_idx > 0 {
             if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
                 if let Some((closest_idx, entry)) =
                     written_transactions.range(..self.tx_idx).next_back()
@@ -520,15 +515,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         };
 
         // Execute
-        let mut db = match VmDb::new(
-            self,
-            &tx_version.tx_idx,
-            tx.nonce.unwrap_or(1),
-            from,
-            from_hash,
-            to,
-            to_hash,
-        ) {
+        let mut db = match VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash) {
             Ok(db) => db,
             // TODO: Handle different errors differently
             Err(_) => return VmExecutionResult::FallbackToSequential,
