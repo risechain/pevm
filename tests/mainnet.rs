@@ -24,7 +24,7 @@ fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
-        _ => Url::parse("https://eth.llamarpc.com").unwrap(),
+        _ => Url::parse("https://eth.public-rpc.com").unwrap(),
     };
 
     // First block under 50 transactions of each EVM-spec-changing fork
