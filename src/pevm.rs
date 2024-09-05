@@ -20,7 +20,7 @@ use revm::{
 
 use crate::{
     chain::PevmChain,
-    compat::{get_block_env, get_tx_env, TransactionParsingError},
+    compat::get_block_env,
     mv_memory::MvMemory,
     scheduler::Scheduler,
     storage::StorageWrapper,
@@ -36,7 +36,7 @@ pub enum PevmError<C: PevmChain> {
     /// Transactions lack information for execution.
     MissingTransactionData,
     /// Invalid input transaction.
-    InvalidTransaction(TransactionParsingError<C>),
+    InvalidTransaction(C::TxEnvError),
     /// Storage error.
     // TODO: More concrete types than just an arbitrary string.
     StorageError(String),
@@ -98,7 +98,7 @@ impl Pevm {
         &mut self,
         storage: &S,
         chain: &C,
-        block: Block,
+        block: Block<C::Transaction>,
         concurrency_level: NonZeroUsize,
         force_sequential: bool,
     ) -> PevmResult<C> {
@@ -109,8 +109,8 @@ impl Pevm {
         let tx_envs = match block.transactions {
             BlockTransactions::Full(txs) => txs
                 .into_iter()
-                .map(|tx| get_tx_env(chain, tx))
-                .collect::<Result<Vec<TxEnv>, TransactionParsingError<_>>>()
+                .map(|tx| chain.get_tx_env(tx))
+                .collect::<Result<Vec<TxEnv>, _>>()
                 .map_err(PevmError::InvalidTransaction)?,
             _ => return Err(PevmError::MissingTransactionData),
         };

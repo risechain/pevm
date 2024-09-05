@@ -20,6 +20,13 @@ use crate::{
     mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx,
 };
 
+/// Represents errors that can occur when parsing transactions
+#[derive(Debug, Clone, PartialEq)]
+pub enum EthereumTxEnvError {
+    OverflowedGasLimit,
+    GasPriceError(EthereumGasPriceError),
+}
+
 /// Implementation of [PevmChain] for Ethereum
 #[derive(Debug, Clone, PartialEq)]
 pub struct PevmEthereum {
@@ -56,8 +63,10 @@ pub enum EthereumGasPriceError {
 }
 
 impl PevmChain for PevmEthereum {
+    type Transaction = Transaction;
     type BlockSpecError = EthereumBlockSpecError;
     type GasPriceError = EthereumGasPriceError;
+    type TxEnvError = EthereumTxEnvError;
 
     fn id(&self) -> u64 {
         self.id
@@ -192,5 +201,32 @@ impl PevmChain for PevmEthereum {
             hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
         }
         hash_builder.root()
+    }
+
+    /// Get the REVM tx envs of an Alloy block.
+    // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
+    // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
+    // TODO: Properly test this.
+    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, EthereumTxEnvError> {
+        Ok(TxEnv {
+            caller: tx.from,
+            gas_limit: tx
+                .gas
+                .try_into()
+                .map_err(|_| EthereumTxEnvError::OverflowedGasLimit)?,
+            gas_price: self
+                .get_gas_price(&tx)
+                .map_err(EthereumTxEnvError::GasPriceError)?,
+            gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
+            transact_to: tx.to.into(),
+            value: tx.value,
+            data: tx.input,
+            nonce: Some(tx.nonce),
+            chain_id: tx.chain_id,
+            access_list: tx.access_list.unwrap_or_default().into(),
+            blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
+            authorization_list: None, // TODO: Support in the upcoming hardfork
+        })
     }
 }

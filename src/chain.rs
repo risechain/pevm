@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 
 use alloy_primitives::{B256, U256};
-use alloy_rpc_types::{BlockTransactions, Header, Transaction};
+use alloy_rpc_types::{BlockTransactions, Header};
 use revm::{
     primitives::{BlockEnv, SpecId, TxEnv},
     Handler,
@@ -22,11 +22,17 @@ pub enum RewardPolicy {
 
 /// Custom behaviours for different chains & networks
 pub trait PevmChain: Debug {
+    /// The transaction type
+    type Transaction: Debug + Clone + PartialEq;
+
     /// The error type for [Self::get_block_spec].
     type BlockSpecError: Debug + Clone + PartialEq;
 
     /// The error type for [Self::get_gas_price].
     type GasPriceError: Debug + Clone + PartialEq;
+
+    /// The error type for [Self::get_tx_env].
+    type TxEnvError: Debug + Clone + PartialEq;
 
     /// Get chain id.
     fn id(&self) -> u64;
@@ -35,7 +41,7 @@ pub trait PevmChain: Debug {
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError>;
 
     /// Get tx gas price.
-    fn get_gas_price(&self, tx: &Transaction) -> Result<U256, Self::GasPriceError>;
+    fn get_gas_price(&self, tx: &Self::Transaction) -> Result<U256, Self::GasPriceError>;
 
     /// Build [MvMemory]
     fn build_mv_memory(
@@ -61,9 +67,12 @@ pub trait PevmChain: Debug {
     fn calculate_receipt_root(
         &self,
         spec_id: SpecId,
-        txs: &BlockTransactions<Transaction>,
+        txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> B256;
+
+    /// Get [TxEnv]
+    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, Self::TxEnvError>;
 }
 
 mod ethereum;

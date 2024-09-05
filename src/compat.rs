@@ -1,10 +1,8 @@
 // TODO: Support custom chains like OP & RISE
 // Ideally REVM & Alloy would provide all these.
 
-use alloy_rpc_types::{Header, Transaction};
-use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, TransactTo, TxEnv, U256};
-
-use crate::chain::PevmChain;
+use alloy_rpc_types::Header;
+use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, U256};
 
 /// Get the REVM block env of an Alloy block.
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L23-L48
@@ -23,46 +21,4 @@ pub(crate) fn get_block_env(header: &Header) -> BlockEnv {
             .excess_blob_gas
             .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64)),
     }
-}
-
-/// Represents errors that can occur when parsing transactions
-#[derive(Debug, Clone, PartialEq)]
-pub enum TransactionParsingError<C: PevmChain> {
-    OverflowedGasLimit,
-    GasPriceError(C::GasPriceError),
-    MissingMaxFeePerGas,
-    InvalidType(u8),
-}
-
-/// Get the REVM tx envs of an Alloy block.
-// https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
-// https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
-// TODO: Properly test this.
-pub(crate) fn get_tx_env<C: PevmChain>(
-    chain: &C,
-    tx: Transaction,
-) -> Result<TxEnv, TransactionParsingError<C>> {
-    Ok(TxEnv {
-        caller: tx.from,
-        gas_limit: tx
-            .gas
-            .try_into()
-            .map_err(|_| TransactionParsingError::OverflowedGasLimit)?,
-        gas_price: chain
-            .get_gas_price(&tx)
-            .map_err(TransactionParsingError::GasPriceError)?,
-        gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
-        transact_to: match tx.to {
-            Some(address) => TransactTo::Call(address),
-            None => TransactTo::Create,
-        },
-        value: tx.value,
-        data: tx.input,
-        nonce: Some(tx.nonce),
-        chain_id: tx.chain_id,
-        access_list: tx.access_list.unwrap_or_default().0,
-        blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
-        max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-        authorization_list: None, // TODO: Support in the upcoming hardfork
-    })
 }
