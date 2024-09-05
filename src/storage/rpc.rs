@@ -62,11 +62,10 @@ impl<N> RpcStorage<N> {
     /// Send a request and retry many times if needed.
     /// This util is made to avoid error 429 Too Many Requests
     /// https://en.wikipedia.org/wiki/Exponential_backoff
-    fn fetch<T, E, R, F>(&self, request: R) -> Result<T, E>
-    where
-        F: IntoFuture<Output = Result<T, E>>,
-        R: Fn() -> F,
-    {
+    fn fetch<T, E, R: IntoFuture<Output = Result<T, E>>>(
+        &self,
+        request: impl Fn() -> R,
+    ) -> Result<T, E> {
         const RETRY_LIMIT: usize = 8;
         const INITIAL_DELAY_MILLIS: u64 = 125;
 
