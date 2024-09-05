@@ -9,13 +9,13 @@ use ahash::AHashMap;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Block, BlockTransactions};
 use revm::{
-    db::CacheDB,
+    db::WrapDatabaseRef,
     primitives::{
         BlockEnv,
         SpecId::{self, SPURIOUS_DRAGON},
         TxEnv,
     },
-    DatabaseCommit,
+    DatabaseCommit, StateBuilder,
 };
 
 use crate::{
@@ -403,7 +403,15 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
     block_env: BlockEnv,
     txs: Vec<TxEnv>,
 ) -> PevmResult<C> {
-    let mut db = CacheDB::new(StorageWrapper(storage));
+    let mut db = {
+        // We use [State] with this specific builder instead of [CacheDB] to match Reth
+        // as close as possible.
+        let mut builder = StateBuilder::new_with_database(WrapDatabaseRef(StorageWrapper(storage)));
+        if !spec_id.is_enabled_in(SPURIOUS_DRAGON) {
+            builder = builder.without_state_clear();
+        }
+        builder.build()
+    };
     let mut evm = build_evm(&mut db, chain, spec_id, block_env, None, true);
     let mut results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
