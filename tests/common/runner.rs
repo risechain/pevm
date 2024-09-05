@@ -49,7 +49,7 @@ pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) 
 pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync + PartialEq>(
     storage: &S,
     chain: &C,
-    block: Block,
+    block: Block<C::Transaction>,
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
