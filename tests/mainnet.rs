@@ -29,19 +29,18 @@ fn mainnet_blocks_from_rpc() {
 
     // First block under 50 transactions of each EVM-spec-changing fork
     for block_number in [
-        46147, // FRONTIER
-        1150000, // HOMESTEAD
-               // TODO: Enable these when CI is less flaky.
-               // 2463002,  // TANGERINE
-               // 2675000,  // SPURIOUS_DRAGON
-               // 4370003,  // BYZANTIUM
-               // 7280003,  // PETERSBURG
-               // 9069001,  // ISTANBUL
-               // 12244002, // BERLIN
-               // 12965034, // LONDON
-               // 15537395, // MERGE
-               // 17035010, // SHANGHAI
-               // 19426587, // CANCUN
+        46147,    // FRONTIER
+        1150000,  // HOMESTEAD
+        2463002,  // TANGERINE
+        2675000,  // SPURIOUS_DRAGON
+        4370003,  // BYZANTIUM
+        7280003,  // PETERSBURG
+        9069001,  // ISTANBUL
+        12244002, // BERLIN
+        12965034, // LONDON
+        15537395, // MERGE
+        17035010, // SHANGHAI
+        19426587, // CANCUN
     ] {
         let runtime = Runtime::new().unwrap();
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
