@@ -1,7 +1,7 @@
 // TODO: Put this behind an RPC flag to not pollute the core
 // library with RPC network & transport dependencies, etc.
 
-use std::{fmt::Debug, future::IntoFuture, sync::Mutex};
+use std::{fmt::Debug, future::IntoFuture, sync::Mutex, time::Duration};
 
 use ahash::AHashMap;
 use alloy_primitives::{Address, B256, U256};
@@ -75,6 +75,28 @@ impl<N> RpcStorage<N> {
     }
 }
 
+/// Retry a task many times.
+/// This util is made to avoid error 429 Too Many Requests
+/// https://en.wikipedia.org/wiki/Exponential_backoff
+async fn with_retries<T, E>(task: impl IntoFuture<Output = Result<T, E>> + Clone) -> Result<T, E> {
+    const RETRY_LIMIT: usize = 8;
+    const INITIAL_DELAY_MILLIS: u64 = 125;
+
+    let mut lives = RETRY_LIMIT;
+    let mut delay = Duration::from_millis(INITIAL_DELAY_MILLIS);
+
+    loop {
+        let result = task.clone().await;
+        if lives > 0 && result.is_err() {
+            tokio::time::sleep(delay).await;
+            lives -= 1;
+            delay *= 2;
+        } else {
+            return result;
+        }
+    }
+}
+
 impl<N: Network> Storage for RpcStorage<N> {
     type Error = TransportError;
 
@@ -85,59 +107,52 @@ impl<N: Network> Storage for RpcStorage<N> {
                 nonce: account.nonce,
             }));
         }
-        self.runtime.block_on(async {
-            let (res_balance, res_nonce, res_code) = tokio::join!(
-                self.provider
-                    .get_balance(*address)
-                    .block_id(self.block_id)
-                    .into_future(),
-                self.provider
-                    .get_transaction_count(*address)
-                    .block_id(self.block_id)
-                    .into_future(),
-                self.provider
-                    .get_code_at(*address)
-                    .block_id(self.block_id)
-                    .into_future()
-            );
-            let balance = res_balance?;
-            let nonce = res_nonce?;
-            let code = res_code?;
-            // We need to distinguish new non-precompile accounts for gas calculation
-            // in early hard-forks (creating new accounts cost extra gas, etc.).
-            if !self
-                .precompiles
-                .addresses()
-                .any(|precompile_address| precompile_address == address)
-                && balance.is_zero()
-                && nonce == 0
-                && code.is_empty()
-            {
-                return Ok(None);
-            }
-            let code = Bytecode::new_raw(code);
-            let code_hash = if code.is_empty() {
-                None
-            } else {
-                let code_hash = code.hash_slow();
-                self.cache_bytecodes
-                    .lock()
-                    .unwrap()
-                    .insert(code_hash, code.into());
-                Some(code_hash)
-            };
-            self.cache_accounts.lock().unwrap().insert(
-                *address,
-                EvmAccount {
-                    balance,
-                    nonce,
-                    code_hash,
-                    code: None,
-                    storage: AHashMap::default(),
-                },
-            );
-            Ok(Some(AccountBasic { balance, nonce }))
-        })
+        let nonce = self.runtime.block_on(with_retries(
+            self.provider
+                .get_transaction_count(*address)
+                .block_id(self.block_id),
+        ))?;
+        let balance = self.runtime.block_on(with_retries(
+            self.provider.get_balance(*address).block_id(self.block_id),
+        ))?;
+        let code = self.runtime.block_on(with_retries(
+            self.provider.get_code_at(*address).block_id(self.block_id),
+        ))?;
+
+        // We need to distinguish new non-precompile accounts for gas calculation
+        // in early hard-forks (creating new accounts cost extra gas, etc.).
+        if !self
+            .precompiles
+            .addresses()
+            .any(|precompile_address| precompile_address == address)
+            && balance.is_zero()
+            && nonce == 0
+            && code.is_empty()
+        {
+            return Ok(None);
+        }
+        let code = Bytecode::new_raw(code);
+        let code_hash = if code.is_empty() {
+            None
+        } else {
+            let code_hash = code.hash_slow();
+            self.cache_bytecodes
+                .lock()
+                .unwrap()
+                .insert(code_hash, code.into());
+            Some(code_hash)
+        };
+        self.cache_accounts.lock().unwrap().insert(
+            *address,
+            EvmAccount {
+                balance,
+                nonce,
+                code_hash,
+                code: None,
+                storage: AHashMap::default(),
+            },
+        );
+        Ok(Some(AccountBasic { balance, nonce }))
     }
 
     fn code_hash(&self, address: &Address) -> Result<Option<B256>, Self::Error> {
@@ -165,13 +180,11 @@ impl<N: Network> Storage for RpcStorage<N> {
                 return Ok(*value);
             }
         }
-        let value = self.runtime.block_on(
+        let value = self.runtime.block_on(with_retries(
             self.provider
                 .get_storage_at(*address, *index)
-                .block_id(self.block_id)
-                .into_future(),
-        )?;
-
+                .block_id(self.block_id),
+        ))?;
         // We only cache if the pre-state account is non-empty. Else this
         // could be a false alarm that results in the default 0. Caching
         // that would make this account non-empty and may fail a tx that
