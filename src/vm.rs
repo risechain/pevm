@@ -4,7 +4,9 @@ use alloy_rpc_types::Receipt;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
-        ResultAndState, SpecId, TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
+        ResultAndState,
+        SpecId::{self, SPURIOUS_DRAGON},
+        TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
     },
     Context, Database, Evm, EvmContext,
 };
@@ -575,7 +577,18 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                         MemoryValue::LazyRecipient(tx.value),
                                     ));
                                 }
-                            } else {
+                            }
+                            // We don't register empty accounts after [SPURIOUS_DRAGON]
+                            // as they are cleared. This can only happen via 2 ways:
+                            // 1. Self-destruction which is handled by an if above.
+                            // 2. Sending 0 ETH to an empty account, which we treat as a
+                            // non-write here. A later read would trace back to storage
+                            // and return a [None], i.e., [LoadedAsNotExisting]. Without
+                            // this check it would write then read a [Some] default
+                            // account, which may yield a wrong gas fee, etc.
+                            else if !self.spec_id.is_enabled_in(SPURIOUS_DRAGON)
+                                || !account.is_empty()
+                            {
                                 write_set.push((
                                     account_location_hash,
                                     MemoryValue::Basic(AccountBasic {
