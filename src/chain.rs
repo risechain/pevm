@@ -29,13 +29,16 @@ pub trait PevmChain: Debug {
     type BlockSpecError: Debug + Clone + PartialEq;
 
     /// The error type for [Self::get_tx_env].
-    type TxEnvError: Debug + Clone + PartialEq;
+    type TransactionParsingError: Debug + Clone + PartialEq;
 
     /// Get chain id.
     fn id(&self) -> u64;
 
     /// Get block's [SpecId]
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError>;
+
+    /// Get [TxEnv]
+    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, Self::TransactionParsingError>;
 
     /// Build [MvMemory]
     fn build_mv_memory(
@@ -64,9 +67,6 @@ pub trait PevmChain: Debug {
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> B256;
-
-    /// Get [TxEnv]
-    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, Self::TxEnvError>;
 }
 
 mod ethereum;

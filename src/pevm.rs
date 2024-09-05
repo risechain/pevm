@@ -36,7 +36,7 @@ pub enum PevmError<C: PevmChain> {
     /// Transactions lack information for execution.
     MissingTransactionData,
     /// Invalid input transaction.
-    InvalidTransaction(C::TxEnvError),
+    InvalidTransaction(C::TransactionParsingError),
     /// Storage error.
     // TODO: More concrete types than just an arbitrary string.
     StorageError(String),

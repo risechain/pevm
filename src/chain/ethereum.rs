@@ -9,7 +9,7 @@ use alloy_chains::NamedChain;
 use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{B256, U256};
 use alloy_provider::network::eip2718::Encodable2718;
-use alloy_rpc_types::{BlockTransactions, Header, Transaction};
+use alloy_rpc_types::{BlockTransactions, Header};
 use revm::{
     primitives::{BlockEnv, SpecId, TxEnv},
     Handler,
@@ -19,13 +19,6 @@ use super::{PevmChain, RewardPolicy};
 use crate::{
     mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx,
 };
-
-/// Represents errors that can occur when parsing transactions
-#[derive(Debug, Clone, PartialEq)]
-pub enum EthereumTxEnvError {
-    OverflowedGasLimit,
-    GasPriceError(EthereumGasPriceError),
-}
 
 /// Implementation of [PevmChain] for Ethereum
 #[derive(Debug, Clone, PartialEq)]
@@ -51,9 +44,11 @@ pub enum EthereumBlockSpecError {
     MissingTotalDifficulty,
 }
 
-/// Error type for [PevmEthereum::get_gas_price].
+/// Represents errors that can occur when parsing transactions
 #[derive(Debug, Clone, PartialEq)]
-pub enum EthereumGasPriceError {
+pub enum EthereumTransactionParsingError {
+    /// [tx.gas] is overflowed.
+    OverflowedGasLimit,
     /// [tx.type] is invalid.
     InvalidType(u8),
     /// [tx.gas_price] is none.
@@ -62,28 +57,30 @@ pub enum EthereumGasPriceError {
     MissingMaxFeePerGas,
 }
 
-fn get_ethereum_gas_price(tx: &Transaction) -> Result<U256, EthereumGasPriceError> {
+fn get_ethereum_gas_price(
+    tx: &alloy_rpc_types::Transaction,
+) -> Result<U256, EthereumTransactionParsingError> {
     let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
     let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
-        return Err(EthereumGasPriceError::InvalidType(tx_type_raw));
+        return Err(EthereumTransactionParsingError::InvalidType(tx_type_raw));
     };
 
     match tx_type {
         TxType::Legacy | TxType::Eip2930 => tx
             .gas_price
             .map(U256::from)
-            .ok_or(EthereumGasPriceError::MissingGasPrice),
+            .ok_or(EthereumTransactionParsingError::MissingGasPrice),
         TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => tx
             .max_fee_per_gas
             .map(U256::from)
-            .ok_or(EthereumGasPriceError::MissingMaxFeePerGas),
+            .ok_or(EthereumTransactionParsingError::MissingMaxFeePerGas),
     }
 }
 
 impl PevmChain for PevmEthereum {
-    type Transaction = Transaction;
+    type Transaction = alloy_rpc_types::Transaction;
     type BlockSpecError = EthereumBlockSpecError;
-    type TxEnvError = EthereumTxEnvError;
+    type TransactionParsingError = EthereumTransactionParsingError;
 
     fn id(&self) -> u64 {
         self.id
@@ -128,6 +125,31 @@ impl PevmChain for PevmEthereum {
         })
     }
 
+    /// Get the REVM tx envs of an Alloy block.
+    // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
+    // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
+    // TODO: Properly test this.
+    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, EthereumTransactionParsingError> {
+        Ok(TxEnv {
+            caller: tx.from,
+            gas_limit: tx
+                .gas
+                .try_into()
+                .map_err(|_| EthereumTransactionParsingError::OverflowedGasLimit)?,
+            gas_price: get_ethereum_gas_price(&tx)?,
+            gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
+            transact_to: tx.to.into(),
+            value: tx.value,
+            data: tx.input,
+            nonce: Some(tx.nonce),
+            chain_id: tx.chain_id,
+            access_list: tx.access_list.unwrap_or_default().into(),
+            blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
+            authorization_list: None, // TODO: Support in the upcoming hardfork
+        })
+    }
+
     fn build_mv_memory(
         &self,
         hasher: &ahash::RandomState,
@@ -164,7 +186,7 @@ impl PevmChain for PevmEthereum {
     fn calculate_receipt_root(
         &self,
         _spec_id: SpecId,
-        txs: &BlockTransactions<Transaction>,
+        txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> B256 {
         // 1. Create an iterator of ReceiptEnvelope
@@ -200,30 +222,5 @@ impl PevmChain for PevmEthereum {
             hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
         }
         hash_builder.root()
-    }
-
-    /// Get the REVM tx envs of an Alloy block.
-    // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
-    // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
-    // TODO: Properly test this.
-    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, EthereumTxEnvError> {
-        Ok(TxEnv {
-            caller: tx.from,
-            gas_limit: tx
-                .gas
-                .try_into()
-                .map_err(|_| EthereumTxEnvError::OverflowedGasLimit)?,
-            gas_price: get_ethereum_gas_price(&tx).map_err(EthereumTxEnvError::GasPriceError)?,
-            gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
-            transact_to: tx.to.into(),
-            value: tx.value,
-            data: tx.input,
-            nonce: Some(tx.nonce),
-            chain_id: tx.chain_id,
-            access_list: tx.access_list.unwrap_or_default().into(),
-            blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-            authorization_list: None, // TODO: Support in the upcoming hardfork
-        })
     }
 }
