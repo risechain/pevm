@@ -2,7 +2,7 @@
 
 use std::fmt::Debug;
 
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use alloy_rpc_types::{BlockTransactions, Header};
 use revm::{
     primitives::{BlockEnv, SpecId, TxEnv},
@@ -28,9 +28,6 @@ pub trait PevmChain: Debug {
     /// The error type for [Self::get_block_spec].
     type BlockSpecError: Debug + Clone + PartialEq;
 
-    /// The error type for [Self::get_gas_price].
-    type GasPriceError: Debug + Clone + PartialEq;
-
     /// The error type for [Self::get_tx_env].
     type TxEnvError: Debug + Clone + PartialEq;
 
@@ -39,9 +36,6 @@ pub trait PevmChain: Debug {
 
     /// Get block's [SpecId]
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError>;
-
-    /// Get tx gas price.
-    fn get_gas_price(&self, tx: &Self::Transaction) -> Result<U256, Self::GasPriceError>;
 
     /// Build [MvMemory]
     fn build_mv_memory(

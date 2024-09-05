@@ -62,10 +62,27 @@ pub enum EthereumGasPriceError {
     MissingMaxFeePerGas,
 }
 
+fn get_ethereum_gas_price(tx: &Transaction) -> Result<U256, EthereumGasPriceError> {
+    let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
+    let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
+        return Err(EthereumGasPriceError::InvalidType(tx_type_raw));
+    };
+
+    match tx_type {
+        TxType::Legacy | TxType::Eip2930 => tx
+            .gas_price
+            .map(U256::from)
+            .ok_or(EthereumGasPriceError::MissingGasPrice),
+        TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => tx
+            .max_fee_per_gas
+            .map(U256::from)
+            .ok_or(EthereumGasPriceError::MissingMaxFeePerGas),
+    }
+}
+
 impl PevmChain for PevmEthereum {
     type Transaction = Transaction;
     type BlockSpecError = EthereumBlockSpecError;
-    type GasPriceError = EthereumGasPriceError;
     type TxEnvError = EthereumTxEnvError;
 
     fn id(&self) -> u64 {
@@ -109,24 +126,6 @@ impl PevmChain for PevmEthereum {
         } else {
             SpecId::FRONTIER
         })
-    }
-
-    fn get_gas_price(&self, tx: &Transaction) -> Result<U256, Self::GasPriceError> {
-        let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
-        let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
-            return Err(EthereumGasPriceError::InvalidType(tx_type_raw));
-        };
-
-        match tx_type {
-            TxType::Legacy | TxType::Eip2930 => tx
-                .gas_price
-                .map(U256::from)
-                .ok_or(EthereumGasPriceError::MissingGasPrice),
-            TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => tx
-                .max_fee_per_gas
-                .map(U256::from)
-                .ok_or(EthereumGasPriceError::MissingMaxFeePerGas),
-        }
     }
 
     fn build_mv_memory(
@@ -214,9 +213,7 @@ impl PevmChain for PevmEthereum {
                 .gas
                 .try_into()
                 .map_err(|_| EthereumTxEnvError::OverflowedGasLimit)?,
-            gas_price: self
-                .get_gas_price(&tx)
-                .map_err(EthereumTxEnvError::GasPriceError)?,
+            gas_price: get_ethereum_gas_price(&tx).map_err(EthereumTxEnvError::GasPriceError)?,
             gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
             transact_to: tx.to.into(),
             value: tx.value,
