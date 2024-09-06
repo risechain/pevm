@@ -6,7 +6,7 @@ use revm::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
         ResultAndState,
         SpecId::{self, SPURIOUS_DRAGON},
-        TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
+        TxEnv, B256, KECCAK_EMPTY, U256,
     },
     Context, Database, Evm, EvmContext,
 };
@@ -146,7 +146,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
                 return self.to_hash.unwrap();
             }
         }
-        self.vm.hash_basic(address)
+        self.vm.hash_basic(*address)
     }
 
     // Push a new read origin. Return an error when there's already
@@ -336,7 +336,9 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         if let Some(mut account) = final_account {
             // Check sender nonce
             account.nonce += nonce_addition;
-            if location_hash == self.from_hash && account.nonce != self.tx.nonce.unwrap_or(1) {
+            if location_hash == self.from_hash
+                && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
+            {
                 if self.tx_idx > 0 {
                     // TODO: Better retry strategy -- immediately, to the
                     // closest sender tx, to the missing sender tx, etc.
@@ -486,8 +488,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     }
 
     #[inline(always)]
-    fn hash_basic(&self, address: &Address) -> MemoryLocationHash {
-        self.hasher.hash_one(MemoryLocation::Basic(*address))
+    fn hash_basic(&self, address: Address) -> MemoryLocationHash {
+        self.hasher.hash_one(MemoryLocation::Basic(address))
     }
 
     // Execute a transaction. This can read from memory but cannot modify any state.
@@ -509,12 +511,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     pub(crate) fn execute(&self, tx_version: &TxVersion) -> VmExecutionResult {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
-        let from = &tx.caller;
-        let from_hash = self.hash_basic(from);
-        let (to, to_hash) = match &tx.transact_to {
-            TransactTo::Call(address) => (Some(address), Some(self.hash_basic(address))),
-            TransactTo::Create => (None, None),
-        };
+        let from_hash = self.hash_basic(tx.caller);
+        let to_hash = tx.transact_to.to().map(|to| self.hash_basic(*to));
 
         // Execute
         let mut db = match VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash) {
@@ -550,7 +548,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     }
 
                     if account.is_touched() {
-                        let account_location_hash = self.hash_basic(address);
+                        let account_location_hash = self.hash_basic(*address);
                         let read_account = evm.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
@@ -631,7 +629,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 drop(evm); // release db
 
                 if db.is_lazy {
-                    self.mv_memory.add_lazy_addresses([*from, *to.unwrap()]);
+                    self.mv_memory
+                        .add_lazy_addresses([tx.caller, *tx.transact_to.to().unwrap()]);
                 }
 
                 let mut flags = if tx_version.tx_idx > 0 && !db.is_lazy {
