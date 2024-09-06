@@ -171,7 +171,8 @@ impl<N: Network> Storage for RpcStorage<N> {
     }
 
     fn has_storage(&self, _address: &Address) -> Result<bool, Self::Error> {
-        // FIXME! Returning [false] should cover EIP-7610 for the time being.
+        // TODO: Properly implement this, like checking for storage hash.
+        // Returning [false] should cover EIP-7610 for now.
         Ok(false)
     }
 
