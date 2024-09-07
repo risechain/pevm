@@ -9,6 +9,7 @@ use flate2::bufread::GzDecoder;
 use hashbrown::HashMap;
 use pevm::{
     chain::PevmChain, BlockHashes, BuildSuffixHasher, Bytecodes, EvmAccount, InMemoryStorage,
+    StorageWrapper,
 };
 
 pub mod runner;
@@ -40,7 +41,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     withdrawals_root: None,
     blob_gas_used: None,
     parent_beacon_block_root: None,
-    requests_hash: None,
+    requests_root: None,
 };
 
 const MOCK_SIGNATURE: Signature = Signature {
@@ -124,5 +125,5 @@ where
         ..Block::<C::Transaction>::default()
     };
     let storage = InMemoryStorage::new(accounts, None, []);
-    test_execute_alloy(&storage, chain, block, false);
+    test_execute_alloy(&StorageWrapper(&storage), chain, block, false);
 }
