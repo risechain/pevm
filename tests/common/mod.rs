@@ -7,7 +7,7 @@ use std::{
 use alloy_primitives::{uint, Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, BlockTransactions, Header, Signature};
 use flate2::bufread::GzDecoder;
-use pevm::{chain::PevmChain, BlockHashes, Bytecodes, EvmAccount, InMemoryStorage};
+use pevm::{chain::PevmChain, BlockHashes, Bytecodes, EvmAccount, InMemoryStorage, StorageWrapper};
 
 pub mod runner;
 pub use runner::{mock_account, test_execute_alloy, test_execute_revm};
@@ -121,5 +121,5 @@ where
         ..Block::<C::Transaction>::default()
     };
     let storage = InMemoryStorage::new(accounts, None, []);
-    test_execute_alloy(&storage, chain, block, false);
+    test_execute_alloy(&StorageWrapper(&storage), chain, block, false);
 }
