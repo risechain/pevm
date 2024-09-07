@@ -36,7 +36,7 @@ smallvec = "1.13.2"
 thiserror = "1.0.64"
 
 # Let's do our best to port needed REVM changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "7345c07ae7f65a976e9db4866872066aef0bdce4", features = [
+revm = { git = "https://github.com/risechain/revm", rev = "bb350a971e5f39a8f822ace081584a3a45fd7c6a", features = [
     "serde",
 ] }
 
@@ -64,7 +64,7 @@ op-alloy-rpc-types = { version = "0.5.0", optional = true }
 criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"
-revme = { git = "https://github.com/risechain/revm", rev = "7345c07ae7f65a976e9db4866872066aef0bdce4" }
+revme = { git = "https://github.com/risechain/revm", rev = "bb350a971e5f39a8f822ace081584a3a45fd7c6a" }
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
 snmalloc-rs = "0.3.6"
 tikv-jemallocator = "0.6.0"

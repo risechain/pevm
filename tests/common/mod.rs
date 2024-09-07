@@ -9,6 +9,7 @@ use flate2::bufread::GzDecoder;
 use hashbrown::HashMap;
 use pevm::{
     chain::PevmChain, BlockHashes, BuildSuffixHasher, Bytecodes, EvmAccount, InMemoryStorage,
+    StorageWrapper,
 };
 
 pub mod runner;
@@ -124,5 +125,5 @@ where
         ..Block::<C::Transaction>::default()
     };
     let storage = InMemoryStorage::new(accounts, None, []);
-    test_execute_alloy(&storage, chain, block, false);
+    test_execute_alloy(&StorageWrapper(&storage), chain, block, false);
 }
