@@ -13,7 +13,7 @@ pub mod uniswap;
 
 use crate::uniswap::generate_cluster;
 use ahash::AHashMap;
-use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
+use pevm::{Bytecodes, EvmAccount, InMemoryStorage, StorageWrapper};
 use revm::primitives::{Address, TxEnv};
 
 #[test]
@@ -33,7 +33,11 @@ fn uniswap_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
-        InMemoryStorage::new(final_state, Some(&final_bytecodes), []),
+        StorageWrapper(&InMemoryStorage::new(
+            final_state,
+            Some(&final_bytecodes),
+            [],
+        )),
         final_txs,
     )
 }

@@ -3,7 +3,7 @@
 
 use alloy_primitives::{Address, U256};
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{chain::PevmEthereum, InMemoryStorage};
+use pevm::{chain::PevmEthereum, InMemoryStorage, StorageWrapper};
 use revm::primitives::{TransactTo, TxEnv};
 
 pub mod common;
@@ -11,7 +11,7 @@ pub mod common;
 #[test]
 fn empty_alloy_block() {
     common::test_execute_alloy(
-        &InMemoryStorage::default(),
+        &StorageWrapper(&InMemoryStorage::default()),
         &PevmEthereum::mainnet(),
         Block {
             header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
@@ -24,13 +24,13 @@ fn empty_alloy_block() {
 
 #[test]
 fn empty_revm_block() {
-    common::test_execute_revm(InMemoryStorage::default(), Vec::new());
+    common::test_execute_revm(StorageWrapper(&InMemoryStorage::default()), Vec::new());
 }
 
 #[test]
 fn one_tx_alloy_block() {
     common::test_execute_alloy(
-        &InMemoryStorage::new([common::mock_account(0)], None, []),
+        &StorageWrapper(&InMemoryStorage::new([common::mock_account(0)], None, [])),
         &PevmEthereum::mainnet(),
         Block {
             // Legit header but with no transactions
@@ -54,7 +54,7 @@ fn one_tx_alloy_block() {
 #[test]
 fn one_tx_revm_block() {
     common::test_execute_revm(
-        InMemoryStorage::new([common::mock_account(0)], None, []),
+        StorageWrapper(&InMemoryStorage::new([common::mock_account(0)], None, [])),
         vec![TxEnv {
             caller: Address::ZERO,
             transact_to: TransactTo::Call(Address::ZERO),
