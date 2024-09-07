@@ -6,7 +6,7 @@ Blazingly fast Parallel EVM in Rust.
 
 :warning: This repository is a **work in progress** and is **not production ready** :construction:
 
-![Banner](./assets/banner.jpg)
+![Banner](./doc/images/banner.jpg)
 
 **RISE pevm** is **a parallel execution engine for EVM transactions** heavily inspired by [Block-STM](https://arxiv.org/abs/2203.06871). Since Blockchain transactions are inherently sequential, a parallel execution engine must detect dependencies and conflicts to guarantee the same deterministic outcome with sequential execution. Block-STM optimistically executes transactions and re-executes when conflicts arise using a collaborative scheduler and a shared multi-version data structure. Since it does not require prior knowledge or constraints on the input transactions, **replacing an existing sequential executor with Block-STM is easy for substantial performance boosts**.
 
