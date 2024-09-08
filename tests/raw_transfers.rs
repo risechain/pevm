@@ -1,6 +1,5 @@
 // Test raw transfers -- only send some ETH from one account to another without extra data.
 
-use alloy_rpc_types::{Block, BlockTransactions, Transaction};
 use pevm::{chain::PevmEthereum, InMemoryStorage};
 use rand::random;
 use revm::primitives::{alloy_primitives::U160, env::TxEnv, Address, TransactTo, U256};
@@ -68,33 +67,16 @@ fn raw_transfers_same_sender_multiple_txs() {
 }
 
 #[test]
-fn raw_transfers_independent_alloy() {
-    let block_size = 100_000; // number of transactions
-    common::test_execute_alloy(
-        // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
-        &InMemoryStorage::new((0..=block_size).map(common::mock_account), None, []),
-        &PevmEthereum::mainnet(),
-        Block {
-            header: common::MOCK_ALLOY_BLOCK_HEADER.clone(),
-            transactions: BlockTransactions::Full(
-                (1..block_size)
-                    .map(|i| {
-                        let address = Address::from(U160::from(i));
-                        Transaction {
-                            transaction_type: Some(2),
-                            from: address,
-                            to: Some(address),
-                            value: U256::from(1),
-                            gas: common::RAW_TRANSFER_GAS_LIMIT.into(),
-                            max_fee_per_gas: Some(1),
-                            nonce: 1,
-                            ..Transaction::default()
-                        }
-                    })
-                    .collect(),
-            ),
-            ..Block::default()
-        },
-        false,
-    );
+fn ethereum_empty_alloy_block() {
+    common::test_independent_raw_transfers(&PevmEthereum::mainnet(), 0);
+}
+
+#[test]
+fn ethereum_one_tx_alloy_block() {
+    common::test_independent_raw_transfers(&PevmEthereum::mainnet(), 1);
+}
+
+#[test]
+fn ethereum_independent_raw_transfers() {
+    common::test_independent_raw_transfers(&PevmEthereum::mainnet(), 100_000);
 }

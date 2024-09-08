@@ -4,9 +4,9 @@ use std::{
     io::BufReader,
 };
 
-use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
-use alloy_rpc_types::{Block, Header};
-use pevm::{BlockHashes, Bytecodes, EvmAccount, InMemoryStorage};
+use alloy_primitives::{uint, Address, Bloom, Bytes, B256, U256};
+use alloy_rpc_types::{Block, BlockTransactions, Header, Signature};
+use pevm::{chain::PevmChain, BlockHashes, Bytecodes, EvmAccount, InMemoryStorage};
 
 pub mod runner;
 pub use runner::{mock_account, test_execute_alloy, test_execute_revm};
@@ -38,6 +38,13 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     blob_gas_used: None,
     parent_beacon_block_root: None,
     requests_root: None,
+};
+
+const MOCK_SIGNATURE: Signature = Signature {
+    r: uint!(1_U256),
+    s: uint!(1_U256),
+    v: U256::ZERO,
+    y_parity: None,
 };
 
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
@@ -79,4 +86,39 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
             InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
         );
     }
+}
+
+// Test a chain with [block_size] independent raw transactions that transfer to itself
+pub fn test_independent_raw_transfers<C>(chain: &C, block_size: usize)
+where
+    C: PevmChain + Send + Sync + PartialEq,
+    C::Transaction: Default,
+{
+    let accounts: Vec<(Address, EvmAccount)> = (0..block_size).map(mock_account).collect();
+    let block: Block<C::Transaction> = Block {
+        header: MOCK_ALLOY_BLOCK_HEADER.clone(),
+        transactions: BlockTransactions::<C::Transaction>::Full(
+            accounts
+                .iter()
+                .map(|(address, account)| {
+                    chain.build_tx_from_alloy_tx(alloy_rpc_types::Transaction {
+                        chain_id: Some(chain.id()),
+                        transaction_type: Some(2),
+                        from: *address,
+                        to: Some(*address),
+                        value: U256::from(1),
+                        gas: RAW_TRANSFER_GAS_LIMIT.into(),
+                        max_fee_per_gas: Some(1),
+                        max_priority_fee_per_gas: Some(0),
+                        nonce: account.nonce,
+                        signature: Some(MOCK_SIGNATURE),
+                        ..alloy_rpc_types::Transaction::default()
+                    })
+                })
+                .collect(),
+        ),
+        ..Block::<C::Transaction>::default()
+    };
+    let storage = InMemoryStorage::new(accounts, None, []);
+    test_execute_alloy(&storage, chain, block, false);
 }
