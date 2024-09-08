@@ -34,6 +34,9 @@ pub trait PevmChain: Debug {
     /// Get chain id.
     fn id(&self) -> u64;
 
+    /// Build Self::Transaction type from Alloy's transaction
+    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types::Transaction) -> Self::Transaction;
+
     /// Get block's [SpecId]
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError>;
 
