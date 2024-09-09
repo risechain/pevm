@@ -1,15 +1,13 @@
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Mutex,
-};
+use std::{collections::BTreeMap, sync::Mutex};
 
-use alloy_primitives::{Address, B256};
+use ahash::AHashSet;
+use alloy_primitives::B256;
 use dashmap::DashMap;
 use revm::primitives::Bytecode;
 
 use crate::{
-    BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocationHash, ReadOrigin, ReadSet,
-    TxIdx, TxVersion, WriteSet,
+    BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocation, MemoryLocationHash,
+    ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
 };
 
 #[derive(Default, Debug)]
@@ -18,8 +16,6 @@ struct LastLocations {
     // Consider [SmallVec] since most transactions explicitly write to 2 locations!
     write: Vec<MemoryLocationHash>,
 }
-
-type LazyAddresses = HashSet<Address, BuildSuffixHasher>;
 
 /// The MvMemory contains shared memory in a form of a multi-version data
 /// structure for values written and read by different transactions. It stores
@@ -35,8 +31,8 @@ pub struct MvMemory {
     pub(crate) data: DashMap<MemoryLocationHash, BTreeMap<TxIdx, MemoryEntry>, BuildIdentityHasher>,
     /// Last read & written locations of each transaction
     last_locations: Vec<Mutex<LastLocations>>,
-    /// Lazy addresses that need full evaluation at the end of the block
-    lazy_addresses: Mutex<LazyAddresses>,
+    /// Lazy locations that need full evaluation at the end of the block
+    pub(crate) lazy_locations: Mutex<AHashSet<MemoryLocation>>,
     /// New bytecodes deployed in this block
     pub(crate) new_bytecodes: DashMap<B256, Bytecode, BuildSuffixHasher>,
 }
@@ -45,7 +41,7 @@ impl MvMemory {
     pub(crate) fn new(
         block_size: usize,
         estimated_locations: impl IntoIterator<Item = (MemoryLocationHash, Vec<TxIdx>)>,
-        lazy_addresses: impl IntoIterator<Item = Address>,
+        lazy_locations: impl IntoIterator<Item = MemoryLocation>,
     ) -> Self {
         // TODO: Fine-tune the number of shards, like to the next number of two from the
         // number of worker threads.
@@ -66,17 +62,10 @@ impl MvMemory {
         Self {
             data,
             last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
-            lazy_addresses: Mutex::new(LazyAddresses::from_iter(lazy_addresses)),
+            lazy_locations: Mutex::new(AHashSet::from_iter(lazy_locations)),
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DashMap::default(),
-        }
-    }
-
-    pub(crate) fn add_lazy_addresses(&self, new_lazy_addresses: impl IntoIterator<Item = Address>) {
-        let mut lazy_addresses = self.lazy_addresses.lock().unwrap();
-        for address in new_lazy_addresses {
-            lazy_addresses.insert(address);
         }
     }
 
@@ -184,9 +173,5 @@ impl MvMemory {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }
         }
-    }
-
-    pub(crate) fn consume_lazy_addresses(&self) -> impl IntoIterator<Item = Address> {
-        std::mem::take(&mut *self.lazy_addresses.lock().unwrap()).into_iter()
     }
 }

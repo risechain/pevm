@@ -20,6 +20,7 @@ bitvec = "1.0.1"
 dashmap = "6.0.1"
 serde = "1.0.209"
 smallvec = "1.13.2"
+phf = { version = "0.11.2", features = ["macros"] }
 
 # Let's do our best to port needed REVM changes upstream
 revm = { git = "https://github.com/risechain/revm", rev = "ad1777e6f4f97d20fb52588677b5d86ed574b823", features = [
