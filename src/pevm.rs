@@ -262,8 +262,7 @@ impl Pevm {
                         MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                             // We fall back to sequential execution when reading a self-destructed account,
                             // so an empty account here would be a bug
-                            debug_assert_ne!(info.balance, U256::ZERO);
-                            debug_assert_ne!(info.nonce, 0);
+                            debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
                             balance = info.balance;
                             nonce = info.nonce;
                         }
