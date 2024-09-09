@@ -260,8 +260,9 @@ impl Pevm {
                 for (tx_idx, memory_entry) in write_history.iter() {
                     match memory_entry {
                         MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                            // TODO: Assert that there must be no self-destructed
-                            // accounts here.
+                            // We fall back to sequential execution when reading a self-destructed account,
+                            // so an empty account here would be a bug
+                            debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
                             balance = info.balance;
                             nonce = info.nonce;
                         }
