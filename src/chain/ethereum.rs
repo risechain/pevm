@@ -57,6 +57,12 @@ pub enum EthereumTransactionParsingError {
     MissingMaxFeePerGas,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum EthereumCalculateReceiptRootError {
+    /// [tx.type] is invalid.
+    InvalidType(u8),
+}
+
 fn get_ethereum_gas_price(
     tx: &alloy_rpc_types::Transaction,
 ) -> Result<U256, EthereumTransactionParsingError> {
@@ -81,6 +87,7 @@ impl PevmChain for PevmEthereum {
     type Transaction = alloy_rpc_types::Transaction;
     type BlockSpecError = EthereumBlockSpecError;
     type TransactionParsingError = EthereumTransactionParsingError;
+    type CalculateReceiptRootError = EthereumCalculateReceiptRootError;
 
     fn id(&self) -> u64 {
         self.id
@@ -189,28 +196,43 @@ impl PevmChain for PevmEthereum {
     // https://github.com/ethereum/go-ethereum/blob/master/cmd/era/main.go#L289
     fn calculate_receipt_root(
         &self,
-        _spec_id: SpecId,
+        spec_id: SpecId,
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
-    ) -> B256 {
-        // 1. Create an iterator of ReceiptEnvelope
-        let tx_type_iter = txs
+    ) -> Result<Option<B256>, Self::CalculateReceiptRootError> {
+        if spec_id < SpecId::BYZANTIUM {
+            // We can only calculate the receipts root from Byzantium.
+            // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
+            // receipt root is calculated with the post transaction state root,
+            // which we don't have in these tests.
+            return Ok(None);
+        }
+
+        // 1. Create a [Vec<TxType>]
+        let tx_types: Vec<TxType> = txs
             .txns()
-            .map(|tx| TxType::try_from(tx.transaction_type.unwrap_or_default()).unwrap());
+            .map(|tx| {
+                let byte = tx.transaction_type.unwrap_or_default();
+                TxType::try_from(byte)
+                    .map_err(|_| EthereumCalculateReceiptRootError::InvalidType(byte))
+            })
+            .collect::<Result<_, _>>()?;
 
-        let receipt_iter = tx_results.iter().map(|tx| tx.receipt.clone().with_bloom());
-
+        // 2. Create an iterator of [ReceiptEnvelope]
         let receipt_envelope_iter =
-            Iterator::zip(tx_type_iter, receipt_iter).map(|(tx_type, receipt)| match tx_type {
-                TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
-                TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
-                TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
-                TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
-                TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt),
+            Iterator::zip(tx_types.iter(), tx_results.iter()).map(|(tx_type, tx_result)| {
+                let receipt = tx_result.receipt.clone().with_bloom();
+                match tx_type {
+                    TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
+                    TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt),
+                    TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt),
+                    TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
+                    TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt),
+                }
             });
 
-        // 2. Create a trie then calculate the root hash
-        // We use BTreeMap because the keys must be sorted in ascending order.
+        // 3. Create a trie then calculate the root hash
+        // We use [BTreeMap] because the keys must be sorted in ascending order.
         let trie_entries: BTreeMap<_, _> = receipt_envelope_iter
             .enumerate()
             .map(|(index, receipt)| {
@@ -225,6 +247,6 @@ impl PevmChain for PevmEthereum {
         for (k, v) in trie_entries {
             hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
         }
-        hash_builder.root()
+        Ok(Some(hash_builder.root()))
     }
 }

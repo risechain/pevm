@@ -31,6 +31,9 @@ pub trait PevmChain: Debug {
     /// The error type for [Self::get_tx_env].
     type TransactionParsingError: Debug + Clone + PartialEq;
 
+    /// The error type for [Self::calculate_receipt_root].
+    type CalculateReceiptRootError: Debug + Clone + PartialEq;
+
     /// Get chain id.
     fn id(&self) -> u64;
 
@@ -69,7 +72,7 @@ pub trait PevmChain: Debug {
         spec_id: SpecId,
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
-    ) -> B256;
+    ) -> Result<Option<B256>, Self::CalculateReceiptRootError>;
 }
 
 mod ethereum;
