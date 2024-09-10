@@ -4,7 +4,7 @@
 use std::{fmt::Debug, future::IntoFuture, sync::Mutex, time::Duration};
 
 use ahash::AHashMap;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, FixedBytes, B256, U256};
 use alloy_provider::{
     network::{BlockResponse, HeaderResponse},
     Network, Provider, RootProvider,
@@ -171,9 +171,17 @@ impl<N: Network> Storage for RpcStorage<N> {
     }
 
     fn has_storage(&self, _address: &Address) -> Result<bool, Self::Error> {
-        // TODO: Properly implement this, like checking for storage hash.
-        // Returning [false] should cover EIP-7610 for now.
-        Ok(false)
+        if let Some(_account) = self.basic(_address)? {
+            let proof = self.fetch(|| {
+                self.provider
+                    .get_proof(*_address, Vec::new())
+                    .block_id(self.block_id)
+            })?;
+            Ok(!proof.storage_hash.is_zero())
+        } else {
+            Ok(false)
+        }
+    
     }
 
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
