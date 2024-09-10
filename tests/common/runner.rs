@@ -1,7 +1,7 @@
 use alloy_primitives::Bloom;
 use alloy_rpc_types::Block;
 use pevm::{
-    chain::{PevmChain, PevmEthereum},
+    chain::{CalculateReceiptRootError, PevmChain, PevmEthereum},
     EvmAccount, Pevm, Storage,
 };
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
@@ -63,8 +63,8 @@ pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync +
         let spec_id = chain.get_block_spec(&block.header).unwrap();
 
         match chain.calculate_receipt_root(spec_id, &block.transactions, &tx_results) {
-            Ok(None) => {}
-            Ok(Some(receipt_root)) => assert_eq!(block.header.receipts_root, receipt_root),
+            Ok(receipt_root) => assert_eq!(block.header.receipts_root, receipt_root),
+            Err(CalculateReceiptRootError::Unsupported) => {}
             Err(err) => panic!("{:?}", err),
         }
 

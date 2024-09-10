@@ -15,7 +15,7 @@ use revm::{
     Handler,
 };
 
-use super::{PevmChain, RewardPolicy};
+use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};
 use crate::{
     mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx,
 };
@@ -57,12 +57,6 @@ pub enum EthereumTransactionParsingError {
     MissingMaxFeePerGas,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum EthereumCalculateReceiptRootError {
-    /// [tx.type] is invalid.
-    InvalidType(u8),
-}
-
 fn get_ethereum_gas_price(
     tx: &alloy_rpc_types::Transaction,
 ) -> Result<U256, EthereumTransactionParsingError> {
@@ -87,7 +81,6 @@ impl PevmChain for PevmEthereum {
     type Transaction = alloy_rpc_types::Transaction;
     type BlockSpecError = EthereumBlockSpecError;
     type TransactionParsingError = EthereumTransactionParsingError;
-    type CalculateReceiptRootError = EthereumCalculateReceiptRootError;
 
     fn id(&self) -> u64 {
         self.id
@@ -199,13 +192,13 @@ impl PevmChain for PevmEthereum {
         spec_id: SpecId,
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
-    ) -> Result<Option<B256>, Self::CalculateReceiptRootError> {
+    ) -> Result<B256, CalculateReceiptRootError> {
         if spec_id < SpecId::BYZANTIUM {
             // We can only calculate the receipts root from Byzantium.
             // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
             // receipt root is calculated with the post transaction state root,
             // which we don't have in these tests.
-            return Ok(None);
+            return Err(CalculateReceiptRootError::Unsupported);
         }
 
         // 1. Create a [Vec<TxType>]
@@ -213,8 +206,7 @@ impl PevmChain for PevmEthereum {
             .txns()
             .map(|tx| {
                 let byte = tx.transaction_type.unwrap_or_default();
-                TxType::try_from(byte)
-                    .map_err(|_| EthereumCalculateReceiptRootError::InvalidType(byte))
+                TxType::try_from(byte).map_err(|_| CalculateReceiptRootError::InvalidTxType(byte))
             })
             .collect::<Result<_, _>>()?;
 
@@ -247,6 +239,6 @@ impl PevmChain for PevmEthereum {
         for (k, v) in trie_entries {
             hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
         }
-        Ok(Some(hash_builder.root()))
+        Ok(hash_builder.root())
     }
 }
