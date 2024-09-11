@@ -197,7 +197,7 @@ impl PevmChain for PevmEthereum {
             // We can only calculate the receipts root from Byzantium.
             // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
             // receipt root is calculated with the post transaction state root,
-            // which we don't have in these tests.
+            // which we don't have here.
 
             // TODO: allow to calculate the receipt root by providing the post transaction state root
             return Err(CalculateReceiptRootError::Unsupported);
