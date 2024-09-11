@@ -4,9 +4,7 @@ use alloy_rpc_types::Receipt;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
-        ResultAndState,
-        SpecId::{self, SPURIOUS_DRAGON},
-        TxEnv, B256, KECCAK_EMPTY, U256,
+        ResultAndState, SpecId, TxEnv, B256, KECCAK_EMPTY, U256,
     },
     Context, Database, Evm, EvmContext,
 };
@@ -44,7 +42,11 @@ impl PevmTxExecutionResult {
     /// Construct a Pevm execution result from a raw Revm result.
     /// Note that [cumulative_gas_used] is preset to the gas used of this transaction.
     /// It should be post-processed with the remaining transactions in the block.
-    pub fn from_revm(spec_id: SpecId, ResultAndState { result, state }: ResultAndState) -> Self {
+    pub fn from_revm<C: PevmChain>(
+        chain: &C,
+        spec_id: SpecId,
+        ResultAndState { result, state }: ResultAndState,
+    ) -> Self {
         Self {
             receipt: Receipt {
                 status: result.is_success().into(),
@@ -56,8 +58,7 @@ impl PevmTxExecutionResult {
                 .filter(|(_, account)| account.is_touched())
                 .map(|(address, account)| {
                     if account.is_selfdestructed()
-                    // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
-                    || account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON)
+                        || account.is_empty() && chain.is_eip_161_enabled(spec_id)
                     {
                         (address, None)
                     } else {
@@ -584,7 +585,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             // and return a [None], i.e., [LoadedAsNotExisting]. Without
                             // this check it would write then read a [Some] default
                             // account, which may yield a wrong gas fee, etc.
-                            else if !self.spec_id.is_enabled_in(SPURIOUS_DRAGON)
+                            else if !self.chain.is_eip_161_enabled(self.spec_id)
                                 || !account.is_empty()
                             {
                                 write_set.push((
@@ -645,6 +646,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
                 VmExecutionResult::Ok {
                     execution_result: PevmTxExecutionResult::from_revm(
+                        self.chain,
                         self.spec_id,
                         result_and_state,
                     ),
@@ -691,7 +693,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 } else {
                     tx.gas_price
                 };
-                if self.spec_id.is_enabled_in(SpecId::LONDON) {
+                if self.chain.is_eip_1559_enabled(self.spec_id) {
                     gas_price = gas_price.saturating_sub(self.block_env.basefee);
                 }
                 smallvec![(self.beneficiary_location_hash, gas_price * gas_used)]

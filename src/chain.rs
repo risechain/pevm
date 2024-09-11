@@ -81,6 +81,18 @@ pub trait PevmChain: Debug {
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> Result<B256, CalculateReceiptRootError>;
+
+    /// Check whether EIP-1559 is enabled
+    /// https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-1559.md
+    fn is_eip_1559_enabled(&self, spec_id: SpecId) -> bool {
+        spec_id >= SpecId::LONDON
+    }
+
+    /// Check whether EIP-161 is enabled
+    /// https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
+    fn is_eip_161_enabled(&self, spec_id: SpecId) -> bool {
+        spec_id >= SpecId::SPURIOUS_DRAGON
+    }
 }
 
 mod ethereum;
