@@ -20,6 +20,17 @@ pub enum RewardPolicy {
     Ethereum,
 }
 
+/// The error type of [PevmChain::calculate_receipt_root]
+#[derive(Debug, Clone)]
+pub enum CalculateReceiptRootError {
+    /// Unsupported
+    Unsupported,
+    /// Invalid transaction type
+    InvalidTxType(u8),
+    /// An escape hatch for other chains
+    Custom(String),
+}
+
 /// Custom behaviours for different chains & networks
 pub trait PevmChain: Debug {
     /// The transaction type
@@ -69,7 +80,7 @@ pub trait PevmChain: Debug {
         spec_id: SpecId,
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
-    ) -> B256;
+    ) -> Result<B256, CalculateReceiptRootError>;
 }
 
 mod ethereum;
