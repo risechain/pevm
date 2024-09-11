@@ -199,7 +199,8 @@ impl PevmChain for PevmEthereum {
             // receipt root is calculated with the post transaction state root,
             // which we don't have here.
 
-            // TODO: allow to calculate the receipt root by providing the post transaction state root
+            // TODO: Allow to calculate the receipt root by providing the post
+            // transaction state root.
             return Err(CalculateReceiptRootError::Unsupported);
         }
 
@@ -242,5 +243,13 @@ impl PevmChain for PevmEthereum {
             hash_builder.add_leaf(alloy_trie::Nibbles::unpack(&k), &v);
         }
         Ok(hash_builder.root())
+    }
+
+    fn is_eip_1559_enabled(&self, spec_id: SpecId) -> bool {
+        spec_id >= SpecId::LONDON
+    }
+
+    fn is_eip_161_enabled(&self, spec_id: SpecId) -> bool {
+        spec_id >= SpecId::SPURIOUS_DRAGON
     }
 }

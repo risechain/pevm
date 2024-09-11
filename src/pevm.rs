@@ -10,11 +10,7 @@ use alloy_primitives::U256;
 use alloy_rpc_types::{Block, BlockTransactions};
 use revm::{
     db::CacheDB,
-    primitives::{
-        BlockEnv,
-        SpecId::{self, SPURIOUS_DRAGON},
-        TxEnv,
-    },
+    primitives::{BlockEnv, SpecId, TxEnv},
     DatabaseCommit,
 };
 
@@ -300,7 +296,7 @@ impl Pevm {
                     let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
                     let account = tx_result.state.entry(address).or_default();
                     // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
-                    if spec_id.is_enabled_in(SPURIOUS_DRAGON)
+                    if chain.is_eip_161_enabled(spec_id)
                         && code_hash.is_none()
                         && nonce == 0
                         && balance == U256::ZERO
@@ -415,7 +411,7 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
                 evm.db_mut().commit(result_and_state.state.clone());
 
                 let mut execution_result =
-                    PevmTxExecutionResult::from_revm(spec_id, result_and_state);
+                    PevmTxExecutionResult::from_revm(chain, spec_id, result_and_state);
 
                 cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
                 execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
