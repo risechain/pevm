@@ -199,7 +199,8 @@ impl PevmChain for PevmEthereum {
             // receipt root is calculated with the post transaction state root,
             // which we don't have here.
 
-            // TODO: allow to calculate the receipt root by providing the post transaction state root
+            // TODO: Allow to calculate the receipt root by providing the post
+            // transaction state root.
             return Err(CalculateReceiptRootError::Unsupported);
         }
 

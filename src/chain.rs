@@ -27,7 +27,7 @@ pub enum CalculateReceiptRootError {
     Unsupported,
     /// Invalid transaction type
     InvalidTxType(u8),
-    /// An escape hatch for other chains
+    /// Arbitrary error message
     Custom(String),
 }
 
