@@ -243,4 +243,12 @@ impl PevmChain for PevmEthereum {
         }
         Ok(hash_builder.root())
     }
+
+    fn is_eip_1559_enabled(&self, spec_id: SpecId) -> bool {
+        spec_id >= SpecId::LONDON
+    }
+
+    fn is_eip_161_enabled(&self, spec_id: SpecId) -> bool {
+        spec_id >= SpecId::SPURIOUS_DRAGON
+    }
 }
