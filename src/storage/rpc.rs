@@ -170,18 +170,15 @@ impl<N: Network> Storage for RpcStorage<N> {
         Ok(self.cache_bytecodes.lock().unwrap().get(code_hash).cloned())
     }
 
-    fn has_storage(&self, _address: &Address) -> Result<bool, Self::Error> {
-        if let Some(_account) = self.basic(_address)? {
-            let proof = self.fetch(|| {
-                self.provider
-                    .get_proof(*_address, Vec::new())
-                    .block_id(self.block_id)
-            })?;
-            Ok(!proof.storage_hash.is_zero())
-        } else {
-            Ok(false)
-        }
-    
+    fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
+        let proof = self.fetch(|| {
+            self.provider
+                // [get_account] is simpler but it yields deserialization
+                // error on an empty account.
+                .get_proof(*address, Vec::new())
+                .block_id(self.block_id)
+        })?;
+        Ok(proof.storage_hash != alloy_consensus::EMPTY_ROOT_HASH)
     }
 
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
