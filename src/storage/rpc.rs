@@ -4,7 +4,7 @@
 use std::{fmt::Debug, future::IntoFuture, sync::Mutex, time::Duration};
 
 use ahash::AHashMap;
-use alloy_primitives::{Address, FixedBytes, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{
     network::{BlockResponse, HeaderResponse},
     Network, Provider, RootProvider,
