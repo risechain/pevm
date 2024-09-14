@@ -9,7 +9,7 @@ use revm::primitives::Bytecode;
 
 use crate::{
     BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocationHash, ReadOrigin, ReadSet,
-    TxIdx, TxVersion, WriteSet,
+    TxIdx, WriteSet,
 };
 
 #[derive(Default, Debug)]
@@ -84,13 +84,8 @@ impl MvMemory {
     // Return whether a write occurred to a memory location not written to by
     // the previous incarnation of the same transaction. This determines whether
     // the executed higher transactions need re-validation.
-    pub(crate) fn record(
-        &self,
-        tx_version: &TxVersion,
-        read_set: ReadSet,
-        write_set: WriteSet,
-    ) -> bool {
-        let mut last_locations = index_mutex!(self.last_locations, tx_version.tx_idx);
+    pub(crate) fn record(&self, tx_idx: TxIdx, read_set: ReadSet, write_set: WriteSet) -> bool {
+        let mut last_locations = index_mutex!(self.last_locations, tx_idx);
         last_locations.read = read_set;
 
         // TODO: Group updates by shard to avoid locking operations.
@@ -100,7 +95,7 @@ impl MvMemory {
             let prev_location = unsafe { last_locations.write.get_unchecked(last_location_idx) };
             if !write_set.iter().any(|(l, _)| l == prev_location) {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
-                    written_transactions.remove(&tx_version.tx_idx);
+                    written_transactions.remove(&tx_idx);
                 }
                 last_locations.write.swap_remove(last_location_idx);
             } else {
@@ -112,10 +107,10 @@ impl MvMemory {
         let mut wrote_new_location = false;
 
         for (location, value) in write_set {
-            self.data.entry(location).or_default().insert(
-                tx_version.tx_idx,
-                MemoryEntry::Data(tx_version.tx_incarnation, value),
-            );
+            self.data
+                .entry(location)
+                .or_default()
+                .insert(tx_idx, MemoryEntry::Data(value));
             if !last_locations.write.contains(&location) {
                 last_locations.write.push(location);
                 wrote_new_location = true;
@@ -142,14 +137,11 @@ impl MvMemory {
             if let Some(written_transactions) = self.data.get(location) {
                 let mut iter = written_transactions.range(..tx_idx);
                 for prior_origin in prior_origins {
-                    if let ReadOrigin::MvMemory(prior_version) = prior_origin {
+                    if let ReadOrigin::MvMemory(prior_idx, prior_value) = prior_origin {
                         // Found something: Must match version.
-                        if let Some((closest_idx, MemoryEntry::Data(tx_incarnation, ..))) =
-                            iter.next_back()
+                        if let Some((closest_idx, MemoryEntry::Data(value, ..))) = iter.next_back()
                         {
-                            if closest_idx != &prior_version.tx_idx
-                                || &prior_version.tx_incarnation != tx_incarnation
-                            {
+                            if closest_idx != prior_idx || prior_value != value {
                                 return false;
                             }
                         }

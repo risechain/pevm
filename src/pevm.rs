@@ -21,7 +21,7 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
+    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxIdx,
 };
 
 /// Errors when executing a block with pevm.
@@ -173,11 +173,9 @@ impl Pevm {
                     let mut task = scheduler.next_task();
                     while task.is_some() {
                         task = match task.unwrap() {
-                            Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
-                            }
-                            Task::Validation(tx_version) => {
-                                try_validate(&mv_memory, &scheduler, &tx_version)
+                            Task::Execution(tx_idx) => self.try_execute(&vm, &scheduler, tx_idx),
+                            Task::Validation(tx_idx) => {
+                                try_validate(&mv_memory, &scheduler, tx_idx)
                             }
                         };
 
@@ -231,7 +229,7 @@ impl Pevm {
                 // Read from storage if the first multi-version entry is not an absolute value.
                 if !matches!(
                     write_history.first_key_value(),
-                    Some((_, MemoryEntry::Data(_, MemoryValue::Basic(_))))
+                    Some((_, MemoryEntry::Data(MemoryValue::Basic(_))))
                 ) {
                     if let Ok(Some(account)) = storage.basic(&address) {
                         balance = account.balance;
@@ -255,17 +253,17 @@ impl Pevm {
                 // TODO: Assert that the evaluated nonce matches the tx's.
                 for (tx_idx, memory_entry) in write_history.iter() {
                     match memory_entry {
-                        MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
+                        MemoryEntry::Data(MemoryValue::Basic(info)) => {
                             // We fall back to sequential execution when reading a self-destructed account,
                             // so an empty account here would be a bug
                             debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
                             balance = info.balance;
                             nonce = info.nonce;
                         }
-                        MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
+                        MemoryEntry::Data(MemoryValue::LazyRecipient(addition)) => {
                             balance += addition;
                         }
-                        MemoryEntry::Data(_, MemoryValue::LazySender(addition)) => {
+                        MemoryEntry::Data(MemoryValue::LazySender(addition)) => {
                             // We must re-do extra sender balance checks as we mock
                             // the max value in [Vm] during execution. Ideally we
                             // can turn off these redundant checks in revm.
@@ -332,10 +330,10 @@ impl Pevm {
         &self,
         vm: &Vm<S, C>,
         scheduler: &Scheduler,
-        tx_version: TxVersion,
+        tx_idx: TxIdx,
     ) -> Option<Task> {
         loop {
-            return match vm.execute(&tx_version) {
+            return match vm.execute(tx_idx) {
                 VmExecutionResult::Retry => {
                     if self.abort_reason.get().is_none() {
                         continue;
@@ -349,7 +347,7 @@ impl Pevm {
                     None
                 }
                 VmExecutionResult::ReadError { blocking_tx_idx } => {
-                    if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
+                    if !scheduler.add_dependency(tx_idx, blocking_tx_idx)
                         && self.abort_reason.get().is_none()
                     {
                         // Retry the execution immediately if the blocking transaction was
@@ -368,26 +366,21 @@ impl Pevm {
                     execution_result,
                     flags,
                 } => {
-                    *index_mutex!(self.execution_results, tx_version.tx_idx) =
-                        Some(execution_result);
-                    scheduler.finish_execution(tx_version, flags)
+                    *index_mutex!(self.execution_results, tx_idx) = Some(execution_result);
+                    scheduler.finish_execution(tx_idx, flags)
                 }
             };
         }
     }
 }
 
-fn try_validate(
-    mv_memory: &MvMemory,
-    scheduler: &Scheduler,
-    tx_version: &TxVersion,
-) -> Option<Task> {
-    let read_set_valid = mv_memory.validate_read_locations(tx_version.tx_idx);
-    let aborted = !read_set_valid && scheduler.try_validation_abort(tx_version);
+fn try_validate(mv_memory: &MvMemory, scheduler: &Scheduler, tx_idx: TxIdx) -> Option<Task> {
+    let read_set_valid = mv_memory.validate_read_locations(tx_idx);
+    let aborted = !read_set_valid && scheduler.try_validation_abort(tx_idx);
     if aborted {
-        mv_memory.convert_writes_to_estimates(tx_version.tx_idx);
+        mv_memory.convert_writes_to_estimates(tx_idx);
     }
-    scheduler.finish_validation(tx_version, aborted)
+    scheduler.finish_validation(tx_idx, aborted)
 }
 
 /// Execute REVM transactions sequentially.

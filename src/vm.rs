@@ -16,7 +16,7 @@ use crate::{
     mv_memory::MvMemory,
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
     MemoryLocation, MemoryLocationHash, MemoryValue, ReadError, ReadOrigin, ReadOrigins, ReadSet,
-    Storage, TxIdx, TxVersion, WriteSet,
+    Storage, TxIdx, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -171,7 +171,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
         if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
-            if let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
+            if let Some((tx_idx, MemoryEntry::Data(value))) =
                 written_transactions.range(..self.tx_idx).next_back()
             {
                 match value {
@@ -181,10 +181,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
                     MemoryValue::CodeHash(code_hash) => {
                         Self::push_origin(
                             read_origins,
-                            ReadOrigin::MvMemory(TxVersion {
-                                tx_idx: *tx_idx,
-                                tx_incarnation: *tx_incarnation,
-                            }),
+                            ReadOrigin::MvMemory(*tx_idx, value.clone()),
                         )?;
                         return Ok(Some(*code_hash));
                     }
@@ -247,16 +244,13 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                         Some((blocking_idx, MemoryEntry::Estimate)) => {
                             return Err(ReadError::BlockingIndex(*blocking_idx))
                         }
-                        Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                        Some((tx_idx, MemoryEntry::Data(value))) => {
                             // About to push a new origin
                             // Inconsistent: new origin will be longer than the previous!
                             if has_prev_origins && read_origins.len() == new_origins.len() {
                                 return Err(ReadError::InconsistentRead);
                             }
-                            let origin = ReadOrigin::MvMemory(TxVersion {
-                                tx_idx: *closest_idx,
-                                tx_incarnation: *tx_incarnation,
-                            });
+                            let origin = ReadOrigin::MvMemory(*tx_idx, value.clone());
                             // Inconsistent: new origin is different from the previous!
                             if has_prev_origins
                                 && unsafe { read_origins.get_unchecked(new_origins.len()) }
@@ -418,13 +412,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                     written_transactions.range(..self.tx_idx).next_back()
                 {
                     match entry {
-                        MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
+                        MemoryEntry::Data(MemoryValue::Storage(value)) => {
                             Self::push_origin(
                                 read_origins,
-                                ReadOrigin::MvMemory(TxVersion {
-                                    tx_idx: *closest_idx,
-                                    tx_incarnation: *tx_incarnation,
-                                }),
+                                ReadOrigin::MvMemory(*closest_idx, MemoryValue::Storage(*value)),
                             )?;
                             return Ok(*value);
                         }
@@ -509,14 +500,14 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     // value are added to the write set, possibly replacing a pair with a prior value
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
-    pub(crate) fn execute(&self, tx_version: &TxVersion) -> VmExecutionResult {
+    pub(crate) fn execute(&self, tx_idx: TxIdx) -> VmExecutionResult {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
-        let tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
+        let tx = unsafe { self.txs.get_unchecked(tx_idx) };
         let from_hash = self.hash_basic(tx.caller);
         let to_hash = tx.transact_to.to().map(|to| self.hash_basic(*to));
 
         // Execute
-        let mut db = match VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash) {
+        let mut db = match VmDb::new(self, tx_idx, tx, from_hash, to_hash) {
             Ok(db) => db,
             // TODO: Handle different errors differently
             Err(_) => return VmExecutionResult::FallbackToSequential,
@@ -636,13 +627,13 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         .add_lazy_addresses([tx.caller, *tx.transact_to.to().unwrap()]);
                 }
 
-                let mut flags = if tx_version.tx_idx > 0 && !db.is_lazy {
+                let mut flags = if tx_idx > 0 && !db.is_lazy {
                     FinishExecFlags::NeedValidation
                 } else {
                     FinishExecFlags::empty()
                 };
 
-                if self.mv_memory.record(tx_version, db.read_set, write_set) {
+                if self.mv_memory.record(tx_idx, db.read_set, write_set) {
                     flags |= FinishExecFlags::WroteNewLocation;
                 }
 
@@ -669,7 +660,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 // Since this retry is safe for syncing canonical blocks but can deadlock
                 // on new or faulty blocks. We can skip the transaction for new blocks and
                 // error out after a number of tries for the latter.
-                if tx_version.tx_idx > 0
+                if tx_idx > 0
                     && matches!(
                         err,
                         EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee { .. })
@@ -677,7 +668,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     )
                 {
                     VmExecutionResult::ReadError {
-                        blocking_tx_idx: tx_version.tx_idx - 1,
+                        blocking_tx_idx: tx_idx - 1,
                     }
                 } else {
                     VmExecutionResult::ExecutionError(err)

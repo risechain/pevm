@@ -67,7 +67,7 @@ pub type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 // TODO: It would be nice if we could tie the different cases of
 // memory locations & values at the type level, to prevent lots of
 // matches & potentially dangerous mismatch mistakes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum MemoryValue {
     Basic(AccountBasic),
     CodeHash(B256),
@@ -88,7 +88,7 @@ enum MemoryValue {
 
 #[derive(Debug)]
 enum MemoryEntry {
-    Data(TxIncarnation, MemoryValue),
+    Data(MemoryValue),
     // When an incarnation is aborted due to a validation failure, the
     // entries in the multi-version data structure corresponding to its
     // write set are replaced with this special ESTIMATE marker.
@@ -106,10 +106,6 @@ enum MemoryEntry {
 // TODO: Consider downsizing to [u32].
 type TxIdx = usize;
 
-// The i-th time a transaction is re-executed, counting from 0.
-// TODO: Consider downsizing to [u32].
-type TxIncarnation = usize;
-
 // - ReadyToExecute(i) --try_incarnate--> Executing(i)
 // Non-blocked execution:
 //   - Executing(i) --finish_execution--> Executed(i)
@@ -120,7 +116,7 @@ type TxIncarnation = usize;
 //   - Executing(i) --add_dependency--> Aborting(i)
 //   - Aborting(i) --resume--> ReadyToExecute(i+1)
 #[derive(PartialEq, Debug)]
-enum IncarnationStatus {
+enum TxStatus {
     ReadyToExecute,
     Executing,
     Executed,
@@ -128,31 +124,11 @@ enum IncarnationStatus {
     Aborting,
 }
 
-#[derive(PartialEq, Debug)]
-struct TxStatus {
-    incarnation: TxIncarnation,
-    status: IncarnationStatus,
-}
-
-// We maintain an in-memory multi-version data structure that stores for
-// each memory location the latest value written per transaction, along
-// with the associated transaction incarnation. When a transaction reads
-// a memory location, it obtains from the multi-version data structure the
-// value written to this location by the highest transaction that appears
-// before it in the block, along with the associated version. If no previous
-// transactions have written to a location, the value would be read from the
-// storage state before block execution.
-#[derive(Clone, Debug, PartialEq)]
-struct TxVersion {
-    tx_idx: TxIdx,
-    tx_incarnation: TxIncarnation,
-}
-
 // The origin of a memory read. It could be from the live multi-version
 // data structure or from storage (chain state before block execution).
 #[derive(Debug, PartialEq)]
 enum ReadOrigin {
-    MvMemory(TxVersion),
+    MvMemory(TxIdx, MemoryValue),
     Storage,
 }
 
@@ -199,8 +175,8 @@ pub enum ReadError {
 // transaction to resolve, etc.
 #[derive(Debug)]
 enum Task {
-    Execution(TxVersion),
-    Validation(TxVersion),
+    Execution(TxIdx),
+    Validation(TxIdx),
 }
 
 bitflags! {
