@@ -78,12 +78,10 @@ pub(crate) enum VmExecutionError {
     ExecutionError(ExecutionError),
 }
 
-pub(crate) struct VmExecutionOutcome {
-    pub execution_result: PevmTxExecutionResult,
-    pub flags: FinishExecFlags,
+pub(crate) struct VmExecutionResult {
+    pub(crate) execution_result: PevmTxExecutionResult,
+    pub(crate) flags: FinishExecFlags,
 }
-
-pub(crate) type VmExecutionResult = Result<VmExecutionOutcome, VmExecutionError>;
 
 // A database interface that intercepts reads while executing a specific
 // transaction with Revm. It provides values from the multi-version data
@@ -510,7 +508,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     // value are added to the write set, possibly replacing a pair with a prior value
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
-    pub(crate) fn execute(&self, tx_version: &TxVersion) -> VmExecutionResult {
+    pub(crate) fn execute(
+        &self,
+        tx_version: &TxVersion,
+    ) -> Result<VmExecutionResult, VmExecutionError> {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
         let from_hash = self.hash_basic(tx.caller);
@@ -520,9 +521,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         let mut db = match VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash) {
             Ok(db) => db,
             Err(err) => {
-                return VmExecutionResult::Err(VmExecutionError::ExecutionError(
-                    ExecutionError::Database(err),
-                ));
+                return Err(VmExecutionError::ExecutionError(ExecutionError::Database(
+                    err,
+                )));
             }
         };
         // TODO: Share as much [Evm], [Context], [Handler], etc. among threads as possible
@@ -650,25 +651,22 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     flags |= FinishExecFlags::WroteNewLocation;
                 }
 
-                let outcome = VmExecutionOutcome {
+                Ok(VmExecutionResult {
                     execution_result: PevmTxExecutionResult::from_revm(
                         self.chain,
                         self.spec_id,
                         result_and_state,
                     ),
                     flags,
-                };
-                VmExecutionResult::Ok(outcome)
+                })
             }
-            Err(EVMError::Database(ReadError::InconsistentRead)) => {
-                VmExecutionResult::Err(VmExecutionError::Retry)
-            }
+            Err(EVMError::Database(ReadError::InconsistentRead)) => Err(VmExecutionError::Retry),
             Err(EVMError::Database(ReadError::SelfDestructedAccount)) => {
-                VmExecutionResult::Err(VmExecutionError::FallbackToSequential)
+                Err(VmExecutionError::FallbackToSequential)
             }
 
             Err(EVMError::Database(ReadError::BlockingIndex(blocking_tx_idx))) => {
-                VmExecutionResult::Err(VmExecutionError::ReadError { blocking_tx_idx })
+                Err(VmExecutionError::ReadError { blocking_tx_idx })
             }
             Err(err) => {
                 // Optimistically retry in case some previous internal transactions send
@@ -684,11 +682,11 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             | EVMError::Transaction(InvalidTransaction::NonceTooHigh { .. })
                     )
                 {
-                    VmExecutionResult::Err(VmExecutionError::ReadError {
+                    Err(VmExecutionError::ReadError {
                         blocking_tx_idx: tx_version.tx_idx - 1,
                     })
                 } else {
-                    VmExecutionResult::Err(VmExecutionError::ExecutionError(err))
+                    Err(VmExecutionError::ExecutionError(err))
                 }
             }
         }

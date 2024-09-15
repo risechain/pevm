@@ -21,7 +21,7 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{
-        build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionOutcome,
+        build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult,
     },
     EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
 };
@@ -366,7 +366,7 @@ impl Pevm {
                         .get_or_init(|| AbortReason::ExecutionError(err));
                     None
                 }
-                Ok(VmExecutionOutcome {
+                Ok(VmExecutionResult {
                     execution_result,
                     flags,
                 }) => {
