@@ -279,7 +279,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                 loop {
                     match iter.next_back() {
                         Some((blocking_idx, MemoryEntry::Estimate)) => {
-                            return Err(ReadError::BlockingIndex(*blocking_idx))
+                            return Err(ReadError::Blocking(*blocking_idx))
                         }
                         Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
                             // About to push a new origin
@@ -377,7 +377,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                 if self.tx_idx > 0 {
                     // TODO: Better retry strategy -- immediately, to the
                     // closest sender tx, to the missing sender tx, etc.
-                    return Err(ReadError::BlockingIndex(self.tx_idx - 1));
+                    return Err(ReadError::Blocking(self.tx_idx - 1));
                 } else {
                     return Err(ReadError::InvalidNonce(self.tx_idx));
                 }
@@ -462,9 +462,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                             )?;
                             return Ok(*value);
                         }
-                        MemoryEntry::Estimate => {
-                            return Err(ReadError::BlockingIndex(*closest_idx))
-                        }
+                        MemoryEntry::Estimate => return Err(ReadError::Blocking(*closest_idx)),
                         _ => return Err(ReadError::InvalidMemoryValueType),
                     }
                 }
