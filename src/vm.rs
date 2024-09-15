@@ -689,7 +689,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     flags,
                 })
             }
-
+            Err(EVMError::Database(read_error)) => Err(read_error.into()),
             Err(err) => {
                 // Optimistically retry in case some previous internal transactions send
                 // more fund to the sender but hasn't been executed yet.
