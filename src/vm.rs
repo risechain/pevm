@@ -93,7 +93,7 @@ pub(crate) struct VmExecutionOutcome {
     flags: FinishExecFlags,
 }
 
-type VmExecutionResult = Result<VmExecutionOutcome, VmExecutionError>;
+pub type VmExecutionResult = Result<VmExecutionOutcome, VmExecutionError>;
 
 // TODO: Rewrite as [Result]
 // pub(crate) enum VmExecutionResult {
@@ -543,8 +543,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         // Execute
         let mut db = match VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash) {
             Ok(db) => db,
-            // TODO: Handle different errors differently
-            Err(_) => return VmExecutionResult::FallbackToSequential,
+            Err(err) => {
+                let evm_err = ExecutionError::Database(err);
+                return VmExecutionResult::Err(VmExecutionError::ExecutionError(evm_err));
+            }
         };
         // TODO: Share as much [Evm], [Context], [Handler], etc. among threads as possible
         // as creating them is very expensive.
@@ -671,21 +673,25 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     flags |= FinishExecFlags::WroteNewLocation;
                 }
 
-                VmExecutionResult::Ok {
+                let outcome = VmExecutionOutcome {
                     execution_result: PevmTxExecutionResult::from_revm(
                         self.chain,
                         self.spec_id,
                         result_and_state,
                     ),
                     flags,
-                }
+                };
+                VmExecutionResult::Ok(outcome)
             }
-            Err(EVMError::Database(ReadError::InconsistentRead)) => VmExecutionResult::Retry,
+            Err(EVMError::Database(ReadError::InconsistentRead)) => {
+                VmExecutionResult::Err(VmExecutionError::Retry)
+            }
             Err(EVMError::Database(ReadError::SelfDestructedAccount)) => {
-                VmExecutionResult::FallbackToSequential
+                VmExecutionResult::Err(VmExecutionError::FallbackToSequential)
             }
+
             Err(EVMError::Database(ReadError::BlockingIndex(blocking_tx_idx))) => {
-                VmExecutionResult::ReadError { blocking_tx_idx }
+                VmExecutionResult::Err(VmExecutionError::ReadError { blocking_tx_idx })
             }
             Err(err) => {
                 // Optimistically retry in case some previous internal transactions send
@@ -701,11 +707,11 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             | EVMError::Transaction(InvalidTransaction::NonceTooHigh { .. })
                     )
                 {
-                    VmExecutionResult::ReadError {
+                    VmExecutionResult::Err(VmExecutionError::ReadError {
                         blocking_tx_idx: tx_version.tx_idx - 1,
-                    }
+                    })
                 } else {
-                    VmExecutionResult::ExecutionError(err)
+                    VmExecutionResult::Err(VmExecutionError::ExecutionError(err))
                 }
             }
         }
