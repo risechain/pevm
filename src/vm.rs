@@ -71,17 +71,6 @@ impl PevmTxExecutionResult {
     }
 }
 
-// /// The error type of [PevmChain::calculate_receipt_root]
-// #[derive(Debug, Clone)]
-// pub enum CalculateReceiptRootError {
-//     /// Unsupported
-//     Unsupported,
-//     /// Invalid transaction type
-//     InvalidTxType(u8),
-//     /// Arbitrary error message
-//     Custom(String),
-// }
-
 pub(crate) enum VmExecutionError {
     Retry,
     FallbackToSequential,
