@@ -70,19 +70,44 @@ impl PevmTxExecutionResult {
     }
 }
 
-// TODO: Rewrite as [Result]
-pub(crate) enum VmExecutionResult {
+// /// The error type of [PevmChain::calculate_receipt_root]
+// #[derive(Debug, Clone)]
+// pub enum CalculateReceiptRootError {
+//     /// Unsupported
+//     Unsupported,
+//     /// Invalid transaction type
+//     InvalidTxType(u8),
+//     /// Arbitrary error message
+//     Custom(String),
+// }
+
+pub(crate) enum VmExecutionError {
     Retry,
     FallbackToSequential,
-    ReadError {
-        blocking_tx_idx: TxIdx,
-    },
+    ReadError { blocking_tx_idx: TxIdx },
     ExecutionError(ExecutionError),
-    Ok {
-        execution_result: PevmTxExecutionResult,
-        flags: FinishExecFlags,
-    },
 }
+
+pub(crate) struct VmExecutionOutcome {
+    execution_result: PevmTxExecutionResult,
+    flags: FinishExecFlags,
+}
+
+type VmExecutionResult = Result<VmExecutionOutcome, VmExecutionError>;
+
+// TODO: Rewrite as [Result]
+// pub(crate) enum VmExecutionResult {
+//     Retry,
+//     FallbackToSequential,
+//     ReadError {
+//         blocking_tx_idx: TxIdx,
+//     },
+//     ExecutionError(ExecutionError),
+//     Ok {
+//         execution_result: PevmTxExecutionResult,
+//         flags: FinishExecFlags,
+//     },
+// }
 
 // A database interface that intercepts reads while executing a specific
 // transaction with Revm. It provides values from the multi-version data
