@@ -16,8 +16,8 @@ use crate::{
     chain::{PevmChain, RewardPolicy},
     mv_memory::MvMemory,
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
-    MemoryLocation, MemoryLocationHash, MemoryValue, ReadError, ReadOrigin, ReadOrigins, ReadSet,
-    Storage, TxIdx, TxVersion, WriteSet,
+    MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
+    TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -74,8 +74,43 @@ impl PevmTxExecutionResult {
 pub(crate) enum VmExecutionError {
     Retry,
     FallbackToSequential,
-    ReadError { blocking_tx_idx: TxIdx },
+    Blocking { blocking_tx_idx: TxIdx },
     ExecutionError(ExecutionError),
+}
+
+/// Errors when reading a memory location.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReadError {
+    /// Cannot read memory location from storage.
+    StorageError(String),
+    /// This memory location has been written by a lower transaction.
+    BlockingIndex(TxIdx),
+    /// There has been an inconsistent read like reading the same
+    /// location from storage in the first call but from [VmMemory] in
+    /// the next.
+    InconsistentRead,
+    /// Found an invalid nonce, like the first transaction of a sender
+    /// not having a (+1) nonce from storage.
+    InvalidNonce(TxIdx),
+    /// Read a self-destructed account that is very hard to handle, as
+    /// there is no performant way to mark all storage slots as cleared.
+    SelfDestructedAccount,
+    /// The stored memory value type doesn't match its location type.
+    /// TODO: Handle this at the type level?
+    InvalidMemoryValueType,
+}
+
+impl From<ReadError> for VmExecutionError {
+    fn from(err: ReadError) -> Self {
+        match err {
+            ReadError::InconsistentRead => VmExecutionError::Retry,
+            ReadError::SelfDestructedAccount => VmExecutionError::FallbackToSequential,
+            ReadError::BlockingIndex(tx_idx) => VmExecutionError::Blocking {
+                blocking_tx_idx: tx_idx,
+            },
+            _ => VmExecutionError::ExecutionError(EVMError::Database(err)),
+        }
+    }
 }
 
 pub(crate) struct VmExecutionResult {
@@ -518,14 +553,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         let to_hash = tx.transact_to.to().map(|to| self.hash_basic(*to));
 
         // Execute
-        let mut db = match VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash) {
-            Ok(db) => db,
-            Err(err) => {
-                return Err(VmExecutionError::ExecutionError(ExecutionError::Database(
-                    err,
-                )));
-            }
-        };
+        let mut db = VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash)
+            .map_err(VmExecutionError::from)?;
         // TODO: Share as much [Evm], [Context], [Handler], etc. among threads as possible
         // as creating them is very expensive.
         let mut evm = build_evm(
@@ -632,7 +661,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     U256::from(result_and_state.result.gas_used()),
                     #[cfg(feature = "optimism")]
                     &evm.context.evm,
-                );
+                )?;
 
                 drop(evm); // release db
 
@@ -660,14 +689,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     flags,
                 })
             }
-            Err(EVMError::Database(ReadError::InconsistentRead)) => Err(VmExecutionError::Retry),
-            Err(EVMError::Database(ReadError::SelfDestructedAccount)) => {
-                Err(VmExecutionError::FallbackToSequential)
-            }
 
-            Err(EVMError::Database(ReadError::BlockingIndex(blocking_tx_idx))) => {
-                Err(VmExecutionError::ReadError { blocking_tx_idx })
-            }
             Err(err) => {
                 // Optimistically retry in case some previous internal transactions send
                 // more fund to the sender but hasn't been executed yet.
@@ -682,7 +704,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             | EVMError::Transaction(InvalidTransaction::NonceTooHigh { .. })
                     )
                 {
-                    Err(VmExecutionError::ReadError {
+                    Err(VmExecutionError::Blocking {
                         blocking_tx_idx: tx_version.tx_idx - 1,
                     })
                 } else {
@@ -699,7 +721,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         tx: &TxEnv,
         gas_used: U256,
         #[cfg(feature = "optimism")] evm_context: &EvmContext<DB>,
-    ) {
+    ) -> Result<(), VmExecutionError> {
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
             std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
         } else {
@@ -753,12 +775,14 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     MemoryValue::Basic(basic) => basic.balance += amount,
                     MemoryValue::LazySender(addition) => *addition -= amount,
                     MemoryValue::LazyRecipient(addition) => *addition += amount,
-                    _ => unreachable!(), // TODO: Better error handling
+                    _ => return Err(ReadError::InvalidMemoryValueType.into()),
                 }
             } else {
                 write_set.push((recipient, MemoryValue::LazyRecipient(amount)));
             }
         }
+
+        Ok(())
     }
 }
 
