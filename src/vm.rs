@@ -9,6 +9,7 @@ use revm::{
     Context, Database, Evm, EvmContext,
 };
 use smallvec::{smallvec, SmallVec};
+
 use std::collections::HashMap;
 
 use crate::{
@@ -89,25 +90,11 @@ pub(crate) enum VmExecutionError {
 }
 
 pub(crate) struct VmExecutionOutcome {
-    execution_result: PevmTxExecutionResult,
-    flags: FinishExecFlags,
+    pub execution_result: PevmTxExecutionResult,
+    pub flags: FinishExecFlags,
 }
 
-pub type VmExecutionResult = Result<VmExecutionOutcome, VmExecutionError>;
-
-// TODO: Rewrite as [Result]
-// pub(crate) enum VmExecutionResult {
-//     Retry,
-//     FallbackToSequential,
-//     ReadError {
-//         blocking_tx_idx: TxIdx,
-//     },
-//     ExecutionError(ExecutionError),
-//     Ok {
-//         execution_result: PevmTxExecutionResult,
-//         flags: FinishExecFlags,
-//     },
-// }
+pub(crate) type VmExecutionResult = Result<VmExecutionOutcome, VmExecutionError>;
 
 // A database interface that intercepts reads while executing a specific
 // transaction with Revm. It provides values from the multi-version data
