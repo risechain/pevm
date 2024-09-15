@@ -520,8 +520,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         let mut db = match VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash) {
             Ok(db) => db,
             Err(err) => {
-                let evm_err = ExecutionError::Database(err);
-                return VmExecutionResult::Err(VmExecutionError::ExecutionError(evm_err));
+                return VmExecutionResult::Err(VmExecutionError::ExecutionError(
+                    ExecutionError::Database(err),
+                ));
             }
         };
         // TODO: Share as much [Evm], [Context], [Handler], etc. among threads as possible
