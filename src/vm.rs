@@ -84,7 +84,7 @@ pub enum ReadError {
     /// Cannot read memory location from storage.
     StorageError(String),
     /// This memory location has been written by a lower transaction.
-    BlockingIndex(TxIdx),
+    Blocking(TxIdx),
     /// There has been an inconsistent read like reading the same
     /// location from storage in the first call but from [VmMemory] in
     /// the next.
@@ -105,7 +105,7 @@ impl From<ReadError> for VmExecutionError {
         match err {
             ReadError::InconsistentRead => VmExecutionError::Retry,
             ReadError::SelfDestructedAccount => VmExecutionError::FallbackToSequential,
-            ReadError::BlockingIndex(tx_idx) => VmExecutionError::Blocking {
+            ReadError::Blocking(tx_idx) => VmExecutionError::Blocking {
                 blocking_tx_idx: tx_idx,
             },
             _ => VmExecutionError::ExecutionError(EVMError::Database(err)),
