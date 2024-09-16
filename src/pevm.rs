@@ -350,7 +350,7 @@ impl Pevm {
                         .get_or_init(|| AbortReason::FallbackToSequential);
                     None
                 }
-                Err(VmExecutionError::Blocking { blocking_tx_idx }) => {
+                Err(VmExecutionError::Blocking(blocking_tx_idx )) => {
                     if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
                         && self.abort_reason.get().is_none()
                     {

@@ -74,7 +74,7 @@ impl PevmTxExecutionResult {
 pub(crate) enum VmExecutionError {
     Retry,
     FallbackToSequential,
-    Blocking { blocking_tx_idx: TxIdx },
+    Blocking(TxIdx),
     ExecutionError(ExecutionError),
 }
 
@@ -105,9 +105,7 @@ impl From<ReadError> for VmExecutionError {
         match err {
             ReadError::InconsistentRead => VmExecutionError::Retry,
             ReadError::SelfDestructedAccount => VmExecutionError::FallbackToSequential,
-            ReadError::Blocking(tx_idx) => VmExecutionError::Blocking {
-                blocking_tx_idx: tx_idx,
-            },
+            ReadError::Blocking(tx_idx) => VmExecutionError::Blocking(tx_idx),
             _ => VmExecutionError::ExecutionError(EVMError::Database(err)),
         }
     }
@@ -702,9 +700,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             | EVMError::Transaction(InvalidTransaction::NonceTooHigh { .. })
                     )
                 {
-                    Err(VmExecutionError::Blocking {
-                        blocking_tx_idx: tx_version.tx_idx - 1,
-                    })
+                    Err(VmExecutionError::Blocking(tx_version.tx_idx - 1))
                 } else {
                     Err(VmExecutionError::ExecutionError(err))
                 }
