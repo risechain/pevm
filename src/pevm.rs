@@ -20,7 +20,9 @@ use crate::{
     mv_memory::MvMemory,
     scheduler::Scheduler,
     storage::StorageWrapper,
-    vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
+    vm::{
+        build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult,
+    },
     EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
 };
 
@@ -336,19 +338,19 @@ impl Pevm {
     ) -> Option<Task> {
         loop {
             return match vm.execute(&tx_version) {
-                VmExecutionResult::Retry => {
+                Err(VmExecutionError::Retry) => {
                     if self.abort_reason.get().is_none() {
                         continue;
                     }
                     None
                 }
-                VmExecutionResult::FallbackToSequential => {
+                Err(VmExecutionError::FallbackToSequential) => {
                     scheduler.abort();
                     self.abort_reason
                         .get_or_init(|| AbortReason::FallbackToSequential);
                     None
                 }
-                VmExecutionResult::ReadError { blocking_tx_idx } => {
+                Err(VmExecutionError::Blocking(blocking_tx_idx )) => {
                     if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
                         && self.abort_reason.get().is_none()
                     {
@@ -358,16 +360,16 @@ impl Pevm {
                     }
                     None
                 }
-                VmExecutionResult::ExecutionError(err) => {
+                Err(VmExecutionError::ExecutionError(err)) => {
                     scheduler.abort();
                     self.abort_reason
                         .get_or_init(|| AbortReason::ExecutionError(err));
                     None
                 }
-                VmExecutionResult::Ok {
+                Ok(VmExecutionResult {
                     execution_result,
                     flags,
-                } => {
+                }) => {
                     *index_mutex!(self.execution_results, tx_version.tx_idx) =
                         Some(execution_result);
                     scheduler.finish_execution(tx_version, flags)

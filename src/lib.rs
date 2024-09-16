@@ -169,30 +169,6 @@ type ReadSet = HashMap<MemoryLocationHash, ReadOrigins, BuildIdentityHasher>;
 // to the multi-version data structure at the end of execution.
 type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
 
-/// Errors when reading a memory location.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ReadError {
-    /// Cannot read memory location from storage.
-    StorageError(String),
-    /// Memory location not found.
-    NotFound,
-    /// This memory location has been written by a lower transaction.
-    BlockingIndex(TxIdx),
-    /// There has been an inconsistent read like reading the same
-    /// location from storage in the first call but from [VmMemory] in
-    /// the next.
-    InconsistentRead,
-    /// Found an invalid nonce, like the first transaction of a sender
-    /// not having a (+1) nonce from storage.
-    InvalidNonce(TxIdx),
-    /// Read a self-destructed account that is very hard to handle, as
-    /// there is no performant way to mark all storage slots as cleared.
-    SelfDestructedAccount,
-    /// The stored memory value type doesn't match its location type.
-    /// TODO: Handle this at the type level?
-    InvalidMemoryValueType,
-}
-
 // A scheduled worker task
 // TODO: Add more useful work when there are idle workers like near
 // the end of block execution, while waiting for a huge blocking
