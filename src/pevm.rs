@@ -254,8 +254,8 @@ impl Pevm {
                     None
                 };
 
-                // TODO: Assert that the evaluated nonce matches the tx's.
                 for (tx_idx, memory_entry) in write_history.iter() {
+                    let tx = unsafe { txs.get_unchecked(*tx_idx) };
                     match memory_entry {
                         MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                             // We fall back to sequential execution when reading a self-destructed account,
@@ -274,7 +274,6 @@ impl Pevm {
                             // TODO: Guard against overflows & underflows
                             // Ideally we would share these calculations with revm
                             // (using their utility functions).
-                            let tx = unsafe { txs.get_unchecked(*tx_idx) };
                             let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
                             if let Some(blob_fee) = tx.max_fee_per_blob_gas {
                                 max_fee +=
@@ -293,6 +292,10 @@ impl Pevm {
                         // TODO: Better error handling
                         _ => unreachable!(),
                     }
+                    // Assert that evaluated nonce is correct when address is caller.
+                    debug_assert!(
+                        tx.caller != address || tx.nonce.map_or(true, |n| n + 1 == nonce)
+                    );
 
                     // SAFETY: The multi-version data structure should not leak an index over block size.
                     let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
