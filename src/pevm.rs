@@ -255,20 +255,9 @@ impl Pevm {
                 for (tx_idx, memory_entry) in write_history.iter() {
                     match memory_entry {
                         MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                            // TODO: these debug assertions can later be converted to errors
                             // We fall back to sequential execution when reading a self-destructed account,
                             // so an empty account here would be a bug
                             debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
-                            // Assert lazy evaluation tx nonce matches tx
-                            let tx = unsafe { txs.get_unchecked(*tx_idx) };
-                            if let Some(nonce) = tx.nonce {
-                                // TODO(edwardjes): remove
-                                if nonce + 1 != info.nonce {
-                                    println!("ACC {:#?}", info);
-                                    println!("TX {:#?}", tx);
-                                }
-                                debug_assert_eq!(nonce + 1, info.nonce);
-                            }
                             balance = info.balance;
                             nonce = info.nonce;
                         }
@@ -301,6 +290,11 @@ impl Pevm {
                         // TODO: Better error handling
                         _ => unreachable!(),
                     }
+                    // Assert that evaluated nonce is correct when address is caller.
+                    let tx = unsafe { txs.get_unchecked(*tx_idx) };
+                    debug_assert!(
+                        tx.caller != address || tx.nonce.map_or(true, |n| n + 1 == nonce)
+                    );
 
                     // SAFETY: The multi-version data structure should not leak an index over block size.
                     let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
