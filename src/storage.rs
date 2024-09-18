@@ -87,7 +87,7 @@ pub struct Eip7702Code {
     raw: Bytes,
 }
 
-/// EVM Code, currently mapping to REVM's [ByteCode::LegacyAnalyzed].
+/// EVM Code, currently mapping to REVM's [ByteCode].
 // TODO: Support raw legacy & EOF
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EvmCode {
@@ -101,7 +101,6 @@ impl From<EvmCode> for Bytecode {
         // A common trap would be converting a default [EvmCode] into
         // a [Bytecode]. On failure we should fallback to legacy and
         // analyse again.
-
         match code {
             EvmCode::Eip7702(code) => {
                 Bytecode::Eip7702(Eip7702Bytecode::new(code.delegated_address))
