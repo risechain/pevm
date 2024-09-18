@@ -5,7 +5,7 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use bitvec::vec::BitVec;
 use revm::{
     interpreter::analysis::to_analysed,
-    primitives::{Account, AccountInfo, Bytecode, JumpTable, KECCAK_EMPTY},
+    primitives::{Account, AccountInfo, Bytecode, Eip7702Bytecode, JumpTable, KECCAK_EMPTY},
     DatabaseRef,
 };
 use serde::{Deserialize, Serialize};
@@ -101,8 +101,14 @@ impl From<EvmCode> for Bytecode {
         // A common trap would be converting a default [EvmCode] into
         // a [Bytecode]. On failure we should fallback to legacy and
         // analyse again.
-        unsafe {
-            Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table))
+
+        match code {
+            EvmCode::Eip7702(code) => {
+                Bytecode::Eip7702(Eip7702Bytecode::new(code.delegated_address))
+            }
+            EvmCode::LegacyAnalyzed(code) => unsafe {
+                Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table))
+            },
         }
     }
 }
@@ -111,13 +117,17 @@ impl From<Bytecode> for EvmCode {
     fn from(code: Bytecode) -> Self {
         match code {
             Bytecode::LegacyRaw(_) => to_analysed(code).into(),
-            Bytecode::LegacyAnalyzed(code) => EvmCode {
+            Bytecode::LegacyAnalyzed(code) => EvmCode::LegacyAnalyzed(LegacyAnalyzedCode {
                 bytecode: code.bytecode,
                 original_len: code.original_len,
                 jump_table: code.jump_table.0,
-            },
+            }),
             Bytecode::Eof(_) => unimplemented!("TODO: Support EOF"),
-            Bytecode::Eip7702(_) => unimplemented!("TODO: Support EIP-7702"),
+            Bytecode::Eip7702(code) => EvmCode::Eip7702(Eip7702Code {
+                delegated_address: code.delegated_address,
+                version: code.version,
+                raw: code.raw,
+            }),
         }
     }
 }
