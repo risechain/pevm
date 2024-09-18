@@ -68,16 +68,31 @@ impl Default for AccountBasic {
     }
 }
 
-/// EVM Code, currently mapping to REVM's [ByteCode::LegacyAnalyzed].
-// TODO: Support raw legacy & EOF
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct EvmCode {
+pub struct LegacyAnalyzedCode {
     /// Bytecode with 32 zero bytes padding
     bytecode: Bytes,
     /// Original bytes length
     original_len: usize,
     /// Jump table.
     jump_table: Arc<BitVec<u8>>,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Eip7702Code {
+    /// EOA which which will inherit the bytecode.
+    delegated_address: Address,
+    /// Version of the bytecode.
+    version: u8,
+    /// Raw bytecode of length 23 comprised of the MAGIC, VERSION and address.
+    raw: Bytes,
+}
+
+/// EVM Code, currently mapping to REVM's [ByteCode::LegacyAnalyzed].
+// TODO: Support raw legacy & EOF
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum EvmCode {
+    LegacyAnalyzed(LegacyAnalyzedCode),
+    Eip7702(Eip7702Code),
 }
 
 impl From<EvmCode> for Bytecode {
