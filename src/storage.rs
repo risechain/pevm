@@ -77,6 +77,7 @@ pub struct LegacyAnalyzedCode {
     /// Jump table.
     jump_table: Arc<BitVec<u8>>,
 }
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Eip7702Code {
     /// EOA which which will inherit the bytecode.
