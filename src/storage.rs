@@ -70,9 +70,9 @@ impl Default for AccountBasic {
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LegacyAnalyzedCode {
-    /// Bytecode with 32 zero bytes padding
+    /// Bytecode with 32 zero bytes padding.
     bytecode: Bytes,
-    /// Original bytes length
+    /// Original bytes length.
     original_len: usize,
     /// Jump table.
     jump_table: Arc<BitVec<u8>>,
@@ -83,7 +83,7 @@ pub struct Eip7702Code {
     delegated_address: Address,
     /// Version of the bytecode.
     version: u8,
-    /// Raw bytecode of length 23 comprised of the MAGIC, VERSION and address.
+    /// Raw bytecode encoding MAGIC, version and delegated address.
     raw: Bytes,
 }
 
@@ -91,7 +91,9 @@ pub struct Eip7702Code {
 // TODO: Support raw legacy & EOF
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EvmCode {
+    /// Analyzed legacy code, with jump table.
     LegacyAnalyzed(LegacyAnalyzedCode),
+    /// Delegated code.
     Eip7702(Eip7702Code),
 }
 
