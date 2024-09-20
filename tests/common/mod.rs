@@ -57,12 +57,6 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
     ))
     .unwrap();
 
-    // Write bytecodes to disk as json JSON is same.
-    // let file_bytecodes = File::create("data/bytecodesOld.json").unwrap();
-    // serde_json::to_writer(file_bytecodes, &bytecodes).unwrap();
-
-    // println!("Bytecodes: {:#?}", bytecodes);
-
     for block_path in fs::read_dir("data/blocks").unwrap() {
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
