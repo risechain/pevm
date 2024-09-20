@@ -61,7 +61,7 @@ pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync +
     let tx_results = sequential_result.unwrap();
     if must_match_block_header {
         let spec_id = chain.get_block_spec(&block.header).unwrap();
-
+        println!("{:?}", block.header);
         match chain.calculate_receipt_root(spec_id, &block.transactions, &tx_results) {
             Ok(receipt_root) => assert_eq!(block.header.receipts_root, receipt_root),
             Err(CalculateReceiptRootError::Unsupported) => {}
