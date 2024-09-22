@@ -79,7 +79,7 @@ pub fn main() {
     let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
     let json_state = serde_json::to_value(&state).unwrap();
     serde_json::to_writer(file_state, &json_state).unwrap();
-    let file_bytecodes = File::create(format!("data/bytecodes.bincode")).unwrap();
+    let file_bytecodes = File::create("data/bytecodes.bincode").unwrap();
     bincode::serialize_into(file_bytecodes, &bytecodes).unwrap();
 
     // Write block hashes to disk.
