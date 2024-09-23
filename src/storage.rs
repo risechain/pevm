@@ -71,7 +71,7 @@ impl Default for AccountBasic {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LegacyCode {
     /// Bytecode with 32 zero bytes padding.
     bytecode: Bytes,
@@ -81,7 +81,7 @@ pub struct LegacyCode {
     jump_table: Arc<BitVec<u8>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Eip7702Code {
     /// Address of the EOA which will inherit the bytecode.
     delegated_address: Address,
