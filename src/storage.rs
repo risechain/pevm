@@ -69,7 +69,7 @@ impl Default for AccountBasic {
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct LegacyAnalyzedCode {
+pub struct LegacyCode {
     /// Bytecode with 32 zero bytes padding.
     bytecode: Bytes,
     /// Original bytes length.
@@ -80,7 +80,7 @@ pub struct LegacyAnalyzedCode {
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Eip7702Code {
-    /// EOA which which will inherit the bytecode.
+    /// EOA which will inherit the bytecode.
     delegated_address: Address,
     /// Version of the bytecode.
     version: u8,
@@ -92,9 +92,9 @@ pub struct Eip7702Code {
 // TODO: Support raw legacy & EOF
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EvmCode {
-    /// Analyzed legacy code, with jump table.
-    LegacyAnalyzed(LegacyAnalyzedCode),
-    /// Delegated code.
+    /// Maps both analyzed and non-analyzed REVM legacy bytecode.
+    Legacy(LegacyCode),
+    /// Maps delegated 7702 byecode.
     Eip7702(Eip7702Code),
 }
 
@@ -105,10 +105,12 @@ impl From<EvmCode> for Bytecode {
         // a [Bytecode]. On failure we should fallback to legacy and
         // analyse again.
         match code {
-            EvmCode::Eip7702(code) => {
-                Bytecode::Eip7702(Eip7702Bytecode::new(code.delegated_address))
-            }
-            EvmCode::LegacyAnalyzed(code) => unsafe {
+            EvmCode::Eip7702(code) => Bytecode::Eip7702(Eip7702Bytecode {
+                delegated_address: code.delegated_address,
+                version: code.version,
+                raw: code.raw,
+            }),
+            EvmCode::Legacy(code) => unsafe {
                 Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table))
             },
         }
@@ -119,7 +121,7 @@ impl From<Bytecode> for EvmCode {
     fn from(code: Bytecode) -> Self {
         match code {
             Bytecode::LegacyRaw(_) => to_analysed(code).into(),
-            Bytecode::LegacyAnalyzed(code) => EvmCode::LegacyAnalyzed(LegacyAnalyzedCode {
+            Bytecode::LegacyAnalyzed(code) => EvmCode::Legacy(LegacyCode {
                 bytecode: code.bytecode,
                 original_len: code.original_len,
                 jump_table: code.jump_table.0,
