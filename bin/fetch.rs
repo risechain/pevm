@@ -39,7 +39,7 @@ pub fn main() {
         .expect("Failed to fetch block from provider")
         .unwrap_or_else(|| panic!("No block found for ID: {:?}", block_id));
 
-    // TODO: parameterize chain to later add support for `OP`, `RISE`.
+    // TODO: parameterize chain to later add support for `OP`, `RISE`. This will need to contain the spec as well.
     let chain = PevmEthereum::mainnet();
     let spec_id = chain.get_block_spec(&block.header).unwrap();
     let storage = RpcStorage::new(provider, spec_id, BlockId::number(block.header.number - 1));
