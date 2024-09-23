@@ -5,7 +5,10 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use bitvec::vec::BitVec;
 use revm::{
     interpreter::analysis::to_analysed,
-    primitives::{Account, AccountInfo, Bytecode, Eip7702Bytecode, JumpTable, KECCAK_EMPTY},
+    primitives::{
+        Account, AccountInfo, Bytecode, Eip7702Bytecode, JumpTable, EIP7702_MAGIC_BYTES,
+        KECCAK_EMPTY,
+    },
     DatabaseRef,
 };
 use serde::{Deserialize, Serialize};
@@ -80,12 +83,10 @@ pub struct LegacyCode {
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Eip7702Code {
-    /// EOA which will inherit the bytecode.
+    /// Address of the EOA which will inherit the bytecode.
     delegated_address: Address,
     /// Version of the bytecode.
     version: u8,
-    /// Raw bytecode encoding MAGIC, version and delegated address.
-    raw: Bytes,
 }
 
 /// EVM Code, currently mapping to REVM's [ByteCode].
@@ -105,11 +106,17 @@ impl From<EvmCode> for Bytecode {
         // a [Bytecode]. On failure we should fallback to legacy and
         // analyse again.
         match code {
-            EvmCode::Eip7702(code) => Bytecode::Eip7702(Eip7702Bytecode {
-                delegated_address: code.delegated_address,
-                version: code.version,
-                raw: code.raw,
-            }),
+            EvmCode::Eip7702(code) => {
+                let mut raw = EIP7702_MAGIC_BYTES.to_vec();
+                raw.push(code.version);
+                raw.extend(&code.delegated_address);
+                Bytecode::Eip7702(Eip7702Bytecode {
+                    delegated_address: code.delegated_address,
+                    version: code.version,
+                    raw: raw.into(),
+                })
+            }
+
             EvmCode::Legacy(code) => unsafe {
                 Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table))
             },
@@ -120,6 +127,7 @@ impl From<EvmCode> for Bytecode {
 impl From<Bytecode> for EvmCode {
     fn from(code: Bytecode) -> Self {
         match code {
+            // This arm will recursively fallback to LegacyAnalyzed.
             Bytecode::LegacyRaw(_) => to_analysed(code).into(),
             Bytecode::LegacyAnalyzed(code) => EvmCode::Legacy(LegacyCode {
                 bytecode: code.bytecode,
@@ -127,11 +135,7 @@ impl From<Bytecode> for EvmCode {
                 jump_table: code.jump_table.0,
             }),
             Bytecode::Eof(_) => unimplemented!("TODO: Support EOF"),
-            Bytecode::Eip7702(code) => EvmCode::Eip7702(Eip7702Code {
-                delegated_address: code.delegated_address,
-                version: code.version,
-                raw: code.raw,
-            }),
+            Bytecode::Eip7702(code) => EvmCode::Eip7702(Eip7702Code(code.address)),
         }
     }
 }
