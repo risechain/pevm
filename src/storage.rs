@@ -116,7 +116,6 @@ impl From<EvmCode> for Bytecode {
                     raw: raw.into(),
                 })
             }
-
             EvmCode::Legacy(code) => unsafe {
                 Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table))
             },
