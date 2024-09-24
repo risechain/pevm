@@ -71,7 +71,8 @@ impl Default for AccountBasic {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Analyzed legacy code.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LegacyCode {
     /// Bytecode with 32 zero bytes padding.
     pub bytecode: Bytes,
@@ -81,7 +82,8 @@ pub struct LegacyCode {
     pub jump_table: Arc<BitVec<u8>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// EIP-7702 delegated code.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Eip7702Code {
     /// Address of the EOA which will inherit the bytecode.
     pub delegated_address: Address,
@@ -90,12 +92,12 @@ pub struct Eip7702Code {
 }
 
 /// EVM Code, currently mapping to REVM's [ByteCode].
-// TODO: Support raw legacy & EOF
+// TODO: Support EOF
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EvmCode {
     /// Maps both analyzed and non-analyzed REVM legacy bytecode.
     Legacy(LegacyCode),
-    /// Maps delegated 7702 byecode.
+    /// Maps delegated 7702 bytecode.
     Eip7702(Eip7702Code),
 }
 
