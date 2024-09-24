@@ -82,7 +82,7 @@ pub struct LegacyCode {
     pub jump_table: Arc<BitVec<u8>>,
 }
 
-/// EIP-7702 delegated code.
+/// EIP7702 delegated code.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Eip7702Code {
     /// Address of the EOA which will inherit the bytecode.
@@ -97,7 +97,7 @@ pub struct Eip7702Code {
 pub enum EvmCode {
     /// Maps both analyzed and non-analyzed REVM legacy bytecode.
     Legacy(LegacyCode),
-    /// Maps delegated 7702 bytecode.
+    /// Maps delegated EIP7702 bytecode.
     Eip7702(Eip7702Code),
 }
 
