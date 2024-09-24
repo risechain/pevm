@@ -214,8 +214,8 @@ pub use pevm::{execute_revm_sequential, Pevm, PevmError, PevmResult};
 mod scheduler;
 mod storage;
 pub use storage::{
-    AccountBasic, BlockHashes, Bytecodes, ChainState, EvmAccount, EvmCode, InMemoryStorage,
-    RpcStorage, Storage, StorageWrapper,
+    AccountBasic, BlockHashes, Bytecodes, ChainState, Eip7702Code, EvmAccount, EvmCode,
+    InMemoryStorage, RpcStorage, Storage, StorageWrapper,
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};
