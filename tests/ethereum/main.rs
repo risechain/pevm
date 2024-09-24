@@ -11,7 +11,8 @@
 use ahash::AHashMap;
 use pevm::chain::PevmEthereum;
 use pevm::{
-    Bytecodes, EvmAccount, EvmCode, InMemoryStorage, Pevm, PevmError, PevmTxExecutionResult,
+    Bytecodes, EvmAccount, EvmCode, InMemoryStorage, ParallelParams, Pevm, PevmError,
+    PevmTxExecutionResult,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
@@ -27,9 +28,9 @@ use revme::cmd::statetest::{
     merkle_trie::{log_rlp_hash, state_merkle_trie_root},
     utils::recover_address,
 };
+use std::fs;
 use std::path::Path;
 use std::str::FromStr;
-use std::{fs, num::NonZeroUsize};
 use walkdir::{DirEntry, WalkDir};
 
 #[path = "../common/mod.rs"]
@@ -141,7 +142,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),
                     vec![tx_env.unwrap()],
-                    NonZeroUsize::MIN,
+                    ParallelParams::default()
                 ),
             ) {
                 // EIP-2681

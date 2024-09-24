@@ -1,7 +1,7 @@
 use std::{
+    collections::BinaryHeap,
     fmt::Debug,
-    num::NonZeroUsize,
-    sync::{mpsc, Mutex, OnceLock},
+    sync::{mpsc, LazyLock, Mutex, OnceLock},
     thread,
 };
 
@@ -23,7 +23,7 @@ use crate::{
     vm::{
         build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult,
     },
-    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
+    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxIdx, TxVersion,
 };
 
 /// Errors when executing a block with pevm.
@@ -79,6 +79,77 @@ impl<T> AsyncDropper<T> {
     }
 }
 
+static AVAILABLE_PARALLELISM: LazyLock<usize> =
+    LazyLock::new(|| match std::thread::available_parallelism() {
+        Ok(n) => n.get(),
+        Err(_) => 1,
+    });
+
+/// Coefficients for [Pevm::execute_revm_parallel]
+#[derive(Debug)]
+pub struct ParallelParams {
+    num_threads_for_regular_txs: usize,
+    num_threads_for_priority_txs: usize,
+    max_num_priority_txs: usize,
+}
+
+impl Default for ParallelParams {
+    fn default() -> Self {
+        // TODO: Fine tune these parameters based on arch.
+        let num_threads_for_regular_txs = AVAILABLE_PARALLELISM.min(8);
+        let num_threads_for_priority_txs = AVAILABLE_PARALLELISM
+            .saturating_sub(num_threads_for_regular_txs)
+            .min(8);
+        let max_num_priority_txs = 23;
+        Self {
+            num_threads_for_regular_txs,
+            num_threads_for_priority_txs,
+            max_num_priority_txs,
+        }
+    }
+}
+
+/// Stragegy for [Pevm::execute]
+#[derive(Debug)]
+pub enum PevmStrategy {
+    /// Sequential
+    Sequential,
+    /// Parallel
+    Parallel(ParallelParams),
+}
+
+impl PevmStrategy {
+    /// Requires PEVM to run sequentially.
+    pub fn sequential() -> Self {
+        Self::Sequential
+    }
+
+    /// Decides whether to run sequentially or in parallel.
+    pub fn auto(num_txs: usize, block_gas_used: u128) -> Self {
+        // TODO: Continue to fine tune this condition.
+        if block_gas_used < 4_000_000 {
+            return Self::Sequential;
+        }
+
+        let parallel = ParallelParams::default();
+
+        if num_txs < parallel.num_threads_for_regular_txs + parallel.num_threads_for_priority_txs {
+            return Self::Sequential;
+        }
+
+        if num_txs < parallel.max_num_priority_txs * 2 {
+            // Fallback to the original strategy: 12 regular threads, 0 priority threads
+            return Self::Parallel(ParallelParams {
+                num_threads_for_regular_txs: AVAILABLE_PARALLELISM.min(12),
+                num_threads_for_priority_txs: 0,
+                max_num_priority_txs: 0,
+            });
+        }
+
+        Self::Parallel(parallel)
+    }
+}
+
 // TODO: Port more recyclable resources into here.
 #[derive(Debug, Default)]
 /// The main pevm struct that executes blocks.
@@ -97,8 +168,7 @@ impl Pevm {
         storage: &S,
         chain: &C,
         block: Block<C::Transaction>,
-        concurrency_level: NonZeroUsize,
-        force_sequential: bool,
+        strategy: PevmStrategy,
     ) -> PevmResult<C> {
         let spec_id = chain
             .get_block_spec(&block.header)
@@ -112,21 +182,19 @@ impl Pevm {
                 .map_err(PevmError::InvalidTransaction)?,
             _ => return Err(PevmError::MissingTransactionData),
         };
-        // TODO: Continue to fine tune this condition.
-        if force_sequential
-            || tx_envs.len() < concurrency_level.into()
-            || block.header.gas_used < 4_000_000
-        {
-            execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
-        } else {
-            self.execute_revm_parallel(
+
+        match strategy {
+            PevmStrategy::Sequential => {
+                execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
+            }
+            PevmStrategy::Parallel(parallel_params) => self.execute_revm_parallel(
                 storage,
                 chain,
                 spec_id,
                 block_env,
                 tx_envs,
-                concurrency_level,
-            )
+                parallel_params,
+            ),
         }
     }
 
@@ -140,14 +208,27 @@ impl Pevm {
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
-        concurrency_level: NonZeroUsize,
+        parallel_params: ParallelParams,
     ) -> PevmResult<C> {
         if txs.is_empty() {
             return Ok(Vec::new());
         }
 
         let block_size = txs.len();
-        let scheduler = Scheduler::new(block_size);
+        let priority_txs: Vec<TxIdx> = {
+            let mut heap = BinaryHeap::with_capacity(parallel_params.max_num_priority_txs);
+            if parallel_params.max_num_priority_txs > 0 {
+                for (tx_idx, tx_env) in txs.iter().enumerate() {
+                    heap.push((!tx_env.gas_limit, tx_idx));
+                    if heap.len() > parallel_params.max_num_priority_txs {
+                        heap.pop();
+                    }
+                }
+            }
+            heap.into_iter().map(|(_, tx_idx)| tx_idx).collect()
+        };
+
+        let scheduler = Scheduler::new(block_size, priority_txs);
 
         let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
         let vm = Vm::new(
@@ -170,7 +251,7 @@ impl Pevm {
 
         // TODO: Better thread handling
         thread::scope(|scope| {
-            for _ in 0..concurrency_level.into() {
+            for _ in 0..parallel_params.num_threads_for_regular_txs {
                 scope.spawn(|| {
                     let mut task = scheduler.next_task();
                     while task.is_some() {
@@ -195,6 +276,28 @@ impl Pevm {
 
                         if task.is_none() {
                             task = scheduler.next_task();
+                        }
+                    }
+                });
+            }
+
+            for _ in 0..parallel_params.num_threads_for_priority_txs {
+                scope.spawn(|| {
+                    let mut task = scheduler.next_priority_task();
+                    while task.is_some() {
+                        task = match task.unwrap() {
+                            Task::Execution(tx_version) => {
+                                self.try_execute(&vm, &scheduler, tx_version)
+                            }
+                            Task::Validation(tx_version) => {
+                                try_validate(&mv_memory, &scheduler, &tx_version)
+                            }
+                        };
+                        if self.abort_reason.get().is_some() {
+                            break;
+                        }
+                        if task.is_none() {
+                            task = scheduler.next_priority_task();
                         }
                     }
                 });
@@ -353,7 +456,7 @@ impl Pevm {
                         .get_or_init(|| AbortReason::FallbackToSequential);
                     None
                 }
-                Err(VmExecutionError::Blocking(blocking_tx_idx )) => {
+                Err(VmExecutionError::Blocking(blocking_tx_idx)) => {
                     if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
                         && self.abort_reason.get().is_none()
                     {

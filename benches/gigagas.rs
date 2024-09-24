@@ -4,13 +4,11 @@
 
 #![allow(missing_docs)]
 
-use std::{num::NonZeroUsize, thread};
-
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{
     chain::PevmEthereum, execute_revm_sequential, Bytecodes, ChainState, EvmAccount,
-    InMemoryStorage, Pevm,
+    InMemoryStorage, ParallelParams, Pevm,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
 
@@ -30,7 +28,6 @@ const GIGA_GAS: u64 = 1_000_000_000;
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<TxEnv>) {
-    let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let chain = PevmEthereum::mainnet();
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
@@ -55,7 +52,7 @@ pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<T
                 black_box(spec_id),
                 black_box(block_env.clone()),
                 black_box(txs.clone()),
-                black_box(concurrency_level),
+                black_box(ParallelParams::default()),
             )
         })
     });
