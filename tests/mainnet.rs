@@ -9,7 +9,6 @@ use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use reqwest::Url;
-use tokio::runtime::Runtime;
 
 use pevm::{
     chain::{PevmChain, PevmEthereum},
@@ -18,12 +17,11 @@ use pevm::{
 
 pub mod common;
 
-// TODO: [tokio::test]?
-#[test]
-fn mainnet_blocks_from_rpc() {
+#[tokio::test]
+async fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
-        Ok(value) if !value.is_empty() => value.parse().unwrap(),
+        Ok(value) if !value.is_empty() => value.parse().expect("Failed to parse ETHEREUM_RPC_URL"),
         _ => Url::parse("https://eth.public-rpc.com").unwrap(),
     };
 
@@ -43,16 +41,13 @@ fn mainnet_blocks_from_rpc() {
                // 17035010, // SHANGHAI
                // 19426587, // CANCUN
     ] {
-        let runtime = Runtime::new().unwrap();
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
-        let block = runtime
-            .block_on(
-                provider.get_block(BlockId::number(block_number), BlockTransactionsKind::Full),
-            )
-            .unwrap()
-            .unwrap();
+        let block = provider.get_block(BlockId::number(block_number), BlockTransactionsKind::Full)
+            .await
+            .expect("Failed to get_block()")
+            .expect("Block not found");
         let chain = PevmEthereum::mainnet();
-        let spec_id = chain.get_block_spec(&block.header).unwrap();
+        let spec_id = chain.get_block_spec(&block.header).expect("Failed to get block spec");
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         common::test_execute_alloy(&rpc_storage, &chain, block.clone(), true);
 
