@@ -48,8 +48,6 @@ pub(crate) struct Scheduler {
     // The list of dependent transactions to resume when the
     // key transaction is re-executed.
     transactions_dependents: Vec<Mutex<SmallVec<[TxIdx; 1]>>>,
-    // The next priority transaction to try and execute.
-    priority_idx: AtomicUsize,
     // The next transaction to try and execute.
     execution_idx: AtomicUsize,
     // The next transaction to try and validate.
@@ -71,7 +69,6 @@ impl Scheduler {
     pub(crate) fn new(block_size: usize, priority_txs: impl IntoIterator<Item = TxIdx>) -> Self {
         Self {
             block_size,
-            priority_idx: AtomicUsize::new(0),
             execution_idx: AtomicUsize::new(0),
             transactions_status: (0..block_size)
                 .map(|_| {
@@ -111,15 +108,10 @@ impl Scheduler {
     }
 
     pub(crate) fn next_priority_task(&self) -> Option<Task> {
-        loop {
+        for &tx_idx in self.priority_txs.iter() {
             if self.aborted.load(Ordering::Acquire) {
                 return None;
             }
-            if self.priority_idx.load(Ordering::Acquire) >= self.priority_txs.len() {
-                return None;
-            }
-            let priority_idx = self.priority_idx.fetch_add(1, Ordering::Release);
-            let tx_idx = self.priority_txs.get(priority_idx).copied()?;
             let mut tx = index_mutex!(self.transactions_status, tx_idx);
             if tx.status == IncarnationStatus::ReadyToExecute {
                 tx.status = IncarnationStatus::Executing;
@@ -129,6 +121,7 @@ impl Scheduler {
                 }));
             }
         }
+        None
     }
 
     pub(crate) fn next_task(&self) -> Option<Task> {
