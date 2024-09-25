@@ -251,6 +251,28 @@ impl Pevm {
 
         // TODO: Better thread handling
         thread::scope(|scope| {
+            for _ in 0..parallel_params.num_threads_for_priority_txs {
+                scope.spawn(|| {
+                    let mut task = scheduler.next_priority_task();
+                    while task.is_some() {
+                        task = match task.unwrap() {
+                            Task::Execution(tx_version) => {
+                                self.try_execute(&vm, &scheduler, tx_version)
+                            }
+                            Task::Validation(tx_version) => {
+                                try_validate(&mv_memory, &scheduler, &tx_version)
+                            }
+                        };
+                        if self.abort_reason.get().is_some() {
+                            break;
+                        }
+                        if task.is_none() {
+                            task = scheduler.next_priority_task();
+                        }
+                    }
+                });
+            }
+
             for _ in 0..parallel_params.num_threads_for_regular_txs {
                 scope.spawn(|| {
                     let mut task = scheduler.next_task();
@@ -276,28 +298,6 @@ impl Pevm {
 
                         if task.is_none() {
                             task = scheduler.next_task();
-                        }
-                    }
-                });
-            }
-
-            for _ in 0..parallel_params.num_threads_for_priority_txs {
-                scope.spawn(|| {
-                    let mut task = scheduler.next_priority_task();
-                    while task.is_some() {
-                        task = match task.unwrap() {
-                            Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
-                            }
-                            Task::Validation(tx_version) => {
-                                try_validate(&mv_memory, &scheduler, &tx_version)
-                            }
-                        };
-                        if self.abort_reason.get().is_some() {
-                            break;
-                        }
-                        if task.is_none() {
-                            task = scheduler.next_priority_task();
                         }
                     }
                 });
