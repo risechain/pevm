@@ -1,5 +1,5 @@
 use std::{
-    collections::BinaryHeap,
+    collections::{BTreeMap, BinaryHeap},
     fmt::Debug,
     sync::{mpsc, LazyLock, Mutex, OnceLock},
     thread,
@@ -109,7 +109,64 @@ impl Default for ParallelParams {
     }
 }
 
-/// Stragegy for [Pevm::execute]
+type Color = TxIdx;
+
+impl ParallelParams {
+    /// Returns the list of transaction indexes with the associated color.
+    /// Transactions with the same color should be executed in the same thread.
+    /// The second element in the returned tuple is the list of colors,
+    /// sorted by the importance (more important first).
+    fn get_priority_txs(&self, txs: &[TxEnv]) -> (BTreeMap<TxIdx, Color>, Vec<Color>) {
+        if self.max_num_priority_txs == 0 || self.num_threads_for_priority_txs == 0 {
+            return (BTreeMap::new(), Vec::new());
+        }
+        // [std::collections::BinaryHeap] is a max heap.
+        // While pushing the txs to the heap, every time the size exceeds
+        // [self.max_num_priority_txs], we pop the lightest tx.
+        // At the end, the heap contains [self.max_num_priority_txs] heaviest txs.
+        let mut heap = BinaryHeap::with_capacity(self.max_num_priority_txs + 1);
+        for (tx_idx, tx_env) in txs.iter().enumerate() {
+            heap.push((!tx_env.gas_limit, tx_idx));
+            if heap.len() > self.max_num_priority_txs {
+                heap.pop();
+            }
+        }
+
+        // Disjoint-Set Unions
+        let priority_txs: Vec<TxIdx> = heap.iter().map(|(_, tx_idx)| *tx_idx).collect();
+        let mut parent: AHashMap<TxIdx, TxIdx> = AHashMap::with_capacity(heap.len());
+
+        while heap.len() > self.num_threads_for_priority_txs {
+            let a = heap.pop().unwrap(); // smaller color
+            let b = heap.pop().unwrap(); // bigger color
+            parent.insert(a.1, b.1);
+            heap.push((!(!a.0 + !b.0), b.1)); // push the bigger color with updated weight
+        }
+
+        let mut sorted_colors = Vec::with_capacity(heap.len());
+        while let Some((_, tx_idx)) = heap.pop() {
+            sorted_colors.push(tx_idx);
+        }
+        sorted_colors.reverse();
+
+        let root = |tx_idx: TxIdx| -> Color {
+            let mut u = tx_idx;
+            while let Some(&p) = parent.get(&u) {
+                u = p
+            }
+            u
+        };
+
+        let priority_txs_with_color: BTreeMap<TxIdx, Color> = priority_txs
+            .into_iter()
+            .map(|tx_idx| (tx_idx, root(tx_idx)))
+            .collect();
+
+        (priority_txs_with_color, sorted_colors)
+    }
+}
+
+/// Strategy for [Pevm::execute]
 #[derive(Debug)]
 pub enum PevmStrategy {
     /// Sequential
@@ -215,20 +272,10 @@ impl Pevm {
         }
 
         let block_size = txs.len();
-        let priority_txs: Vec<TxIdx> = {
-            let mut heap = BinaryHeap::with_capacity(parallel_params.max_num_priority_txs);
-            if parallel_params.max_num_priority_txs > 0 {
-                for (tx_idx, tx_env) in txs.iter().enumerate() {
-                    heap.push((!tx_env.gas_limit, tx_idx));
-                    if heap.len() > parallel_params.max_num_priority_txs {
-                        heap.pop();
-                    }
-                }
-            }
-            heap.into_iter().map(|(_, tx_idx)| tx_idx).collect()
-        };
 
-        let scheduler = Scheduler::new(block_size, priority_txs);
+        let (priority_txs_with_color, sorted_colors) = parallel_params.get_priority_txs(&txs);
+
+        let scheduler = Scheduler::new(block_size);
 
         let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
         let vm = Vm::new(
@@ -249,27 +296,35 @@ impl Pevm {
             }
         }
 
+        let run_priority_worker = |color: TxIdx| {
+            for (&tx_idx, &c) in priority_txs_with_color.iter() {
+                if c != color {
+                    continue;
+                }
+
+                let mut task = scheduler.next_execution_task(tx_idx);
+                while let Some(t) = task {
+                    task = match t {
+                        Task::Execution(tx_version) => {
+                            self.try_execute(&vm, &scheduler, tx_version)
+                        }
+                        Task::Validation(tx_version) => {
+                            try_validate(&mv_memory, &scheduler, &tx_version)
+                        }
+                    };
+
+                    if self.abort_reason.get().is_some() {
+                        break;
+                    }
+                }
+            }
+        };
+
         // TODO: Better thread handling
         thread::scope(|scope| {
-            for _ in 0..parallel_params.num_threads_for_priority_txs {
-                scope.spawn(|| {
-                    let mut task = scheduler.next_priority_task();
-                    while task.is_some() {
-                        task = match task.unwrap() {
-                            Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
-                            }
-                            Task::Validation(tx_version) => {
-                                try_validate(&mv_memory, &scheduler, &tx_version)
-                            }
-                        };
-                        if self.abort_reason.get().is_some() {
-                            break;
-                        }
-                        if task.is_none() {
-                            task = scheduler.next_priority_task();
-                        }
-                    }
+            for color in sorted_colors {
+                scope.spawn(move || {
+                    run_priority_worker(color);
                 });
             }
 
