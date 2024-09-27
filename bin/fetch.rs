@@ -1,10 +1,10 @@
 //! Fetch and snapshot a real block to disk for testing & benchmarking.
 use std::{
     collections::BTreeMap,
+    error::Error,
     fs::{self, File},
     io::BufReader,
     num::NonZeroUsize,
-    thread,
 };
 
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -19,6 +19,8 @@ use pevm::{
 use reqwest::Url;
 use tokio::runtime::Runtime;
 
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
 #[derive(Parser, Debug)]
 /// Fetch is a CLI tool to fetch a block from an RPC provider, and snapshot that block to disk.
 struct Fetch {
@@ -26,9 +28,16 @@ struct Fetch {
     block_id: BlockId,
 }
 
+fn main() {
+    if let Err(err) = try_main() {
+        eprintln!("{}", err);
+        std::process::exit(2);
+    }
+}
+
 // TODO: async main?
 // TODO: Binary formats to save disk?
-pub fn main() {
+fn try_main() -> Result<()> {
     let Fetch { block_id, rpc_url } = Fetch::parse();
 
     // Define provider.
