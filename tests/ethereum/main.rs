@@ -140,7 +140,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),
                     vec![tx_env.unwrap()],
-                    ParallelConfig { num_threads: 1 }
+                    ParallelConfig::new(1,0,0)
                 ),
             ) {
                 // EIP-2681

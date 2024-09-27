@@ -1,6 +1,10 @@
 //! PEVM Strategies: Sequential and Parallel
 
-use std::sync::LazyLock;
+use std::{collections::BinaryHeap, sync::LazyLock};
+
+use revm::primitives::TxEnv;
+
+use crate::TxIdx;
 
 static AVAILABLE_PARALLELISM: LazyLock<usize> =
     LazyLock::new(|| match std::thread::available_parallelism() {
@@ -11,24 +15,69 @@ static AVAILABLE_PARALLELISM: LazyLock<usize> =
 /// Configuration for parallel execution.
 #[derive(Debug, Clone)]
 pub struct ParallelConfig {
-    /// Number of threads to use.
-    pub num_threads: usize,
+    /// Number of threads for regular transactions
+    pub num_threads_for_regular_txs: usize,
+    /// Number of threads for priority transactions
+    pub num_threads_for_priority_txs: usize,
+    /// Max number of priority transactions
+    pub max_num_priority_txs: usize,
+}
+
+impl ParallelConfig {
+    /// Create [ParallelConfig]
+    pub fn new(
+        num_threads_for_regular_txs: usize,
+        num_threads_for_priority_txs: usize,
+        max_num_priority_txs: usize,
+    ) -> Self {
+        Self {
+            num_threads_for_regular_txs,
+            num_threads_for_priority_txs,
+            max_num_priority_txs,
+        }
+    }
 }
 
 impl Default for ParallelConfig {
     fn default() -> Self {
-        // This max should be tuned to the running machine,
-        // ideally also per block depending on the number of
-        // transactions, gas usage, etc. ARM machines seem to
-        // go higher thanks to their low thread overheads.
-        let num_threads = AVAILABLE_PARALLELISM.min(
-            #[cfg(target_arch = "aarch64")]
-            12,
-            #[cfg(not(target_arch = "aarch64"))]
-            8,
-        );
+        // TODO: Fine tune these parameters based on arch.
+        let num_threads_for_regular_txs = AVAILABLE_PARALLELISM.min(8);
+        let num_threads_for_priority_txs = AVAILABLE_PARALLELISM
+            .saturating_sub(num_threads_for_regular_txs)
+            .min(6);
+        let max_num_priority_txs = 24;
+        Self {
+            num_threads_for_regular_txs,
+            num_threads_for_priority_txs,
+            max_num_priority_txs,
+        }
+    }
+}
 
-        Self { num_threads }
+impl ParallelConfig {
+    /// Returns the list of priority transactions.
+    pub fn get_priority_txs(&self, txs: &[TxEnv]) -> Vec<TxIdx> {
+        if self.max_num_priority_txs == 0 || self.num_threads_for_priority_txs == 0 {
+            return Vec::new();
+        }
+        // [std::collections::BinaryHeap] is a max heap.
+        // While pushing the txs to the heap, every time the size exceeds
+        // [self.max_num_priority_txs], we pop the lightest tx.
+        // At the end, the heap contains [self.max_num_priority_txs] heaviest txs.
+        let mut heap = BinaryHeap::with_capacity(self.max_num_priority_txs + 1);
+        for (tx_idx, tx_env) in txs.iter().enumerate() {
+            heap.push((!tx_env.gas_limit, tx_idx));
+            if heap.len() > self.max_num_priority_txs {
+                heap.pop();
+            }
+        }
+
+        let mut priority_txs = Vec::with_capacity(heap.len());
+        while let Some((_, tx_idx)) = heap.pop() {
+            priority_txs.push(tx_idx);
+        }
+        priority_txs.reverse();
+        priority_txs
     }
 }
 
@@ -63,10 +112,27 @@ impl PevmStrategy {
         if block_gas_used < 4_000_000 {
             return Self::Sequential;
         }
+
         let parallel_config = ParallelConfig::default();
-        if num_txs < parallel_config.num_threads {
+        if num_txs
+            < parallel_config.num_threads_for_priority_txs
+                + parallel_config.num_threads_for_regular_txs
+        {
             return Self::Sequential;
         }
+
+        if num_txs < parallel_config.max_num_priority_txs * 2 {
+            // Fallback to the original strategy: 12 regular threads, 0 priority threads
+            let fallback_parallel_config = ParallelConfig {
+                num_threads_for_regular_txs: AVAILABLE_PARALLELISM.min(12),
+                num_threads_for_priority_txs: 0,
+                max_num_priority_txs: 0,
+            };
+            return Self::Parallel {
+                config: fallback_parallel_config,
+            };
+        }
+
         Self::Parallel {
             config: parallel_config,
         }

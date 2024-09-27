@@ -148,6 +148,15 @@ struct TxVersion {
     tx_incarnation: TxIncarnation,
 }
 
+impl TxVersion {
+    fn new(tx_idx: TxIdx, tx_incarnation: TxIncarnation) -> Self {
+        Self {
+            tx_idx,
+            tx_incarnation,
+        }
+    }
+}
+
 // The origin of a memory read. It could be from the live multi-version
 // data structure or from storage (chain state before block execution).
 #[derive(Debug, PartialEq)]
@@ -180,6 +189,7 @@ enum Task {
 }
 
 bitflags! {
+    #[derive(Debug)]
     struct FinishExecFlags: u8 {
         // Do we need to validate from this transaction?
         // The first and lazy transactions don't need validation. Note
