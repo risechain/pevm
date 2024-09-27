@@ -10,6 +10,7 @@
 
 use ahash::AHashMap;
 use pevm::chain::PevmEthereum;
+use pevm::strategy::ParallelConfig;
 use pevm::{
     Bytecodes, EvmAccount, EvmCode, InMemoryStorage, Pevm, PevmError, PevmTxExecutionResult,
 };
@@ -27,9 +28,7 @@ use revme::cmd::statetest::{
     merkle_trie::{log_rlp_hash, state_merkle_trie_root},
     utils::recover_address,
 };
-use std::path::Path;
-use std::str::FromStr;
-use std::{fs, num::NonZeroUsize};
+use std::{fs, path::Path, str::FromStr};
 use walkdir::{DirEntry, WalkDir};
 
 #[path = "../common/mod.rs"]
@@ -141,7 +140,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),
                     vec![tx_env.unwrap()],
-                    NonZeroUsize::MIN,
+                    ParallelConfig { num_threads: 1 }
                 ),
             ) {
                 // EIP-2681

@@ -4,7 +4,6 @@ use std::{
     error::Error,
     fs::{self, File},
     io::BufReader,
-    num::NonZeroUsize,
 };
 
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -14,6 +13,7 @@ use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use clap::Parser;
 use pevm::{
     chain::{PevmChain, PevmEthereum},
+    strategy::PevmStrategy,
     EvmAccount, EvmCode, Pevm, RpcStorage,
 };
 use reqwest::Url;
@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Execute the block and track the pre-state in the RPC storage.
     Pevm::default()
-        .execute(&storage, &chain, block.clone(), NonZeroUsize::MIN, true)
+        .execute(&storage, &chain, block.clone(), PevmStrategy::sequential())
         .map_err(|err| format!("Failed to execute block: {:?}", err))?;
 
     let block_dir = format!("data/blocks/{}", block.header.number);

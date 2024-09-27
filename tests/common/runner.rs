@@ -2,10 +2,10 @@ use alloy_primitives::Bloom;
 use alloy_rpc_types::Block;
 use pevm::{
     chain::{CalculateReceiptRootError, PevmChain, PevmEthereum},
+    strategy::{ParallelConfig, PevmStrategy},
     EvmAccount, Pevm, Storage,
 };
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
-use std::{num::NonZeroUsize, thread};
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -24,7 +24,6 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
 // Execute an REVM block sequentially & with PEVM and assert that
 // the execution results match.
 pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) {
-    let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_eq!(
         pevm::execute_revm_sequential(
             &storage,
@@ -39,7 +38,7 @@ pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) 
             SpecId::LATEST,
             BlockEnv::default(),
             txs,
-            concurrency_level,
+            ParallelConfig::default(),
         ),
     );
 }
@@ -52,10 +51,14 @@ pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync +
     block: Block<C::Transaction>,
     must_match_block_header: bool,
 ) {
-    let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let mut pevm = Pevm::default();
-    let sequential_result = pevm.execute(storage, chain, block.clone(), concurrency_level, true);
-    let parallel_result = pevm.execute(storage, chain, block.clone(), concurrency_level, false);
+    let sequential_result = pevm.execute(storage, chain, block.clone(), PevmStrategy::sequential());
+    let parallel_result = pevm.execute(
+        storage,
+        chain,
+        block.clone(),
+        PevmStrategy::auto(block.transactions.len(), block.header.gas_used),
+    );
     assert_eq!(&sequential_result, &parallel_result);
 
     let tx_results = sequential_result.unwrap();
