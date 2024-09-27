@@ -1,5 +1,3 @@
-use std::process;
-
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use reqwest::Url;
