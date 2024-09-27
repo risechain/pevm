@@ -42,15 +42,16 @@ fn try_main() -> Result<()> {
 
     // Define provider.
     let provider = ProviderBuilder::new().on_http(
-        Url::parse(&rpc_url).unwrap_or_else(|_| panic!("Invalid RPC URL supplied: {rpc_url}")),
+        Url::parse(&rpc_url)
+            .map_err(|err| format!("Invalid RPC URL supplied: {rpc_url}. {err}"))?,
     );
 
     // Retrive block from provider.
     let runtime = Runtime::new().unwrap();
     let block = runtime
         .block_on(provider.get_block(block_id, BlockTransactionsKind::Full))
-        .expect("Failed to fetch block from provider")
-        .unwrap_or_else(|| panic!("No block found for ID: {:?}", block_id));
+        .map_err(|err| format!("Failed to fetch block from provider. {err}"))?
+        .ok_or(format!("No block found for ID: {:?}", block_id))?;
 
     // TODO: parameterize `chain` to add support for `OP`, `RISE`, and more.
     let chain = PevmEthereum::mainnet();
@@ -114,4 +115,6 @@ fn try_main() -> Result<()> {
         serde_json::to_writer(file, &block_hashes)
             .unwrap_or_else(|e| panic!("Failed to write block hashes to file: {e}"));
     }
+
+    Ok(())
 }
