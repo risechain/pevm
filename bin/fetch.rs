@@ -48,7 +48,7 @@ fn try_main() -> Result<()> {
     );
 
     // Retrive block from provider.
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::new()?;
     let block = runtime
         .block_on(provider.get_block(block_id, BlockTransactionsKind::Full))
         .map_err(|err| format!("Failed to fetch block from provider. {err}"))?
@@ -91,8 +91,11 @@ fn try_main() -> Result<()> {
     bytecodes.extend(storage.get_cache_bytecodes());
     for (address, mut account) in storage.get_cache_accounts() {
         if let Some(code) = account.code.take() {
-            assert_ne!(account.code_hash.unwrap(), KECCAK_EMPTY);
-            bytecodes.insert(account.code_hash.unwrap(), code);
+            let code_hash = account
+                .code_hash
+                .ok_or(format!("Failed to get code hash for: {}", address))?;
+            assert_ne!(code_hash, KECCAK_EMPTY);
+            bytecodes.insert(code_hash, code);
         }
         state.insert(address, account);
     }
