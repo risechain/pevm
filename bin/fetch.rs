@@ -33,6 +33,7 @@ fn main() {
         eprintln!("{}", err);
         std::process::exit(2);
     }
+    std::process::exit(0)
 }
 
 // TODO: async main?
@@ -55,36 +56,36 @@ fn try_main() -> Result<()> {
 
     // TODO: parameterize `chain` to add support for `OP`, `RISE`, and more.
     let chain = PevmEthereum::mainnet();
-    let spec_id = chain.get_block_spec(&block.header).unwrap_or_else(|e| {
-        panic!(
+    let spec_id = chain.get_block_spec(&block.header).map_err(|err| {
+        format!(
             "Failed to get block spec for block: {}. {:?}",
-            block.header.number, e
+            block.header.number, err
         )
-    });
+    })?;
     let storage = RpcStorage::new(provider, spec_id, BlockId::number(block.header.number - 1));
 
     // Execute the block and track the pre-state in the RPC storage.
     let _ = Pevm::default()
         .execute(&storage, &chain, block.clone(), NonZeroUsize::MIN, true)
-        .unwrap_or_else(|e| panic!("Failed to execute block: {:?}", e));
+        .map_err(|err| format!("Failed to execute block: {:?}", err));
 
     let block_dir = format!("data/blocks/{}", block.header.number);
 
     // Create block directory.
     fs::create_dir_all(block_dir.clone())
-        .unwrap_or_else(|e| panic!("Failed to create block directory: {e}"));
+        .map_err(|err| format!("Failed to create block directory: {err}"))?;
 
     // Create blockfile.
     let block_file = File::create(format!("{block_dir}/block.json"))
-        .unwrap_or_else(|e| panic!("Failed to create block file: {e}"));
+        .map_err(|err| format!("Failed to create block file: {err}"))?;
     serde_json::to_writer(block_file, &block)
-        .unwrap_or_else(|e| panic!("Failed to write block to file: {e}"));
+        .map_err(|err| format!("Failed to write block to file: {err}"))?;
 
     // Populate bytecodes and state from RPC storage.
     let mut state = BTreeMap::<Address, EvmAccount>::new();
     let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode") {
         Ok(file) => bincode::deserialize_from(BufReader::new(file))
-            .unwrap_or_else(|e| panic!("Failed to deserialize bytecodes from file: {e}")),
+            .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?,
         Err(_) => BTreeMap::new(),
     };
     bytecodes.extend(storage.get_cache_bytecodes());
@@ -98,22 +99,22 @@ fn try_main() -> Result<()> {
 
     // Write state and bytecodes to disk.
     let file_state = File::create(format!("{block_dir}/pre_state.json"))
-        .unwrap_or_else(|e| panic!("Failed to create pre-state file: {e}"));
-    let json_state = serde_json::to_value(&state).unwrap();
+        .map_err(|err| format!("Failed to create pre-state file: {err}"))?;
+    let json_state = serde_json::to_value(&state)?;
     serde_json::to_writer(file_state, &json_state)
-        .unwrap_or_else(|e| panic!("Failed to write pre-state to file: {e}"));
+        .map_err(|err| format!("Failed to write pre-state to file: {err}"))?;
     let file_bytecodes = File::create("data/bytecodes.bincode")
-        .unwrap_or_else(|e| panic!("Failed to create bytecodes file: {e}"));
+        .map_err(|err| format!("Failed to create bytecodes file: {err}"))?;
     bincode::serialize_into(file_bytecodes, &bytecodes)
-        .unwrap_or_else(|e| panic!("Failed to write bytecodes to file: {e}"));
+        .map_err(|err| format!("Failed to write bytecodes to file: {err}"))?;
 
     // Write block hashes to disk.
     let block_hashes: BTreeMap<u64, B256> = storage.get_cache_block_hashes().into_iter().collect();
     if !block_hashes.is_empty() {
         let file = File::create(format!("{block_dir}/block_hashes.json"))
-            .unwrap_or_else(|e| panic!("Failed to create block hashes file: {e}"));
+            .map_err(|err| format!("Failed to create block hashes file: {err}"))?;
         serde_json::to_writer(file, &block_hashes)
-            .unwrap_or_else(|e| panic!("Failed to write block hashes to file: {e}"));
+            .map_err(|err| format!("Failed to write block hashes to file: {err}"))?;
     }
 
     Ok(())
