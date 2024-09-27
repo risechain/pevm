@@ -71,7 +71,7 @@ $ cargo build
 We often want to fetch real blocks for testing and benchmarking. The `fetch` CLI snapshots everything needed to execute an Ethereum mainnet block to `data`. More networks will be supported in the future.
 
 ```sh
-$ cargo run --bin fetch <BLOCK_ID> <RPC_URL>
+$ cargo run --bin fetch <RPC_URL> <BLOCK_ID>
 ```
 
 Where `<BLOCK_ID>` may be a hash or a number.
