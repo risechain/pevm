@@ -48,9 +48,9 @@ reqwest = "0.12.7"
 tokio = { version = "1.40.0", features = ["rt-multi-thread"] }
 
 # CLI dependencies
-serde_json = { version = "1.0.127", features = ["preserve_order"] }
 bincode = "1.3.3"
-clap = { version = "4.5.17", features = ["derive"] }
+clap = { version = "4.5.18", features = ["derive"] }
+serde_json = { version = "1.0.128", features = ["preserve_order"] }
 
 # OP dependencies
 op-alloy-consensus = { version = "0.2.12", optional = true }

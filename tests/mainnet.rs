@@ -49,21 +49,6 @@ fn mainnet_blocks_from_rpc() {
         let spec_id = chain.get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         common::test_execute_alloy(&rpc_storage, &chain, block.clone(), true);
-
-        // Snapshot blocks (for benchmark)
-        // TODO: Binary formats to save disk?
-        if std::env::var("SNAPSHOT_BLOCKS") == Ok("1".to_string()) {
-            process::Command::new("cargo")
-                .args([
-                    "run",
-                    "--bin",
-                    "fetch",
-                    &block_number.to_string(),
-                    rpc_url.as_ref(),
-                ])
-                .status()
-                .expect("Failed to snapshot block");
-        }
     }
 }
 

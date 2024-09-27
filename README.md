@@ -31,6 +31,10 @@ Finally, while Aptos and Polygon embed their pevm implementation directly into t
 
 - Install [cmake](https://cmake.org) to build `snmalloc` (a highly performant memory allocator).
 
+```sh
+$ cargo build
+```
+
 ### Alpha Done
 
 - Build a Block-STM foundation to improve on.
@@ -60,15 +64,11 @@ Finally, while Aptos and Polygon embed their pevm implementation directly into t
 - Hyper-optimise at low system levels (kernel configurations, writing hot paths in Assembly, etc.).
 - Propose an EIP to "tax" blocks with low parallelism.
 
-```sh
-$ cargo build
-```
-
 ### Tooling
 
-Fetcher
+#### Fetch real blocks
 
-We provide a command-line interface (CLI) tool to snapshot the state of a block. This tool fetches a block from an RPC provider and snapshots the state to disk.
+We often want to fetch real blocks for testing and benchmarking. The `fetch` CLI snapshots everything needed to execute an Ethereum mainnet block to `data`. More networks will be supported in the future.
 
 ```sh
 $ cargo run --bin fetch <BLOCK_ID> <RPC_URL>
