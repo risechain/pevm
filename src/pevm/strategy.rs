@@ -41,10 +41,10 @@ impl ParallelConfig {
 impl Default for ParallelConfig {
     fn default() -> Self {
         // TODO: Fine tune these parameters based on arch.
-        let num_threads_for_regular_txs = AVAILABLE_PARALLELISM.min(8);
+        let num_threads_for_regular_txs = AVAILABLE_PARALLELISM.min(12);
         let num_threads_for_priority_txs = AVAILABLE_PARALLELISM
             .saturating_sub(num_threads_for_regular_txs)
-            .min(6);
+            .min(4);
         let max_num_priority_txs = 24;
         Self {
             num_threads_for_regular_txs,
@@ -121,15 +121,14 @@ impl PevmStrategy {
             return Self::Sequential;
         }
 
-        if num_txs < parallel_config.max_num_priority_txs * 2 {
-            // Fallback to the original strategy: 12 regular threads, 0 priority threads
-            let fallback_parallel_config = ParallelConfig {
-                num_threads_for_regular_txs: AVAILABLE_PARALLELISM.min(12),
-                num_threads_for_priority_txs: 0,
-                max_num_priority_txs: 0,
-            };
+        if num_txs <= 384 && *AVAILABLE_PARALLELISM >= 12 {
+            // Reduce the number of regular workers to optimize for small blocks
             return Self::Parallel {
-                config: fallback_parallel_config,
+                config: ParallelConfig {
+                    num_threads_for_regular_txs: 8,
+                    num_threads_for_priority_txs: 4,
+                    max_num_priority_txs: 24,
+                },
             };
         }
 
