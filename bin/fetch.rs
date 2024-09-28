@@ -105,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     serde_json::to_writer(file_state, &json_state)
         .map_err(|err| format!("Failed to write pre-state to file: {err}"))?;
 
-    // Write block to disk.
+    // Write block hashes to disk.
     let block_hashes: BTreeMap<u64, B256> = storage.get_cache_block_hashes().into_iter().collect();
     if !block_hashes.is_empty() {
         let file = File::create(format!("{block_dir}/block_hashes.json"))
