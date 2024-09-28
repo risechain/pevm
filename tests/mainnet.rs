@@ -1,11 +1,3 @@
-use std::{
-    collections::BTreeMap,
-    fs::{self, File},
-    io::BufReader,
-};
-
-use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use reqwest::Url;
@@ -13,7 +5,7 @@ use tokio::runtime::Runtime;
 
 use pevm::{
     chain::{PevmChain, PevmEthereum},
-    EvmAccount, EvmCode, RpcStorage,
+    RpcStorage,
 };
 
 pub mod common;
@@ -54,47 +46,7 @@ fn mainnet_blocks_from_rpc() {
         let chain = PevmEthereum::mainnet();
         let spec_id = chain.get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
-        common::test_execute_alloy(&rpc_storage, &chain, block.clone(), true);
-
-        // Snapshot blocks (for benchmark)
-        // TODO: Port to a dedicated CLI instead?
-        // TODO: Binary formats to save disk?
-        if std::env::var("SNAPSHOT_BLOCKS") == Ok("1".to_string()) {
-            let dir = format!("data/blocks/{block_number}");
-            fs::create_dir_all(dir.clone()).unwrap();
-            let file_block = File::create(format!("{dir}/block.json")).unwrap();
-            serde_json::to_writer(file_block, &block).unwrap();
-
-            // TODO: Snapshot with consistent ordering for ease of diffing.
-            // Currently [EvmStorage]'s storage ordering isn't consistent.
-            let mut state = BTreeMap::<Address, EvmAccount>::new();
-            let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode")
-            {
-                Ok(file) => bincode::deserialize_from(BufReader::new(file)).unwrap(),
-                Err(_) => BTreeMap::new(),
-            };
-            bytecodes.extend(rpc_storage.get_cache_bytecodes());
-            for (address, mut account) in rpc_storage.get_cache_accounts() {
-                if let Some(code) = account.code.take() {
-                    assert_ne!(account.code_hash.unwrap(), KECCAK_EMPTY);
-                    bytecodes.insert(account.code_hash.unwrap(), code);
-                }
-                state.insert(address, account);
-            }
-
-            let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
-            serde_json::to_writer(file_state, &state).unwrap();
-            let file_bytecodes = File::create("data/bytecodes.bincode").unwrap();
-            bincode::serialize_into(file_bytecodes, &bytecodes).unwrap();
-
-            // We convert to [BTreeMap] for consistent ordering & diffs between snapshots
-            let block_hashes: BTreeMap<u64, B256> =
-                rpc_storage.get_cache_block_hashes().into_iter().collect();
-            if !block_hashes.is_empty() {
-                let file = File::create(format!("{dir}/block_hashes.json")).unwrap();
-                serde_json::to_writer(file, &block_hashes).unwrap();
-            }
-        }
+        common::test_execute_alloy(&rpc_storage, &chain, block, true);
     }
 }
 

@@ -11,6 +11,10 @@ optimism = [
     "dep:op-alloy-rpc-types",
 ]
 
+[[bin]]
+name = "fetch"
+path = "bin/fetch.rs"
+
 [dependencies]
 # Put this behind a feature flag if there are use cases & users
 # that need more security guarantees even for internally hashing
@@ -43,20 +47,23 @@ alloy-transport-http = "0.3.6"
 reqwest = "0.12.7"
 tokio = { version = "1.40.0", features = ["rt-multi-thread"] }
 
+# CLI dependencies
+bincode = "1.3.3"
+clap = { version = "4.5.18", features = ["derive"] }
+serde_json = { version = "1.0.128", features = ["preserve_order"] }
+
 # OP dependencies
 op-alloy-consensus = { version = "0.2.12", optional = true }
 op-alloy-network = { version = "0.2.12", optional = true }
 op-alloy-rpc-types = { version = "0.2.12", optional = true }
 
 [dev-dependencies]
-bincode = "1.3.3"
 criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"
 revme = { git = "https://github.com/risechain/revm", rev = "1ad0b38dd50e421b057d6cd73d2e18de04fad095" }
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
 snmalloc-rs = "0.3.6"
-serde_json = "1.0.128"
 tikv-jemallocator = "0.6.0"
 walkdir = "2.5.0"
 
