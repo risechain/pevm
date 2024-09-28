@@ -63,7 +63,7 @@ $ cargo build
 - Support multiple EVM executors (REVM, JIT & AOT compilers, etc.).
 - Hyper-optimise at low system levels (kernel configurations, writing hot paths in Assembly, etc.).
 - Propose an EIP to "tax" blocks with low parallelism.
-q
+
 ### Tooling
 
 #### Fetch real blocks

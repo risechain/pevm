@@ -46,7 +46,7 @@ fn mainnet_blocks_from_rpc() {
         let chain = PevmEthereum::mainnet();
         let spec_id = chain.get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
-        common::test_execute_alloy(&rpc_storage, &chain, block.clone(), true);
+        common::test_execute_alloy(&rpc_storage, &chain, block, true);
     }
 }
 

@@ -19,8 +19,6 @@ use pevm::{
 use reqwest::Url;
 use tokio::runtime::Runtime;
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
-
 #[derive(Parser, Debug)]
 /// Fetch is a CLI tool to fetch a block from an RPC provider, and snapshot that block to disk.
 struct Fetch {
@@ -28,17 +26,10 @@ struct Fetch {
     block_id: BlockId,
 }
 
-fn main() {
-    if let Err(err) = try_main() {
-        eprintln!("{}", err);
-        std::process::exit(2);
-    }
-    std::process::exit(0)
-}
-
 // TODO: async main?
 // TODO: Binary formats to save disk?
-fn try_main() -> Result<()> {
+// TODO: Test block after fetching it.
+fn main() -> Result<(), Box<dyn Error>> {
     let Fetch { block_id, rpc_url } = Fetch::parse();
 
     // Define provider.
@@ -65,9 +56,9 @@ fn try_main() -> Result<()> {
     let storage = RpcStorage::new(provider, spec_id, BlockId::number(block.header.number - 1));
 
     // Execute the block and track the pre-state in the RPC storage.
-    let _ = Pevm::default()
+    Pevm::default()
         .execute(&storage, &chain, block.clone(), NonZeroUsize::MIN, true)
-        .map_err(|err| format!("Failed to execute block: {:?}", err));
+        .map_err(|err| format!("Failed to execute block: {:?}", err))?;
 
     let block_dir = format!("data/blocks/{}", block.header.number);
 
@@ -75,7 +66,7 @@ fn try_main() -> Result<()> {
     fs::create_dir_all(block_dir.clone())
         .map_err(|err| format!("Failed to create block directory: {err}"))?;
 
-    // Create blockfile.
+    // Write block to disk.
     let block_file = File::create(format!("{block_dir}/block.json"))
         .map_err(|err| format!("Failed to create block file: {err}"))?;
     serde_json::to_writer(block_file, &block)
@@ -100,18 +91,21 @@ fn try_main() -> Result<()> {
         state.insert(address, account);
     }
 
-    // Write state and bytecodes to disk.
-    let file_state = File::create(format!("{block_dir}/pre_state.json"))
-        .map_err(|err| format!("Failed to create pre-state file: {err}"))?;
-    let json_state = serde_json::to_value(&state)?;
-    serde_json::to_writer(file_state, &json_state)
-        .map_err(|err| format!("Failed to write pre-state to file: {err}"))?;
+    // Write bytecodes to disk.
     let file_bytecodes = File::create("data/bytecodes.bincode")
         .map_err(|err| format!("Failed to create bytecodes file: {err}"))?;
     bincode::serialize_into(file_bytecodes, &bytecodes)
         .map_err(|err| format!("Failed to write bytecodes to file: {err}"))?;
 
-    // Write block hashes to disk.
+    // Write pre-state to disk.
+    let file_state = File::create(format!("{block_dir}/pre_state.json"))
+        .map_err(|err| format!("Failed to create pre-state file: {err}"))?;
+    let json_state = serde_json::to_value(&state)
+        .map_err(|err| format!("Failed to serialize pre-state to JSON: {err}"))?;
+    serde_json::to_writer(file_state, &json_state)
+        .map_err(|err| format!("Failed to write pre-state to file: {err}"))?;
+
+    // Write block to disk.
     let block_hashes: BTreeMap<u64, B256> = storage.get_cache_block_hashes().into_iter().collect();
     if !block_hashes.is_empty() {
         let file = File::create(format!("{block_dir}/block_hashes.json"))
