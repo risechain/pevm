@@ -72,10 +72,10 @@ impl Default for AccountBasic {
 }
 
 /// Analyzed legacy code.
+// TODO: Store unpadded bytecode and pad on revm conversion.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LegacyCode {
     /// Bytecode with 32 zero bytes padding.
-    // TODO: Store unpadded bytecode and pad on revm conversion.
     bytecode: Bytes,
     /// Original bytes length.
     original_len: usize,
@@ -241,12 +241,15 @@ mod tests {
 
     #[test]
     fn evmcode_from_revm_bytecode_legacy() {
+        // Create revm bytecodes.
         let contract_bytecode = Bytecode::new_legacy(BYTECODE);
         let analyzed = to_analysed(contract_bytecode.clone());
+
         // Create EvmCode from analyzed bytecode.
         let evmcode = EvmCode::from(analyzed.clone());
         assert!(eq_bytecodes(&analyzed, &evmcode));
-        // Create EvmCode from raw Bytecode.
+
+        // Create EvmCode from raw bytecode.
         let evmcode = EvmCode::from(contract_bytecode);
         assert!(eq_bytecodes(&analyzed, &evmcode));
     }
@@ -258,11 +261,7 @@ mod tests {
         // New from address.
         let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new(addr));
         let evmcode = EvmCode::from(bytecode.clone());
-        assert!(
-            matches!(evmcode, EvmCode::Eip7702(Eip7702Code { delegated_address, version })
-                if delegated_address == addr && version == EIP7702_VERSION
-            )
-        );
+        assert!(eq_eip7702_version_addr(&evmcode, &addr, EIP7702_VERSION));
 
         // New from raw.
         let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
@@ -270,11 +269,19 @@ mod tests {
         bytes.extend(addr);
         let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(bytes.into()).unwrap());
         let evmcode = EvmCode::from(bytecode);
-        assert!(
-            matches!(evmcode, EvmCode::Eip7702(Eip7702Code { delegated_address, version })
-                if delegated_address == addr && version == EIP7702_VERSION
-            )
-        );
+        assert!(eq_eip7702_version_addr(&evmcode, &addr, EIP7702_VERSION));
+
+        // Assert that From<Bytecode> preserves version.
+        let new_version = 1;
+        let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
+        bytes.push(EIP7702_VERSION);
+        bytes.extend(addr);
+        let mut eip_bytecode = Eip7702Bytecode::new_raw(bytes.into()).unwrap();
+        // Mutate version.
+        eip_bytecode.version = new_version;
+        let bytecode = Bytecode::Eip7702(eip_bytecode);
+        let evmcode = EvmCode::from(bytecode);
+        assert!(eq_eip7702_version_addr(&evmcode, &addr, new_version))
     }
 
     fn eq_bytecodes(revm_code: &Bytecode, pevm_code: &EvmCode) -> bool {
@@ -285,6 +292,16 @@ mod tests {
                     && revm.original_len == pevm.original_len
                     && raw_jump == pevm.jump_table
             }
+            _ => false,
+        }
+    }
+
+    fn eq_eip7702_version_addr(evmcode: &EvmCode, address: &Address, version: u8) -> bool {
+        match evmcode {
+            EvmCode::Eip7702(Eip7702Code {
+                delegated_address,
+                version: ver,
+            }) => delegated_address == address && *ver == version,
             _ => false,
         }
     }
