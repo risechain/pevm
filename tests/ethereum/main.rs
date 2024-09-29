@@ -61,14 +61,14 @@ fn build_block_env(env: &Env) -> BlockEnv {
     }
 }
 
-fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv, ParseError> {
+fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices, path: &Path) -> Result<TxEnv, ParseError> {
     Ok(TxEnv {
         caller: if let Some(address) = tx.sender {
             address
         } else if let Some(address) = recover_address(tx.secret_key.as_slice()) {
             address
         } else {
-            panic!("Failed to parse caller") // TODO: Report test name
+            panic!("Failed to parse caller.{}",path);
         },
         gas_limit: tx.gas_limit[indexes.gas].saturating_to(),
         gas_price: tx.gas_price.or(tx.max_fee_per_gas).unwrap_or_default(),
@@ -105,7 +105,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
         }
 
         tests.into_par_iter().for_each(|test| {
-            let tx_env = build_tx_env(&unit.transaction, &test.indexes);
+            let tx_env = build_tx_env(&unit.transaction, &test.indexes,path);
             if test.expect_exception.as_deref() == Some("TR_RLP_WRONGVALUE") && tx_env.is_err() {
                 return;
             }
