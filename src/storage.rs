@@ -105,9 +105,6 @@ pub enum EvmCode {
 impl From<EvmCode> for Bytecode {
     fn from(code: EvmCode) -> Self {
         // TODO: Better error handling.
-        // A common trap would be converting a default [EvmCode] into
-        // a [Bytecode]. On failure we should fallback to legacy and
-        // analyse again.
         match code {
             EvmCode::Eip7702(code) => {
                 let mut raw = EIP7702_MAGIC_BYTES.to_vec();
@@ -267,15 +264,12 @@ mod tests {
         let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
         bytes.push(EIP7702_VERSION);
         bytes.extend(addr);
-        let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(bytes.into()).unwrap());
+        let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(bytes.clone().into()).unwrap());
         let evmcode = EvmCode::from(bytecode);
         assert!(eq_eip7702_version_addr(&evmcode, &addr, EIP7702_VERSION));
 
         // Assert that From<Bytecode> preserves version.
         let new_version = 1;
-        let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
-        bytes.push(EIP7702_VERSION);
-        bytes.extend(addr);
         let mut eip_bytecode = Eip7702Bytecode::new_raw(bytes.into()).unwrap();
         // Mutate version.
         eip_bytecode.version = new_version;
