@@ -13,7 +13,7 @@ const BYTECODE: alloy_primitives::Bytes = bytes!("608060405234801561001057600080
 fn test_evmcode_from_revm_bytecode_eip7702() {
     let addr = Address::new([0x01; 20]);
 
-    // From address.
+    // New from address.
     let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new(addr));
     let evmcode = EvmCode::from(bytecode);
     assert!(
@@ -22,7 +22,7 @@ fn test_evmcode_from_revm_bytecode_eip7702() {
         )
     );
 
-    // From raw.
+    // New fromn raw.
     let byte_str = format!("ef0100{}", addr.to_string().trim_start_matches("0x"));
     let raw = Bytes::from_str(&byte_str).unwrap();
     let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(raw).unwrap());
@@ -38,6 +38,7 @@ fn test_evmcode_from_revm_bytecode_eip7702() {
 fn test_evmcode_from_revm_bytecode_legacy_raw() {
     let contract_bytecode = Bytecode::new_legacy(BYTECODE);
     let analyzed = to_analysed(contract_bytecode.clone());
+    // Create EvmCode from raw Bytecode.
     let evmcode = EvmCode::from(contract_bytecode);
 
     if let Bytecode::LegacyAnalyzed(legacy_analyzed) = analyzed {
@@ -47,6 +48,8 @@ fn test_evmcode_from_revm_bytecode_legacy_raw() {
                 if bytecode == *legacy_analyzed.bytecode() && original_len == legacy_analyzed.original_len() && jump_table == raw_jump
             )
         );
+    } else {
+        panic!("Expected LegacyAnalyzed Bytecode")
     }
 }
 
@@ -54,6 +57,7 @@ fn test_evmcode_from_revm_bytecode_legacy_raw() {
 fn test_evmcode_from_revm_bytecode_legacy_analyzed() {
     let contract_bytecode = Bytecode::new_legacy(BYTECODE);
     let analyzed = to_analysed(contract_bytecode.clone());
+    // Create EvmCode from analyzed bytecode.
     let evmcode = EvmCode::from(analyzed.clone());
 
     if let Bytecode::LegacyAnalyzed(legacy_analyzed) = analyzed {
@@ -63,5 +67,7 @@ fn test_evmcode_from_revm_bytecode_legacy_analyzed() {
                 if bytecode == *legacy_analyzed.bytecode() && original_len == legacy_analyzed.original_len() && jump_table == raw_jump
             )
         );
+    } else {
+        panic!("Expected LegacyAnalyzed Bytecode")
     }
 }
