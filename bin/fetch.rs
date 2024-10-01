@@ -3,9 +3,12 @@ use std::{
     collections::BTreeMap,
     error::Error,
     fs::{self, File},
-    io::BufReader,
+    io::{BufReader, Write},
     num::NonZeroUsize,
 };
+
+use bincode;
+use flate2::{bufread, write::GzEncoder, Compression};
 
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Address, B256};
@@ -74,11 +77,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Populate bytecodes and state from RPC storage.
     let mut state = BTreeMap::<Address, EvmAccount>::new();
-    let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode") {
-        Ok(file) => bincode::deserialize_from(BufReader::new(file))
-            .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?,
+    let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode.gz") {
+        Ok(compressed_file) => {
+            let mut decoder = bufread::GzDecoder::new(BufReader::new(compressed_file));
+            bincode::deserialize_from(&mut decoder)
+                .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?
+        }
         Err(_) => BTreeMap::new(),
     };
+
     bytecodes.extend(storage.get_cache_bytecodes());
     for (address, mut account) in storage.get_cache_accounts() {
         if let Some(code) = account.code.take() {
@@ -91,11 +98,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         state.insert(address, account);
     }
 
-    // Write bytecodes to disk.
-    let file_bytecodes = File::create("data/bytecodes.bincode")
-        .map_err(|err| format!("Failed to create bytecodes file: {err}"))?;
-    bincode::serialize_into(file_bytecodes, &bytecodes)
-        .map_err(|err| format!("Failed to write bytecodes to file: {err}"))?;
+    // Write compressed bytecodes to disk.
+    let serialized = bincode::serialize(&bytecodes)?;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&serialized)?;
+    let compressed = encoder.finish()?;
+    let mut file_compressed_bytecodes = File::create("data/bytecodes.bincode.gz")
+        .map_err(|err| format!("Failed to create compressed bytecodes file: {err}"))?;
+    file_compressed_bytecodes.write_all(&compressed)?;
 
     // Write pre-state to disk.
     let file_state = File::create(format!("{block_dir}/pre_state.json"))
