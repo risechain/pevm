@@ -132,6 +132,8 @@ struct VmDb<'a, S: Storage, C: PevmChain> {
     read_set: ReadSet,
     // TODO: Clearer type for [AccountBasic] plus code hash
     read_accounts: HashMap<MemoryLocationHash, (AccountBasic, Option<B256>), BuildIdentityHasher>,
+    // We reuse this instead of allocating anew per [basic] call
+    reading_account: Option<AccountBasic>,
 }
 
 impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
@@ -154,6 +156,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
             // read at least from the sender and recipient accounts.
             read_set: ReadSet::with_capacity(2),
             read_accounts: HashMap::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
+            reading_account: None,
         };
         // We only lazy update raw transfers that already have the sender
         // or recipient in [MvMemory] since sequentially evaluating memory
@@ -262,11 +265,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         // - register origins on the first read
         let mut new_origins = SmallVec::new();
 
-        let mut final_account = None;
+        let mut nonce_addition = 0;
         let mut balance_addition = U256::ZERO;
         // The sign of [balance_addition] since it can be negative for lazy senders.
         let mut positive_addition = true;
-        let mut nonce_addition = 0;
 
         // Try reading from multi-version data
         if self.tx_idx > 0 {
@@ -303,7 +305,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                                     // [SelfDestructed]?
                                     // For now we are betting on [code_hash] triggering the
                                     // sequential fallback when we read a self-destructed contract.
-                                    final_account = Some(basic.clone());
+                                    self.reading_account = Some(basic.clone());
                                     break;
                                 }
                                 MemoryValue::LazyRecipient(addition) => {
@@ -335,7 +337,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         }
 
         // Fall back to storage
-        if final_account.is_none() {
+        if self.reading_account.is_none() {
             // Populate [Storage] on the first read
             if !has_prev_origins {
                 new_origins.push(ReadOrigin::Storage);
@@ -347,7 +349,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             {
                 return Err(ReadError::InconsistentRead);
             }
-            final_account = match self.vm.storage.basic(&address) {
+            self.reading_account = match self.vm.storage.basic(&address) {
                 Ok(Some(basic)) => Some(basic),
                 Ok(None) => {
                     if balance_addition > U256::ZERO {
@@ -366,7 +368,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             *read_origins = new_origins;
         }
 
-        if let Some(mut account) = final_account {
+        if let Some(mut account) = self.reading_account.take() {
             // Check sender nonce
             account.nonce += nonce_addition;
             if location_hash == self.from_hash
