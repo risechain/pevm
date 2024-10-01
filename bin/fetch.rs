@@ -7,7 +7,6 @@ use std::{
     num::NonZeroUsize,
 };
 
-use bincode;
 use flate2::{bufread, write::GzEncoder, Compression};
 
 use alloy_consensus::constants::KECCAK_EMPTY;
