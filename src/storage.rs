@@ -72,10 +72,10 @@ impl Default for AccountBasic {
 }
 
 /// Analyzed legacy code.
-// TODO: Store unpadded bytecode and pad on revm conversion.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LegacyCode {
     /// Bytecode with 32 zero bytes padding.
+    // TODO: Store unpadded bytecode and pad on revm conversion
     bytecode: Bytes,
     /// Original bytes length.
     original_len: usize,
@@ -104,7 +104,6 @@ pub enum EvmCode {
 
 impl From<EvmCode> for Bytecode {
     fn from(code: EvmCode) -> Self {
-        // TODO: Better error handling.
         match code {
             EvmCode::Eip7702(code) => {
                 let mut raw = EIP7702_MAGIC_BYTES.to_vec();
@@ -236,70 +235,60 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn evmcode_from_revm_bytecode_legacy() {
-        // Create revm bytecodes.
-        let contract_bytecode = Bytecode::new_legacy(BYTECODE);
-        let analyzed = to_analysed(contract_bytecode.clone());
-
-        // Create EvmCode from analyzed bytecode.
-        let evmcode = EvmCode::from(analyzed.clone());
-        assert!(eq_bytecodes(&analyzed, &evmcode));
-
-        // Create EvmCode from raw bytecode.
-        let evmcode = EvmCode::from(contract_bytecode);
-        assert!(eq_bytecodes(&analyzed, &evmcode));
-    }
-
-    #[test]
-    fn evmcode_from_revm_bytecode_eip7702() {
-        let addr = Address::new([0x01; 20]);
-
-        // New from address.
-        let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new(addr));
-        let evmcode = EvmCode::from(bytecode.clone());
-        assert!(eq_eip7702_version_addr(&evmcode, &addr, EIP7702_VERSION));
-
-        // New from raw.
-        let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
-        bytes.push(EIP7702_VERSION);
-        bytes.extend(addr);
-        let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(bytes.clone().into()).unwrap());
-        let evmcode = EvmCode::from(bytecode);
-        assert!(eq_eip7702_version_addr(&evmcode, &addr, EIP7702_VERSION));
-
-        // Assert that From<Bytecode> preserves version.
-        let new_version = 1;
-        let mut eip_bytecode = Eip7702Bytecode::new_raw(bytes.into()).unwrap();
-        // Mutate version.
-        eip_bytecode.version = new_version;
-        let bytecode = Bytecode::Eip7702(eip_bytecode);
-        let evmcode = EvmCode::from(bytecode);
-        assert!(eq_eip7702_version_addr(&evmcode, &addr, new_version))
-    }
+    // Bytecode from Foundry's default Counter.sol contract, compiled with solc 0.8.13.
+    // https://github.com/foundry-rs/foundry/blob/nightly-fe2acca4e379793539db80e032d76ffe0110298b/testdata/multi-version/Counter.sol
+    const BYTECODE: alloy_primitives::Bytes = bytes!("608060405234801561001057600080fd5b5060f78061001f6000396000f3fe6080604052348015600f57600080fd5b5060043610603c5760003560e01c80633fb5c1cb1460415780638381f58a146053578063d09de08a14606d575b600080fd5b6051604c3660046083565b600055565b005b605b60005481565b60405190815260200160405180910390f35b6051600080549080607c83609b565b9190505550565b600060208284031215609457600080fd5b5035919050565b60006001820160ba57634e487b7160e01b600052601160045260246000fd5b506001019056fea264697066735822122012c25f3d90606133b37330bf079a425dbc650fd21060dee49f715d37d97cb58f64736f6c634300080d0033");
 
     fn eq_bytecodes(revm_code: &Bytecode, pevm_code: &EvmCode) -> bool {
         match (revm_code, pevm_code) {
             (Bytecode::LegacyAnalyzed(revm), EvmCode::Legacy(pevm)) => {
-                let raw_jump = revm.jump_table().0.clone();
                 revm.bytecode == pevm.bytecode
                     && revm.original_len == pevm.original_len
-                    && raw_jump == pevm.jump_table
+                    && revm.jump_table.0 == pevm.jump_table
+            }
+            (Bytecode::Eip7702(revm), EvmCode::Eip7702(pevm)) => {
+                revm.delegated_address == pevm.delegated_address && revm.version == pevm.version
             }
             _ => false,
         }
     }
 
-    fn eq_eip7702_version_addr(evmcode: &EvmCode, address: &Address, version: u8) -> bool {
-        match evmcode {
-            EvmCode::Eip7702(Eip7702Code {
-                delegated_address,
-                version: ver,
-            }) => delegated_address == address && *ver == version,
-            _ => false,
-        }
+    #[test]
+    fn legacy_bytecodes() {
+        let contract_bytecode = Bytecode::new_legacy(BYTECODE);
+        let analyzed = to_analysed(contract_bytecode.clone());
+
+        let evm_code = EvmCode::from(analyzed.clone());
+        assert!(eq_bytecodes(&analyzed, &evm_code));
+        assert_eq!(analyzed, Bytecode::from(evm_code));
+
+        let evm_code = EvmCode::from(contract_bytecode);
+        assert!(eq_bytecodes(&analyzed, &evm_code));
+        assert_eq!(analyzed, Bytecode::from(evm_code));
     }
 
-    // Bytecode from Storage.sol.
-    const BYTECODE: alloy_primitives::Bytes = bytes!("6080604052348015600e575f80fd5b506101438061001c5f395ff3fe608060405234801561000f575f80fd5b5060043610610034575f3560e01c80632e64cec1146100385780636057361d14610056575b5f80fd5b610040610072565b60405161004d919061009b565b60405180910390f35b610070600480360381019061006b91906100e2565b61007a565b005b5f8054905090565b805f8190555050565b5f819050919050565b61009581610083565b82525050565b5f6020820190506100ae5f83018461008c565b92915050565b5f80fd5b6100c181610083565b81146100cb575f80fd5b50565b5f813590506100dc816100b8565b92915050565b5f602082840312156100f7576100f66100b4565b5b5f610104848285016100ce565b9150509291505056fea26469706673582212209a0dd35336aff1eb3eeb11db76aa60a1427a12c1b92f945ea8c8d1dfa337cf2264736f6c634300081a0033");
+    #[test]
+    fn eip7702_bytecodes() {
+        let delegated_address = Address::new([0x01; 20]);
+
+        let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new(delegated_address));
+        let evm_code = EvmCode::from(Bytecode::Eip7702(Eip7702Bytecode::new(delegated_address)));
+        assert!(eq_bytecodes(&bytecode, &evm_code));
+        assert_eq!(bytecode, Bytecode::from(evm_code));
+
+        let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
+        bytes.push(EIP7702_VERSION);
+        bytes.extend(delegated_address);
+        let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(bytes.into()).unwrap());
+        let evm_code = EvmCode::from(bytecode.clone());
+        assert!(eq_bytecodes(&bytecode, &evm_code));
+        assert_eq!(bytecode, Bytecode::from(evm_code));
+
+        let mut eip_bytecode = Eip7702Bytecode::new(delegated_address);
+        eip_bytecode.version = 1;
+        let bytecode = Bytecode::Eip7702(eip_bytecode.clone());
+        let evm_code = EvmCode::from(Bytecode::Eip7702(eip_bytecode));
+        assert!(eq_bytecodes(&bytecode, &evm_code));
+        assert_eq!(bytecode, Bytecode::from(evm_code));
+    }
 }
