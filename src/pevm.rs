@@ -1,17 +1,7 @@
 use std::{
     fmt::Debug,
-    num::NonZeroUsize,
     sync::{mpsc, Mutex, OnceLock},
     thread,
-};
-
-use ahash::AHashMap;
-use alloy_primitives::U256;
-use alloy_rpc_types::{Block, BlockTransactions};
-use revm::{
-    db::CacheDB,
-    primitives::{BlockEnv, SpecId, TxEnv},
-    DatabaseCommit,
 };
 
 use crate::{
@@ -25,6 +15,17 @@ use crate::{
     },
     EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
 };
+use ahash::AHashMap;
+use alloy_primitives::U256;
+use alloy_rpc_types::{Block, BlockTransactions};
+use revm::{
+    db::CacheDB,
+    primitives::{BlockEnv, SpecId, TxEnv},
+    DatabaseCommit,
+};
+use strategy::{ParallelConfig, PevmStrategy};
+
+pub mod strategy;
 
 /// Errors when executing a block with pevm.
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +86,7 @@ impl<T> AsyncDropper<T> {
 pub struct Pevm {
     hasher: ahash::RandomState,
     execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
+    pre_vm_results: Vec<Mutex<Option<Result<VmExecutionResult, VmExecutionError>>>>,
     abort_reason: OnceLock<AbortReason>,
     dropper: AsyncDropper<(MvMemory, Scheduler, Vec<TxEnv>)>,
 }
@@ -97,8 +99,7 @@ impl Pevm {
         storage: &S,
         chain: &C,
         block: Block<C::Transaction>,
-        concurrency_level: NonZeroUsize,
-        force_sequential: bool,
+        strategy: PevmStrategy,
     ) -> PevmResult<C> {
         let spec_id = chain
             .get_block_spec(&block.header)
@@ -112,21 +113,14 @@ impl Pevm {
                 .map_err(PevmError::InvalidTransaction)?,
             _ => return Err(PevmError::MissingTransactionData),
         };
-        // TODO: Continue to fine tune this condition.
-        if force_sequential
-            || tx_envs.len() < concurrency_level.into()
-            || block.header.gas_used < 4_000_000
-        {
-            execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
-        } else {
-            self.execute_revm_parallel(
-                storage,
-                chain,
-                spec_id,
-                block_env,
-                tx_envs,
-                concurrency_level,
-            )
+
+        match strategy {
+            PevmStrategy::Sequential => {
+                execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
+            }
+            PevmStrategy::Parallel { config } => {
+                self.execute_revm_parallel(storage, chain, spec_id, block_env, tx_envs, config)
+            }
         }
     }
 
@@ -140,7 +134,7 @@ impl Pevm {
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
-        concurrency_level: NonZeroUsize,
+        parallel_config: ParallelConfig,
     ) -> PevmResult<C> {
         if txs.is_empty() {
             return Ok(Vec::new());
@@ -168,9 +162,34 @@ impl Pevm {
             }
         }
 
+        self.pre_vm_results.clear();
+        self.pre_vm_results.resize_with(block_size, Mutex::default);
+
+        let priority_txs = parallel_config.get_priority_txs(&txs);
+
         // TODO: Better thread handling
         thread::scope(|scope| {
-            for _ in 0..concurrency_level.into() {
+            for _ in 0..parallel_config.num_threads_for_priority_txs {
+                // run priority threads here
+                scope.spawn(|| {
+                    for tx_idx in priority_txs.iter() {
+                        if !scheduler.has_not_been_touched(*tx_idx) {
+                            continue;
+                        }
+                        let Ok(mut pre_vm_result) =
+                            self.pre_vm_results.get(*tx_idx).unwrap().try_lock()
+                        else {
+                            continue;
+                        };
+                        if pre_vm_result.is_some() {
+                            continue;
+                        }
+                        *pre_vm_result = Some(vm.execute(&TxVersion::new(*tx_idx, 0)));
+                    }
+                });
+            }
+
+            for _ in 0..parallel_config.num_threads_for_regular_txs {
                 scope.spawn(|| {
                     let mut task = scheduler.next_task();
                     while task.is_some() {
@@ -340,7 +359,25 @@ impl Pevm {
         tx_version: TxVersion,
     ) -> Option<Task> {
         loop {
-            return match vm.execute(&tx_version) {
+            let vm_result = {
+                if tx_version.tx_incarnation == 0 {
+                    let mut pre_vm_result = self
+                        .pre_vm_results
+                        .get(tx_version.tx_idx)
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    if let Some(vm_result) = pre_vm_result.take() {
+                        vm_result
+                    } else {
+                        vm.execute(&tx_version)
+                    }
+                } else {
+                    vm.execute(&tx_version)
+                }
+            };
+
+            return match vm_result {
                 Err(VmExecutionError::Retry) => {
                     if self.abort_reason.get().is_none() {
                         continue;
@@ -353,7 +390,7 @@ impl Pevm {
                         .get_or_init(|| AbortReason::FallbackToSequential);
                     None
                 }
-                Err(VmExecutionError::Blocking(blocking_tx_idx )) => {
+                Err(VmExecutionError::Blocking(blocking_tx_idx)) => {
                     if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
                         && self.abort_reason.get().is_none()
                     {

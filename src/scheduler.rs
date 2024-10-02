@@ -105,6 +105,11 @@ impl Scheduler {
         None
     }
 
+    pub(crate) fn has_not_been_touched(&self, tx_idx: TxIdx) -> bool {
+        let tx = index_mutex!(self.transactions_status, tx_idx);
+        tx.incarnation == 0 && tx.status == IncarnationStatus::ReadyToExecute
+    }
+
     pub(crate) fn next_task(&self) -> Option<Task> {
         while !self.aborted.load(Ordering::Acquire) {
             let execution_idx = self.execution_idx.load(Ordering::Acquire);
