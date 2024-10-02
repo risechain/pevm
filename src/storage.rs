@@ -285,9 +285,15 @@ mod tests {
         assert_eq!(bytecode, Bytecode::from(evm_code));
 
         let mut eip_bytecode = Eip7702Bytecode::new(delegated_address);
-        eip_bytecode.version = 1;
-        let bytecode = Bytecode::Eip7702(eip_bytecode.clone());
-        let evm_code = EvmCode::from(Bytecode::Eip7702(eip_bytecode));
+        // Mutate version and raw bytes after construction.
+        let new_version = 5;
+        eip_bytecode.version = new_version;
+        let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
+        bytes.push(new_version);
+        bytes.extend(delegated_address);
+        eip_bytecode.raw = bytes.into();
+        let bytecode = Bytecode::Eip7702(eip_bytecode);
+        let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
         assert_eq!(bytecode, Bytecode::from(evm_code));
     }
