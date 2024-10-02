@@ -272,7 +272,7 @@ mod tests {
         let delegated_address = Address::new([0x01; 20]);
 
         let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new(delegated_address));
-        let evm_code = EvmCode::from(Bytecode::Eip7702(Eip7702Bytecode::new(delegated_address)));
+        let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
         assert_eq!(bytecode, Bytecode::from(evm_code));
 
