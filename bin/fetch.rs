@@ -7,13 +7,12 @@ use std::{
     num::NonZeroUsize,
 };
 
-use flate2::{bufread, write::GzEncoder, Compression};
-
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use clap::Parser;
+use flate2::{bufread, write::GzEncoder, Compression};
 use pevm::{
     chain::{PevmChain, PevmEthereum},
     EvmAccount, EvmCode, Pevm, RpcStorage,
@@ -76,15 +75,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Populate bytecodes and state from RPC storage.
     let mut state = BTreeMap::<Address, EvmAccount>::new();
+    // TODO: Deduplicate logic with [for_each_block_from_disk] when there is more usage
     let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode.gz") {
         Ok(compressed_file) => {
-            let mut decoder = bufread::GzDecoder::new(BufReader::new(compressed_file));
-            bincode::deserialize_from(&mut decoder)
+            bincode::deserialize_from(bufread::GzDecoder::new(BufReader::new(compressed_file)))
                 .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?
         }
         Err(_) => BTreeMap::new(),
     };
-
+    // let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode") {
+    //     Ok(file) => bincode::deserialize_from(BufReader::new(file))
+    //         .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?,
+    //     Err(_) => BTreeMap::new(),
+    // };
     bytecodes.extend(storage.get_cache_bytecodes());
     for (address, mut account) in storage.get_cache_accounts() {
         if let Some(code) = account.code.take() {
@@ -98,13 +101,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Write compressed bytecodes to disk.
-    let serialized = bincode::serialize(&bytecodes)?;
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(&serialized)?;
-    let compressed = encoder.finish()?;
-    let mut file_compressed_bytecodes = File::create("data/bytecodes.bincode.gz")
+    let file_bytecodes = File::create("data/bytecodes.bincode.gz")
         .map_err(|err| format!("Failed to create compressed bytecodes file: {err}"))?;
-    file_compressed_bytecodes.write_all(&compressed)?;
+    let serialized_bytecodes = bincode::serialize(&bytecodes)
+        .map_err(|err| format!("Failed to serialize bytecodes to bincode: {err}"))?;
+    GzEncoder::new(file_bytecodes, Compression::default())
+        .write_all(&serialized_bytecodes)
+        .map_err(|err| format!("Failed to write bytecodes to file: {err}"))?;
 
     // Write pre-state to disk.
     let file_state = File::create(format!("{block_dir}/pre_state.json"))
