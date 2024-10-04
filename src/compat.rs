@@ -17,8 +17,6 @@ pub(crate) fn get_block_env(header: &Header) -> BlockEnv {
         basefee: U256::from(header.base_fee_per_gas.unwrap_or_default()),
         difficulty: header.difficulty,
         prevrandao: header.mix_hash,
-        blob_excess_gas_and_price: header
-            .excess_blob_gas
-            .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64)),
+        blob_excess_gas_and_price: header.excess_blob_gas.map(BlobExcessGasAndPrice::new),
     }
 }
