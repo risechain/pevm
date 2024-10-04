@@ -83,11 +83,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Err(_) => BTreeMap::new(),
     };
-    // let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode") {
-    //     Ok(file) => bincode::deserialize_from(BufReader::new(file))
-    //         .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?,
-    //     Err(_) => BTreeMap::new(),
-    // };
     bytecodes.extend(storage.get_cache_bytecodes());
     for (address, mut account) in storage.get_cache_accounts() {
         if let Some(code) = account.code.take() {
