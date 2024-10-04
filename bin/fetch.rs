@@ -3,7 +3,7 @@ use std::{
     collections::BTreeMap,
     error::Error,
     fs::{self, File},
-    io::BufReader,
+    io::{BufReader, Write},
     num::NonZeroUsize,
 };
 
@@ -12,6 +12,7 @@ use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use clap::Parser;
+use flate2::{bufread::GzDecoder, write::GzEncoder, Compression};
 use pevm::{
     chain::{PevmChain, PevmEthereum},
     EvmAccount, EvmCode, Pevm, RpcStorage,
@@ -74,9 +75,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Populate bytecodes and state from RPC storage.
     let mut state = BTreeMap::<Address, EvmAccount>::new();
-    let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode") {
-        Ok(file) => bincode::deserialize_from(BufReader::new(file))
-            .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?,
+    // TODO: Deduplicate logic with [for_each_block_from_disk] when there is more usage
+    let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode.gz") {
+        Ok(compressed_file) => {
+            bincode::deserialize_from(GzDecoder::new(BufReader::new(compressed_file)))
+                .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?
+        }
         Err(_) => BTreeMap::new(),
     };
     bytecodes.extend(storage.get_cache_bytecodes());
@@ -91,10 +95,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         state.insert(address, account);
     }
 
-    // Write bytecodes to disk.
-    let file_bytecodes = File::create("data/bytecodes.bincode")
-        .map_err(|err| format!("Failed to create bytecodes file: {err}"))?;
-    bincode::serialize_into(file_bytecodes, &bytecodes)
+    // Write compressed bytecodes to disk.
+    let file_bytecodes = File::create("data/bytecodes.bincode.gz")
+        .map_err(|err| format!("Failed to create compressed bytecodes file: {err}"))?;
+    let serialized_bytecodes = bincode::serialize(&bytecodes)
+        .map_err(|err| format!("Failed to serialize bytecodes to bincode: {err}"))?;
+    GzEncoder::new(file_bytecodes, Compression::default())
+        .write_all(&serialized_bytecodes)
         .map_err(|err| format!("Failed to write bytecodes to file: {err}"))?;
 
     // Write pre-state to disk.

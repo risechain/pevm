@@ -6,6 +6,7 @@ use std::{
 
 use alloy_primitives::{uint, Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, BlockTransactions, Header, Signature};
+use flate2::bufread::GzDecoder;
 use pevm::{chain::PevmChain, BlockHashes, Bytecodes, EvmAccount, InMemoryStorage};
 
 pub mod runner;
@@ -51,10 +52,10 @@ pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
 pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
-    // Parse bytecodes
-    let bytecodes: Bytecodes = bincode::deserialize_from(BufReader::new(
-        File::open("data/bytecodes.bincode").unwrap(),
-    ))
+    // TODO: Deduplicate logic with [bin/fetch.rs] when there is more usage
+    let bytecodes: Bytecodes = bincode::deserialize_from(GzDecoder::new(BufReader::new(
+        File::open("data/bytecodes.bincode.gz").unwrap(),
+    )))
     .unwrap();
 
     for block_path in fs::read_dir("data/blocks").unwrap() {
