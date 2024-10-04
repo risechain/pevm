@@ -45,6 +45,7 @@ pub enum OptimismTransactionParsingError {
     MissingGasPrice,
     MissingMaxFeePerGas,
     MissingSourceHash,
+    OverflowedGasLimit,
     SerdeError(String),
 }
 
@@ -280,7 +281,11 @@ impl PevmChain for PevmOptimism {
         Ok(TxEnv {
             optimism: get_optimism_fields(&tx)?,
             caller: tx.inner.from,
-            gas_limit: tx.inner.gas,
+            gas_limit: tx
+                .inner
+                .gas
+                .try_into()
+                .map_err(|_| OptimismTransactionParsingError::OverflowedGasLimit)?,
             gas_price: get_optimism_gas_price(&tx)?,
             gas_priority_fee: tx.inner.max_priority_fee_per_gas.map(U256::from),
             transact_to: tx.inner.to.into(),

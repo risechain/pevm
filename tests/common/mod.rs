@@ -19,7 +19,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     timestamp: 1710338135,
     mix_hash: Some(B256::ZERO),
     excess_blob_gas: Some(0),
-    gas_limit: u64::MAX,
+    gas_limit: u128::MAX,
     // Defaults
     hash: B256::ZERO,
     parent_hash: B256::ZERO,
@@ -108,7 +108,7 @@ where
                         from: *address,
                         to: Some(*address),
                         value: U256::from(1),
-                        gas: RAW_TRANSFER_GAS_LIMIT,
+                        gas: RAW_TRANSFER_GAS_LIMIT.into(),
                         max_fee_per_gas: Some(1),
                         max_priority_fee_per_gas: Some(0),
                         nonce: account.nonce,
