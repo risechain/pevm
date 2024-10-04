@@ -308,7 +308,8 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                                 }
                                 MemoryValue::LazyRecipient(addition) => {
                                     if positive_addition {
-                                        balance_addition =balance_addition.saturating_add(*addition);
+                                        balance_addition =
+                                            balance_addition.saturating_add(*addition);
                                     } else {
                                         positive_addition = *addition >= balance_addition;
                                         balance_addition = balance_addition.abs_diff(*addition);
@@ -319,7 +320,8 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                                         positive_addition = balance_addition >= *subtraction;
                                         balance_addition = balance_addition.abs_diff(*subtraction);
                                     } else {
-                                        balance_addition =balance_addition.saturating_add(*subtraction);
+                                        balance_addition =
+                                            balance_addition.saturating_add(*subtraction);
                                     }
                                     nonce_addition += 1;
                                 }
@@ -368,7 +370,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         if let Some(mut account) = final_account {
             // Check sender nonce
-            account.nonce =account.nonce.saturating_add(nonce_addition);
+            account.nonce += nonce_addition;
             if location_hash == self.from_hash
                 && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
             {
@@ -717,7 +719,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         #[cfg(feature = "optimism")] evm_context: &EvmContext<DB>,
     ) -> Result<(), VmExecutionError> {
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
-            std::cmp::min(tx.gas_price, priority_fee.saturating_add(self.block_env.basefee))
+            std::cmp::min(
+                tx.gas_price,
+                priority_fee.saturating_add(self.block_env.basefee),
+            )
         } else {
             tx.gas_price
         };
@@ -727,7 +732,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
         let rewards: SmallVec<[(MemoryLocationHash, U256); 1]> = match self.reward_policy {
             RewardPolicy::Ethereum => {
-                smallvec![(self.beneficiary_location_hash, gas_price * gas_used)]
+                smallvec![(
+                    self.beneficiary_location_hash,
+                    gas_price.saturating_mul(gas_used)
+                )]
             }
             #[cfg(feature = "optimism")]
             RewardPolicy::Optimism {
@@ -766,9 +774,15 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 .find(|(location, _)| location == &recipient)
             {
                 match value {
-                    MemoryValue::Basic(basic) => basic.balance =basic.balance.saturating_add(amount),
-                    MemoryValue::LazySender(addition) => *addition =addition.saturating_sub(amount),
-                    MemoryValue::LazyRecipient(addition) => *addition =addition.saturating_add(amount),
+                    MemoryValue::Basic(basic) => {
+                        basic.balance = basic.balance.saturating_add(amount)
+                    }
+                    MemoryValue::LazySender(subtraction) => {
+                        *subtraction = subtraction.saturating_sub(amount)
+                    }
+                    MemoryValue::LazyRecipient(addition) => {
+                        *addition = addition.saturating_add(amount)
+                    }
                     _ => return Err(ReadError::InvalidMemoryValueType.into()),
                 }
             } else {
