@@ -12,7 +12,7 @@ use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use clap::Parser;
-use flate2::{bufread, write::GzEncoder, Compression};
+use flate2::{bufread::GzDecoder, write::GzEncoder, Compression};
 use pevm::{
     chain::{PevmChain, PevmEthereum},
     EvmAccount, EvmCode, Pevm, RpcStorage,
@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // TODO: Deduplicate logic with [for_each_block_from_disk] when there is more usage
     let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode.gz") {
         Ok(compressed_file) => {
-            bincode::deserialize_from(bufread::GzDecoder::new(BufReader::new(compressed_file)))
+            bincode::deserialize_from(GzDecoder::new(BufReader::new(compressed_file)))
                 .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?
         }
         Err(_) => BTreeMap::new(),
