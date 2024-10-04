@@ -47,8 +47,6 @@ pub enum EthereumBlockSpecError {
 /// Represents errors that can occur when parsing transactions
 #[derive(Debug, Clone, PartialEq)]
 pub enum EthereumTransactionParsingError {
-    /// [tx.gas] is overflowed.
-    OverflowedGasLimit,
     /// [tx.type] is invalid.
     InvalidType(u8),
     /// [tx.gas_price] is none.
@@ -136,10 +134,7 @@ impl PevmChain for PevmEthereum {
     fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, EthereumTransactionParsingError> {
         Ok(TxEnv {
             caller: tx.from,
-            gas_limit: tx
-                .gas
-                .try_into()
-                .map_err(|_| EthereumTransactionParsingError::OverflowedGasLimit)?,
+            gas_limit: tx.gas,
             gas_price: get_ethereum_gas_price(&tx)?,
             gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
             transact_to: tx.to.into(),

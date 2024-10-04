@@ -27,7 +27,7 @@ type RpcProvider<N> = RootProvider<Http<Client>, N>;
 
 /// A storage that fetches state data via RPC for execution.
 #[derive(Debug)]
-pub struct RpcStorage<N> {
+pub struct RpcStorage<N: Network> {
     provider: RpcProvider<N>,
     block_id: BlockId,
     precompiles: &'static Precompiles,
@@ -44,7 +44,7 @@ pub struct RpcStorage<N> {
     runtime: Runtime,
 }
 
-impl<N> RpcStorage<N> {
+impl<N: Network> RpcStorage<N> {
     /// Create a new RPC Storage
     pub fn new(provider: RpcProvider<N>, spec_id: SpecId, block_id: BlockId) -> Self {
         RpcStorage {
