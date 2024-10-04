@@ -61,7 +61,11 @@ fn build_block_env(env: &Env) -> BlockEnv {
     }
 }
 
-fn build_tx_env(path: &Path, tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv, ParseError> {
+fn build_tx_env(
+    path: &Path,
+    tx: &TransactionParts,
+    indexes: &TxPartIndices,
+) -> Result<TxEnv, ParseError> {
     Ok(TxEnv {
         caller: if let Some(address) = tx.sender {
             address

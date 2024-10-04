@@ -160,8 +160,8 @@ impl Pevm {
             spec_id,
         );
 
-        if block_size > self.execution_results.len() {
-            let additional = block_size - self.execution_results.len();
+        let additional = block_size.saturating_sub(self.execution_results.len());
+        if additional > 0 {
             self.execution_results.reserve(additional);
             for _ in 0..additional {
                 self.execution_results.push(Mutex::new(None));
@@ -218,7 +218,8 @@ impl Pevm {
         let mut cumulative_gas_used: u128 = 0;
         for i in 0..block_size {
             let mut execution_result = index_mutex!(self.execution_results, i).take().unwrap();
-            cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
+            cumulative_gas_used =
+                cumulative_gas_used.saturating_add(execution_result.receipt.cumulative_gas_used);
             execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
             fully_evaluated_results.push(execution_result);
         }
@@ -265,28 +266,29 @@ impl Pevm {
                             nonce = info.nonce;
                         }
                         MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
-                            balance += addition;
+                            balance = balance.saturating_add(*addition);
                         }
-                        MemoryEntry::Data(_, MemoryValue::LazySender(addition)) => {
+                        MemoryEntry::Data(_, MemoryValue::LazySender(subtraction)) => {
                             // We must re-do extra sender balance checks as we mock
                             // the max value in [Vm] during execution. Ideally we
                             // can turn off these redundant checks in revm.
-                            // TODO: Guard against overflows & underflows
                             // Ideally we would share these calculations with revm
                             // (using their utility functions).
-                            let mut max_fee = U256::from(tx.gas_limit) * tx.gas_price + tx.value;
+                            let mut max_fee = U256::from(tx.gas_limit)
+                                .saturating_mul(tx.gas_price)
+                                .saturating_add(tx.value);
                             if let Some(blob_fee) = tx.max_fee_per_blob_gas {
-                                max_fee +=
-                                    U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee);
+                                max_fee = max_fee.saturating_add(
+                                    U256::from(tx.get_total_blob_gas())
+                                        .saturating_mul(U256::from(blob_fee)),
+                                );
                             }
                             if balance < max_fee {
                                 return Err(PevmError::ExecutionError(
                                     "Transaction(LackOfFundForMaxFee)".to_string(),
                                 ));
                             }
-                            balance -= addition;
-                            // End of overflow TODO
-
+                            balance = balance.saturating_sub(*subtraction);
                             nonce += 1;
                         }
                         // TODO: Better error handling
@@ -353,7 +355,7 @@ impl Pevm {
                         .get_or_init(|| AbortReason::FallbackToSequential);
                     None
                 }
-                Err(VmExecutionError::Blocking(blocking_tx_idx )) => {
+                Err(VmExecutionError::Blocking(blocking_tx_idx)) => {
                     if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
                         && self.abort_reason.get().is_none()
                     {
@@ -418,7 +420,8 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
                 let mut execution_result =
                     PevmTxExecutionResult::from_revm(chain, spec_id, result_and_state);
 
-                cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
+                cumulative_gas_used = cumulative_gas_used
+                    .saturating_add(execution_result.receipt.cumulative_gas_used);
                 execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
 
                 results.push(execution_result);
