@@ -274,12 +274,13 @@ impl Pevm {
                             // can turn off these redundant checks in revm.
                             // Ideally we would share these calculations with revm
                             // (using their utility functions).
-                            let mut max_fee = (U256::from(tx.gas_limit)
-                                .saturating_mul(tx.gas_price))
-                            .saturating_add(tx.value);
+                            let mut max_fee = U256::from(tx.gas_limit)
+                                .saturating_mul(tx.gas_price)
+                                .saturating_add(tx.value);
                             if let Some(blob_fee) = tx.max_fee_per_blob_gas {
                                 max_fee = max_fee.saturating_add(
-                                    U256::from(tx.get_total_blob_gas()) * U256::from(blob_fee),
+                                    U256::from(tx.get_total_blob_gas())
+                                        .saturating_mul(U256::from(blob_fee)),
                                 );
                             }
                             if balance < max_fee {
@@ -288,8 +289,6 @@ impl Pevm {
                                 ));
                             }
                             balance = balance.saturating_sub(*subtraction);
-                            // End of overflow TODO
-
                             nonce += 1;
                         }
                         // TODO: Better error handling

@@ -757,11 +757,14 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     let l1_cost = l1_block_info.calculate_tx_l1_cost(enveloped_tx, self.spec_id);
 
                     smallvec![
-                        (self.beneficiary_location_hash, gas_price * gas_used),
+                        (
+                            self.beneficiary_location_hash,
+                            gas_price.saturating_mul(gas_used)
+                        ),
                         (l1_fee_recipient_location_hash, l1_cost),
                         (
                             base_fee_vault_location_hash,
-                            self.block_env.basefee * gas_used,
+                            self.block_env.basefee.saturating_mul(gas_used),
                         ),
                     ]
                 }
