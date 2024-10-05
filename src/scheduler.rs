@@ -88,7 +88,7 @@ impl Scheduler {
     }
 
     pub(crate) fn abort(&self) {
-        self.aborted.store(true, Ordering::Release);
+        self.aborted.store(true, Ordering::Relaxed);
     }
 
     fn try_execute(&self, tx_idx: TxIdx) -> Option<TxVersion> {
@@ -106,12 +106,12 @@ impl Scheduler {
     }
 
     pub(crate) fn next_task(&self) -> Option<Task> {
-        while !self.aborted.load(Ordering::Acquire) {
-            let execution_idx = self.execution_idx.load(Ordering::Acquire);
-            let validation_idx = self.validation_idx.load(Ordering::Acquire);
+        while !self.aborted.load(Ordering::Relaxed) {
+            let execution_idx = self.execution_idx.load(Ordering::Relaxed);
+            let validation_idx = self.validation_idx.load(Ordering::Relaxed);
             if execution_idx >= self.block_size && validation_idx >= self.block_size {
-                if self.num_validated.load(Ordering::Acquire)
-                    >= self.block_size - self.min_validation_idx.load(Ordering::Acquire)
+                if self.num_validated.load(Ordering::Relaxed)
+                    >= self.block_size - self.min_validation_idx.load(Ordering::Relaxed)
                 {
                     break;
                 }
@@ -121,7 +121,7 @@ impl Scheduler {
 
             // Prioritize a validation task to minimize re-execution
             if validation_idx < execution_idx {
-                let tx_idx = self.validation_idx.fetch_add(1, Ordering::Release);
+                let tx_idx = self.validation_idx.fetch_add(1, Ordering::Relaxed);
                 if tx_idx < self.block_size {
                     let mut tx = index_mutex!(self.transactions_status, tx_idx);
                     // "Steal" execution job while holding the lock
@@ -156,7 +156,7 @@ impl Scheduler {
 
             // Prioritize execution task
             if let Some(tx_version) =
-                self.try_execute(self.execution_idx.fetch_add(1, Ordering::Release))
+                self.try_execute(self.execution_idx.fetch_add(1, Ordering::Relaxed))
             {
                 return Some(Task::Execution(tx_version));
             }
@@ -209,7 +209,7 @@ impl Scheduler {
         let mut dependents = index_mutex!(self.transactions_dependents, tx_version.tx_idx);
         for tx_idx in dependents.drain(..) {
             self.set_ready_status(tx_idx);
-            self.execution_idx.fetch_min(tx_idx, Ordering::Release);
+            self.execution_idx.fetch_min(tx_idx, Ordering::Relaxed);
         }
 
         // TODO: Simplify or better document this logic.
@@ -217,11 +217,11 @@ impl Scheduler {
         let min_validation_idx = if flags.contains(FinishExecFlags::NeedValidation) {
             min(
                 self.min_validation_idx
-                    .fetch_min(tx_version.tx_idx, Ordering::Release),
+                    .fetch_min(tx_version.tx_idx, Ordering::Relaxed),
                 tx_version.tx_idx,
             )
         } else {
-            self.min_validation_idx.load(Ordering::Acquire)
+            self.min_validation_idx.load(Ordering::Relaxed)
         };
         // Have found a min validation index to even bother
         if min_validation_idx < self.block_size {
@@ -229,22 +229,22 @@ impl Scheduler {
             if tx_version.tx_idx < min_validation_idx {
                 if flags.contains(FinishExecFlags::WroteNewLocation) {
                     self.validation_idx
-                        .fetch_min(min_validation_idx, Ordering::Release);
+                        .fetch_min(min_validation_idx, Ordering::Relaxed);
                 }
             }
             // Validate from this transaction as it's in between min and the current
             // validation index.
-            else if tx_version.tx_idx < self.validation_idx.load(Ordering::Acquire) {
+            else if tx_version.tx_idx < self.validation_idx.load(Ordering::Relaxed) {
                 if flags.contains(FinishExecFlags::WroteNewLocation) {
                     self.validation_idx
-                        .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
+                        .fetch_min(tx_version.tx_idx + 1, Ordering::Relaxed);
                 }
                 if flags.contains(FinishExecFlags::NeedValidation) {
                     tx.status = IncarnationStatus::Executed;
                     return Some(Task::Validation(tx_version));
                 } else {
                     tx.status = IncarnationStatus::Validated;
-                    self.num_validated.fetch_add(1, Ordering::Release);
+                    self.num_validated.fetch_add(1, Ordering::Relaxed);
                 }
             }
             // Don't need to validate anything if the current validation index is
@@ -255,7 +255,7 @@ impl Scheduler {
             tx.status = IncarnationStatus::Executed;
         } else {
             tx.status = IncarnationStatus::Validated;
-            self.num_validated.fetch_add(1, Ordering::Release);
+            self.num_validated.fetch_add(1, Ordering::Relaxed);
         }
         None
     }
@@ -267,7 +267,7 @@ impl Scheduler {
     pub(crate) fn try_validation_abort(&self, tx_version: &TxVersion) -> bool {
         let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
         if tx.status == IncarnationStatus::Validated {
-            self.num_validated.fetch_sub(1, Ordering::Release);
+            self.num_validated.fetch_sub(1, Ordering::Relaxed);
         }
 
         let aborting = matches!(
@@ -287,15 +287,15 @@ impl Scheduler {
         if aborted {
             self.set_ready_status(tx_version.tx_idx);
             self.validation_idx
-                .fetch_min(tx_version.tx_idx + 1, Ordering::Release);
-            if self.execution_idx.load(Ordering::Acquire) > tx_version.tx_idx {
+                .fetch_min(tx_version.tx_idx + 1, Ordering::Relaxed);
+            if self.execution_idx.load(Ordering::Relaxed) > tx_version.tx_idx {
                 return self.try_execute(tx_version.tx_idx).map(Task::Execution);
             }
         } else {
             let mut tx = index_mutex!(self.transactions_status, tx_version.tx_idx);
             if tx.status == IncarnationStatus::Executed {
                 tx.status = IncarnationStatus::Validated;
-                self.num_validated.fetch_add(1, Ordering::Release);
+                self.num_validated.fetch_add(1, Ordering::Relaxed);
             }
         }
         None
