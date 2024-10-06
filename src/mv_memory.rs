@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{btree_map, BTreeMap, HashSet},
     sync::Mutex,
 };
 
@@ -112,10 +112,25 @@ impl MvMemory {
         let mut wrote_new_location = false;
 
         for (location, value) in write_set {
-            self.data.entry(location).or_default().insert(
-                tx_version.tx_idx,
-                MemoryEntry::Data(tx_version.tx_incarnation, value),
-            );
+            match self
+                .data
+                .entry(location)
+                .or_default()
+                .entry(tx_version.tx_idx)
+            {
+                btree_map::Entry::Vacant(v) => {
+                    v.insert(MemoryEntry::Data(tx_version.tx_incarnation, value));
+                }
+                btree_map::Entry::Occupied(mut o) => match o.get_mut() {
+                    MemoryEntry::Data(i, v) => {
+                        *i = tx_version.tx_incarnation;
+                        *v = value;
+                    }
+                    MemoryEntry::Estimate => {
+                        o.insert(MemoryEntry::Data(tx_version.tx_incarnation, value));
+                    }
+                },
+            }
             if !last_locations.write.contains(&location) {
                 last_locations.write.push(location);
                 wrote_new_location = true;
