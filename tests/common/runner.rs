@@ -2,10 +2,13 @@ use alloy_primitives::Bloom;
 use alloy_rpc_types::Block;
 use pevm::{
     chain::{CalculateReceiptRootError, PevmChain, PevmEthereum},
-    EvmAccount, Pevm, Storage,
+    EvmAccount, Pevm, PevmTxExecutionResult,
 };
-use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
-use std::{num::NonZeroUsize, thread};
+use revm::{
+    primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256},
+    DatabaseRef,
+};
+use std::{fmt::Display, num::NonZeroUsize, thread};
 
 // Mock an account from an integer index that is used as the address.
 // Useful for mock iterations.
@@ -23,7 +26,10 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
 
 // Execute an REVM block sequentially & with PEVM and assert that
 // the execution results match.
-pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) {
+pub fn test_execute_revm<S: DatabaseRef<Error: Display> + Send + Sync>(
+    storage: S,
+    txs: Vec<TxEnv>,
+) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_eq!(
         pevm::execute_revm_sequential(
@@ -46,7 +52,10 @@ pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) 
 
 // Execute an Alloy block sequentially & with pevm and assert that
 // the execution results match.
-pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync + PartialEq>(
+pub fn test_execute_alloy<
+    S: DatabaseRef<Error: Display> + Send + Sync,
+    C: PevmChain + Send + Sync + PartialEq,
+>(
     storage: &S,
     chain: &C,
     block: Block<C::Transaction>,
@@ -58,7 +67,18 @@ pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync +
     let parallel_result = pevm.execute(storage, chain, block.clone(), concurrency_level, false);
     assert_eq!(&sequential_result, &parallel_result);
 
-    let tx_results = sequential_result.unwrap();
+    let spec_id = chain.get_block_spec(&block.header).unwrap();
+    let mut cumulative_gas_used: u128 = 0;
+    let tx_results = sequential_result
+        .unwrap()
+        .into_iter()
+        .map(|result_and_state| {
+            let mut result = PevmTxExecutionResult::from_revm(chain, spec_id, result_and_state);
+            result.receipt.cumulative_gas_used += cumulative_gas_used;
+            cumulative_gas_used = result.receipt.cumulative_gas_used;
+            result
+        })
+        .collect::<Vec<_>>();
     if must_match_block_header {
         let spec_id = chain.get_block_spec(&block.header).unwrap();
 

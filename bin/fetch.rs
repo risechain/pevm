@@ -15,7 +15,7 @@ use clap::Parser;
 use flate2::{bufread::GzDecoder, write::GzEncoder, Compression};
 use pevm::{
     chain::{PevmChain, PevmEthereum},
-    EvmAccount, EvmCode, Pevm, RpcStorage,
+    EvmAccount, EvmCode, Pevm, RpcStorage, StorageWrapper,
 };
 use reqwest::Url;
 use tokio::runtime::Runtime;
@@ -55,10 +55,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
     })?;
     let storage = RpcStorage::new(provider, spec_id, BlockId::number(block.header.number - 1));
+    let wrapped_storage = StorageWrapper(&storage);
 
     // Execute the block and track the pre-state in the RPC storage.
     Pevm::default()
-        .execute(&storage, &chain, block.clone(), NonZeroUsize::MIN, true)
+        .execute(
+            &wrapped_storage,
+            &chain,
+            block.clone(),
+            NonZeroUsize::MIN,
+            true,
+        )
         .map_err(|err| format!("Failed to execute block: {:?}", err))?;
 
     let block_dir = format!("data/blocks/{}", block.header.number);

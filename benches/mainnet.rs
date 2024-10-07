@@ -7,7 +7,7 @@
 use std::{num::NonZeroUsize, thread};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::{chain::PevmEthereum, Pevm};
+use pevm::{chain::PevmEthereum, Pevm, StorageWrapper};
 
 // Better project structure
 #[path = "../tests/common/mod.rs"]
@@ -41,6 +41,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let mut pevm = Pevm::default();
 
     common::for_each_block_from_disk(|block, storage| {
+        let db = StorageWrapper(&storage);
         let mut group = c.benchmark_group(format!(
             "Block {}({} txs, {} gas)",
             block.header.number,
@@ -50,7 +51,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Sequential", |b| {
             b.iter(|| {
                 pevm.execute(
-                    black_box(&storage),
+                    black_box(&db),
                     black_box(&chain),
                     black_box(block.clone()),
                     black_box(concurrency_level),
@@ -61,7 +62,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Parallel", |b| {
             b.iter(|| {
                 pevm.execute(
-                    black_box(&storage),
+                    black_box(&db),
                     black_box(&chain),
                     black_box(block.clone()),
                     black_box(concurrency_level),
