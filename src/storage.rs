@@ -120,9 +120,7 @@ impl From<EvmCode> for Bytecode {
                     raw: raw.into(),
                 })
             }
-            EvmCode::Eof(code) => Eof::decode(code)
-                .map(|eof| Bytecode::Eof(Arc::new(eof)))
-                .unwrap_or_else(|_| Bytecode::Eof(Arc::new(Eof::default()))),
+            EvmCode::Eof(code) => Bytecode::Eof(Arc::new(Eof::decode(code).unwrap())),
         }
     }
 }
