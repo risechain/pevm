@@ -92,10 +92,6 @@ pub struct Eip7702Code {
     version: u8,
 }
 
-/// EVM Object Format (EOF) code.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EofCode(Bytes);
-
 /// EVM Code, currently mapping to REVM's [ByteCode].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EvmCode {
@@ -104,9 +100,10 @@ pub enum EvmCode {
     /// Maps delegated EIP7702 bytecode.
     Eip7702(Eip7702Code),
     /// Maps EOF bytecode.
-    Eof(EofCode),
+    Eof(Bytes),
 }
 
+// TODO: Rewrite as [TryFrom]
 impl From<EvmCode> for Bytecode {
     fn from(code: EvmCode) -> Self {
         match code {
@@ -123,7 +120,7 @@ impl From<EvmCode> for Bytecode {
                     raw: raw.into(),
                 })
             }
-            EvmCode::Eof(eof_code) => Eof::decode(eof_code.0.clone())
+            EvmCode::Eof(code) => Eof::decode(code)
                 .map(|eof| Bytecode::Eof(Arc::new(eof)))
                 .unwrap_or_else(|_| Bytecode::Eof(Arc::new(Eof::default()))),
         }
@@ -144,7 +141,7 @@ impl From<Bytecode> for EvmCode {
                 delegated_address: code.delegated_address,
                 version: code.version,
             }),
-            Bytecode::Eof(code) => EvmCode::Eof(EofCode(code.raw.clone())),
+            Bytecode::Eof(code) => EvmCode::Eof(Arc::unwrap_or_clone(code).raw),
         }
     }
 }
@@ -313,7 +310,7 @@ mod tests {
 
     #[test]
     fn eof_bytecodes() {
-        let bytecode = Bytecode::Eof(Arc::new(Eof::decode(EOF_BYTECODE.clone()).unwrap()));
+        let bytecode = Bytecode::Eof(Arc::new(Eof::decode(EOF_BYTECODE).unwrap()));
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
         assert_eq!(bytecode, Bytecode::from(evm_code));
