@@ -109,13 +109,17 @@ enum BytecodeConversionError {
     EofDecodingError,
 }
 
-impl TryFrom<EvmCode> for Bytecode{
+impl TryFrom<EvmCode> for Bytecode {
     type Error = BytecodeConversionError;
     fn try_from(code: EvmCode) -> Result<Self, Self::Error> {
         match code {
-            EvmCode::Legacy(code) => unsafe{
-                Ok(Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table)))
-            }
+            EvmCode::Legacy(code) => unsafe {
+                Ok(Bytecode::new_analyzed(
+                    code.bytecode,
+                    code.original_len,
+                    JumpTable(code.jump_table),
+                ))
+            },
             EvmCode::Eip7702(code) => {
                 let mut raw = EIP7702_MAGIC_BYTES.to_vec();
                 raw.push(code.version);
@@ -127,8 +131,8 @@ impl TryFrom<EvmCode> for Bytecode{
                 }))
             }
             EvmCode::Eof(code) => Eof::decode(code)
-            .map(|eof| Bytecode::Eof(Arc::new(eof)))
-            .map_err(|_| BytecodeConversionError::EofDecodingError),
+                .map(|eof| Bytecode::Eof(Arc::new(eof)))
+                .map_err(|_| BytecodeConversionError::EofDecodingError),
         }
     }
 }
