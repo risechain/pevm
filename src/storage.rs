@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use ahash::AHashMap;
@@ -103,11 +104,20 @@ pub enum EvmCode {
     Eof(Bytes),
 }
 
-#[derive(Debug)]
-enum BytecodeConversionError {
-    /// Error when decoding Eof
+#[derive(Debug, PartialEq)]
+pub enum BytecodeConversionError {
     EofDecodingError,
 }
+
+impl fmt::Display for BytecodeConversionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BytecodeConversionError::EofDecodingError => write!(f, "Error decoding EOF bytecode"),
+        }
+    }
+}
+
+
 
 impl TryFrom<EvmCode> for Bytecode {
     type Error = BytecodeConversionError;
@@ -201,28 +211,32 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
     type Error = S::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(if let Some(basic) = self.0.basic(&address)? {
-            let code_hash = self.0.code_hash(&address)?;
-            let code = if let Some(code_hash) = &code_hash {
-                self.0.code_by_hash(code_hash)?.map(Bytecode::from)
-            } else {
-                None
-            };
-            Some(AccountInfo {
+        let basic = self.0.basic(&address)?;
+        
+        Ok(basic.map(|basic| {
+            let code_hash = self.0.code_hash(&address).ok().flatten();
+            let code = code_hash.as_ref()
+                .and_then(|hash| self.0.code_by_hash(hash).ok().flatten())
+                .map(|c| Bytecode::try_from(c).unwrap_or_default());
+
+            AccountInfo {
                 balance: basic.balance,
                 nonce: basic.nonce,
                 code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
                 code,
-            })
-        } else {
-            None
-        })
+            }
+        }))
     }
+
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.0
             .code_by_hash(&code_hash)
-            .map(|code| code.map(Bytecode::from).unwrap_or_default())
+            .map(|code_option| {
+                code_option
+                    .map(|c| Bytecode::try_from(c).unwrap_or_default())
+                    .unwrap_or_default()
+            })
     }
 
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
@@ -280,11 +294,11 @@ mod tests {
 
         let evm_code = EvmCode::from(analyzed.clone());
         assert!(eq_bytecodes(&analyzed, &evm_code));
-        assert_eq!(analyzed, Bytecode::from(evm_code));
+        assert_eq!(analyzed, evm_code.try_into().unwrap());
 
         let evm_code = EvmCode::from(contract_bytecode);
         assert!(eq_bytecodes(&analyzed, &evm_code));
-        assert_eq!(analyzed, Bytecode::from(evm_code));
+        assert_eq!(analyzed, evm_code.try_into().unwrap());
     }
 
     #[test]
@@ -294,7 +308,7 @@ mod tests {
         let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new(delegated_address));
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, Bytecode::from(evm_code));
+        assert_eq!(bytecode, evm_code.try_into().unwrap());
 
         let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
         bytes.push(EIP7702_VERSION);
@@ -302,7 +316,7 @@ mod tests {
         let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(bytes.into()).unwrap());
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, Bytecode::from(evm_code));
+        assert_eq!(bytecode, Bytecode::try_from(evm_code).unwrap());
 
         let mut eip_bytecode = Eip7702Bytecode::new(delegated_address);
         // Mutate version and raw bytes after construction.
@@ -315,7 +329,7 @@ mod tests {
         let bytecode = Bytecode::Eip7702(eip_bytecode);
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, Bytecode::from(evm_code));
+        assert_eq!(bytecode, evm_code.try_into().unwrap());
     }
 
     #[test]
@@ -323,6 +337,16 @@ mod tests {
         let bytecode = Bytecode::Eof(Arc::new(Eof::decode(EOF_BYTECODE).unwrap()));
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, Bytecode::from(evm_code));
+        assert_eq!(bytecode, evm_code.try_into().unwrap());
+    }
+    #[test]
+    fn eof_bytecodes_error() {
+        let dangling_data = bytes!("010203").to_vec();
+        let mut eof_dangling = EOF_BYTECODE.to_vec();
+        eof_dangling.extend(dangling_data);
+        let evm_code = EvmCode::Eof(eof_dangling.into());
+        let byte_code = Bytecode::try_from(evm_code);
+        assert_eq!(byte_code.unwrap_err(), BytecodeConversionError::EofDecodingError);
+
     }
 }
