@@ -103,24 +103,32 @@ pub enum EvmCode {
     Eof(Bytes),
 }
 
-// TODO: Rewrite as [TryFrom]
-impl From<EvmCode> for Bytecode {
-    fn from(code: EvmCode) -> Self {
+#[derive(Debug)]
+enum BytecodeConversionError {
+    /// Error when decoding Eof
+    EofDecodingError,
+}
+
+impl TryFrom<EvmCode> for Bytecode{
+    type Error = BytecodeConversionError;
+    fn try_from(code: EvmCode) -> Result<Self, Self::Error> {
         match code {
-            EvmCode::Legacy(code) => unsafe {
-                Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table))
-            },
+            EvmCode::Legacy(code) => unsafe{
+                Ok(Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table)))
+            }
             EvmCode::Eip7702(code) => {
                 let mut raw = EIP7702_MAGIC_BYTES.to_vec();
                 raw.push(code.version);
                 raw.extend(&code.delegated_address);
-                Bytecode::Eip7702(Eip7702Bytecode {
+                Ok(Bytecode::Eip7702(Eip7702Bytecode {
                     delegated_address: code.delegated_address,
                     version: code.version,
                     raw: raw.into(),
-                })
+                }))
             }
-            EvmCode::Eof(code) => Bytecode::Eof(Arc::new(Eof::decode(code).unwrap())),
+            EvmCode::Eof(code) => Eof::decode(code)
+            .map(|eof| Bytecode::Eof(Arc::new(eof)))
+            .map_err(|_| BytecodeConversionError::EofDecodingError),
         }
     }
 }
