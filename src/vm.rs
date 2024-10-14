@@ -401,7 +401,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                     Some(code.clone())
                 } else {
                     match self.vm.storage.code_by_hash(code_hash) {
-                        Ok(code) => code.map(Bytecode::try_from).transpose().map_err(|err| ReadError::StorageError(err.to_string()))?,
+                        Ok(code) => code
+                            .map(Bytecode::try_from)
+                            .transpose()
+                            .map_err(|err| ReadError::StorageError(err.to_string()))?,
                         Err(err) => return Err(ReadError::StorageError(err.to_string())),
                     }
                 }
@@ -426,11 +429,12 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         self.vm
             .storage
             .code_by_hash(&code_hash)
-            .map_err(|e| ReadError::StorageError(e.to_string()) )
+            .map_err(|e| ReadError::StorageError(e.to_string()))
             .and_then(|opt| opt.ok_or(ReadError::StorageError("".into())))
-            .and_then(|evm_code| Bytecode::try_from(evm_code).map_err(|e| ReadError::StorageError(e.to_string())))
+            .and_then(|evm_code| {
+                Bytecode::try_from(evm_code).map_err(|e| ReadError::StorageError(e.to_string()))
+            })
     }
-    
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
         self.vm

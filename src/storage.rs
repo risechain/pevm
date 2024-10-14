@@ -117,8 +117,6 @@ impl fmt::Display for BytecodeConversionError {
     }
 }
 
-
-
 impl TryFrom<EvmCode> for Bytecode {
     type Error = BytecodeConversionError;
     fn try_from(code: EvmCode) -> Result<Self, Self::Error> {
@@ -212,10 +210,11 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let basic = self.0.basic(&address)?;
-        
+
         Ok(basic.map(|basic| {
             let code_hash = self.0.code_hash(&address).ok().flatten();
-            let code = code_hash.as_ref()
+            let code = code_hash
+                .as_ref()
                 .and_then(|hash| self.0.code_by_hash(hash).ok().flatten())
                 .map(|c| Bytecode::try_from(c).unwrap_or_default());
 
@@ -228,15 +227,12 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
         }))
     }
 
-
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.0
-            .code_by_hash(&code_hash)
-            .map(|code_option| {
-                code_option
-                    .map(|c| Bytecode::try_from(c).unwrap_or_default())
-                    .unwrap_or_default()
-            })
+        self.0.code_by_hash(&code_hash).map(|code_option| {
+            code_option
+                .map(|c| Bytecode::try_from(c).unwrap_or_default())
+                .unwrap_or_default()
+        })
     }
 
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
@@ -346,7 +342,9 @@ mod tests {
         eof_dangling.extend(dangling_data);
         let evm_code = EvmCode::Eof(eof_dangling.into());
         let byte_code = Bytecode::try_from(evm_code);
-        assert_eq!(byte_code.unwrap_err(), BytecodeConversionError::EofDecodingError);
-
+        assert_eq!(
+            byte_code.unwrap_err(),
+            BytecodeConversionError::EofDecodingError
+        );
     }
 }
