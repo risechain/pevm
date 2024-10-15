@@ -212,22 +212,28 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
     type Error = StorageWrapperError<S>;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let basic = self.0.basic(&address).map_err(StorageWrapperError::StorageError)?;
+        self.0
+            .basic(&address)
+            .map_err(StorageWrapperError::StorageError)
+            .map(|basic_option| {
+                basic_option.map(|basic| {
+                    let code_hash = self.0.code_hash(&address).ok().flatten();
+                    let code = code_hash
+                        .and_then(|hash| self.0.code_by_hash(&hash).ok().flatten())
+                        .map(|c| {
+                            Bytecode::try_from(c)
+                                .map_err(|e| Self::Error::InvalidBytecode(e))
+                                .unwrap_or_default()
+                        });
 
-        Ok(basic.map(|basic| {
-            let code_hash = self.0.code_hash(&address).ok().flatten();
-            let code = code_hash
-                .as_ref()
-                .and_then(|hash| self.0.code_by_hash(hash).ok().flatten())
-                .map(|c| Bytecode::try_from(c).unwrap_or_default());
-
-            AccountInfo {
-                balance: basic.balance,
-                nonce: basic.nonce,
-                code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
-                code,
-            }
-        }))
+                    AccountInfo {
+                        balance: basic.balance,
+                        nonce: basic.nonce,
+                        code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
+                        code,
+                    }
+                })
+            })
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
@@ -241,18 +247,24 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
                     .map_err(StorageWrapperError::InvalidBytecode)
             })
             .map(|bytecode| bytecode.unwrap_or_default())
-    }    
-    
+    }
+
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
-        self.0.has_storage(&address).map_err(StorageWrapperError::StorageError)
+        self.0
+            .has_storage(&address)
+            .map_err(StorageWrapperError::StorageError)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.0.storage(&address, &index).map_err(StorageWrapperError::StorageError)
+        self.0
+            .storage(&address, &index)
+            .map_err(StorageWrapperError::StorageError)
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        self.0.block_hash(&number).map_err(StorageWrapperError::StorageError)
+        self.0
+            .block_hash(&number)
+            .map_err(StorageWrapperError::StorageError)
     }
 }
 
