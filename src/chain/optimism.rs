@@ -8,7 +8,7 @@ use alloy_rpc_types::{BlockTransactions, Header};
 use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType, TxDeposit};
 use op_alloy_network::eip2718::Encodable2718;
 use revm::{
-    primitives::{BlockEnv, OptimismFields, SpecId, TxEnv},
+    primitives::{AuthorizationList, BlockEnv, OptimismFields, SpecId, TxEnv},
     Handler,
 };
 
@@ -291,7 +291,9 @@ impl PevmChain for PevmOptimism {
             access_list: tx.inner.access_list.unwrap_or_default().into(),
             blob_hashes: tx.inner.blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas: tx.inner.max_fee_per_blob_gas.map(U256::from),
-            authorization_list: None, // TODO: Support in the upcoming hardfork
+            authorization_list: Some(AuthorizationList::Signed(
+                tx.inner.authorization_list.unwrap_or_default(),
+            )), // TODO: Support in the upcoming hardfork
         })
     }
 
