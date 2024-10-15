@@ -11,7 +11,7 @@ use alloy_primitives::{B256, U256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{BlockTransactions, Header};
 use revm::{
-    primitives::{BlockEnv, SpecId, TxEnv},
+    primitives::{AuthorizationList, BlockEnv, SpecId, TxEnv},
     Handler,
 };
 
@@ -145,7 +145,9 @@ impl PevmChain for PevmEthereum {
             access_list: tx.access_list.unwrap_or_default().into(),
             blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-            authorization_list: None, // TODO: Support in the upcoming hardfork
+            authorization_list: Some(AuthorizationList::Signed(
+                tx.authorization_list.unwrap_or_default(),
+            )), // TODO: Support in the upcoming hardfork
             #[cfg(feature = "optimism")]
             optimism: revm::primitives::OptimismFields::default(),
         })
