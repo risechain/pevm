@@ -291,9 +291,9 @@ impl PevmChain for PevmOptimism {
             access_list: tx.inner.access_list.unwrap_or_default().into(),
             blob_hashes: tx.inner.blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas: tx.inner.max_fee_per_blob_gas.map(U256::from),
-            authorization_list: Some(AuthorizationList::Signed(
-                tx.inner.authorization_list.unwrap_or_default(),
-            )), // TODO: Support in the upcoming hardfork
+            authorization_list: tx.inner.authorization_list.map(|auth_list| {
+                AuthorizationList::Signed(auth_list)
+            }),
         })
     }
 

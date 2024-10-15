@@ -145,9 +145,9 @@ impl PevmChain for PevmEthereum {
             access_list: tx.access_list.unwrap_or_default().into(),
             blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-            authorization_list: Some(AuthorizationList::Signed(
-                tx.authorization_list.unwrap_or_default(),
-            )), // TODO: Support in the upcoming hardfork
+            authorization_list: tx.authorization_list.map(|auth_list|{
+                AuthorizationList::Signed(auth_list)
+            }),
             #[cfg(feature = "optimism")]
             optimism: revm::primitives::OptimismFields::default(),
         })
