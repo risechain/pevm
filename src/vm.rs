@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use crate::{
     chain::{PevmChain, RewardPolicy},
     mv_memory::MvMemory,
+    storage::BytecodeConversionError,
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
     MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
     TxIdx, TxVersion, WriteSet,
@@ -98,6 +99,8 @@ pub enum ReadError {
     /// The stored memory value type doesn't match its location type.
     /// TODO: Handle this at the type level?
     InvalidMemoryValueType,
+    /// The bytecode is invalid and cannot be converted.
+    InvalidBytecode(BytecodeConversionError),
 }
 
 impl From<ReadError> for VmExecutionError {
@@ -404,7 +407,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                         Ok(code) => code
                             .map(Bytecode::try_from)
                             .transpose()
-                            .map_err(|err| ReadError::StorageError(err.to_string()))?,
+                            .map_err(ReadError::InvalidBytecode)?,
                         Err(err) => return Err(ReadError::StorageError(err.to_string())),
                     }
                 }
@@ -426,14 +429,15 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.vm
+        match self
+            .vm
             .storage
             .code_by_hash(&code_hash)
-            .map_err(|e| ReadError::StorageError(e.to_string()))
-            .and_then(|opt| opt.ok_or(ReadError::StorageError("".into())))
-            .and_then(|evm_code| {
-                Bytecode::try_from(evm_code).map_err(|e| ReadError::StorageError(e.to_string()))
-            })
+            .map_err(|err| ReadError::StorageError(err.to_string()))?
+        {
+            Some(evm_code) => Bytecode::try_from(evm_code).map_err(ReadError::InvalidBytecode),
+            None => Ok(Bytecode::default()),
+        }
     }
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {

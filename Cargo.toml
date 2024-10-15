@@ -57,6 +57,7 @@ serde_json = { version = "1.0.128", features = ["preserve_order"] }
 op-alloy-consensus = { version = "0.3.3", optional = true }
 op-alloy-network = { version = "0.3.3", optional = true }
 op-alloy-rpc-types = { version = "0.3.3", optional = true }
+thiserror = "1.0.64"
 
 [dev-dependencies]
 criterion = "0.5.1"
