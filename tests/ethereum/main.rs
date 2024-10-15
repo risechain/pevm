@@ -9,7 +9,6 @@
 // - Help outline the minimal state commitment logic for pevm.
 
 use ahash::AHashMap;
-use alloy_primitives::{Address,Signature,Parity};
 use pevm::chain::PevmEthereum;
 use pevm::{
     Bytecodes, EvmAccount, EvmCode, InMemoryStorage, Pevm, PevmError, PevmTxExecutionResult,
@@ -22,13 +21,12 @@ use revm::primitives::{
     Bytecode, TransactTo, TxEnv, KECCAK_EMPTY, U256,
 };
 use revme::cmd::statetest::models::{
-    Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices
+    Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
 };
 use revme::cmd::statetest::{
     merkle_trie::{log_rlp_hash, state_merkle_trie_root},
     utils::recover_address,
 };
-use serde_json::Value;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fs, num::NonZeroUsize};
@@ -95,26 +93,14 @@ fn build_tx_env(
         gas_priority_fee: tx.max_priority_fee_per_gas,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-        authorization_list: Some(AuthorizationList::Signed(
-            tx.authorization_list
-                .iter()
-                .map(|auth| {
-                    let serialized = serde_json::to_string(&auth).unwrap();
-                    let json_value: Value = serde_json::from_str(&serialized).unwrap();
-                    
-                    alloy_rpc_types::Authorization{
-                        chain_id: U256::from(json_value["chain_id"].as_u64().unwrap()),
-                        address: Address::from_str(json_value["address"].as_str().unwrap()).expect("Failed to parse address"),
-                        nonce:json_value["nonce"].as_u64().unwrap(),
-                    }
-                    .into_signed(Signature::new(
-                        U256::from(json_value["r"].as_u64().unwrap()),
-                        U256::from(json_value["s"].as_u64().unwrap()),
-                        Parity::try_from(json_value["v"].as_u64().unwrap()).unwrap(),
-                    ))
-                })
-                .collect(),
-        )),
+        authorization_list: tx.authorization_list.as_ref().map(|auth_list| {
+            AuthorizationList::Recovered(
+                auth_list
+                    .iter()
+                    .map(|auth| auth.clone().into_recovered())
+                    .collect(),
+            )
+        }),
         #[cfg(feature = "optimism")]
         optimism: revm::primitives::OptimismFields::default(),
     })
