@@ -65,7 +65,6 @@ rayon = "1.10.0"
 revme = { git = "https://github.com/risechain/revm", rev = "72a1b18a87fced07a0f44e40e83e2f28750a27ff" }
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
 snmalloc-rs = "0.3.6"
-snmalloc-sys = "0.3.6"
 tikv-jemallocator = "0.6.0"
 walkdir = "2.5.0"
 

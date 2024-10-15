@@ -2780,7 +2780,6 @@ dependencies = [
  "serde_json",
  "smallvec",
  "snmalloc-rs",
- "snmalloc-sys",
  "tikv-jemallocator",
  "tokio",
  "walkdir",
