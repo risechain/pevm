@@ -19,16 +19,15 @@ use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
     calc_excess_blob_gas, AccountInfo, AuthorizationList, BlobExcessGasAndPrice, BlockEnv,
-    Bytecode, SignedAuthorization, TransactTo, TxEnv, KECCAK_EMPTY, U256,
+    Bytecode, TransactTo, TxEnv, KECCAK_EMPTY, U256,
 };
 use revme::cmd::statetest::models::{
-    Authorization, Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices
+    Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices
 };
 use revme::cmd::statetest::{
     merkle_trie::{log_rlp_hash, state_merkle_trie_root},
     utils::recover_address,
 };
-use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 use std::str::FromStr;
