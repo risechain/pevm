@@ -95,7 +95,6 @@ fn build_tx_env(
         gas_priority_fee: tx.max_priority_fee_per_gas,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-        //authorization_list: None,
         authorization_list: Some(AuthorizationList::Signed(
             tx.authorization_list
                 .iter()
@@ -115,13 +114,11 @@ fn build_tx_env(
                     ))
                 })
                 .collect(),
-        )), // TODO: Support in the upcoming hardfork
+        )),
         #[cfg(feature = "optimism")]
         optimism: revm::primitives::OptimismFields::default(),
     })
 }
-
-
 
 fn run_test_unit(path: &Path, unit: TestUnit) {
     unit.post.into_par_iter().for_each(|(spec_name, tests)| {
