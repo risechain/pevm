@@ -12,6 +12,7 @@ use revm::{
     DatabaseRef,
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::{BuildIdentityHasher, BuildSuffixHasher};
 
@@ -103,24 +104,37 @@ pub enum EvmCode {
     Eof(Bytes),
 }
 
-// TODO: Rewrite as [TryFrom]
-impl From<EvmCode> for Bytecode {
-    fn from(code: EvmCode) -> Self {
+#[derive(Debug, Clone, PartialEq)]
+pub enum BytecodeConversionError {
+    EofDecodingError,
+}
+
+impl TryFrom<EvmCode> for Bytecode {
+    type Error = BytecodeConversionError;
+    fn try_from(code: EvmCode) -> Result<Self, Self::Error> {
         match code {
+            // TODO: Turn this [unsafe] into a proper [Result]
             EvmCode::Legacy(code) => unsafe {
-                Bytecode::new_analyzed(code.bytecode, code.original_len, JumpTable(code.jump_table))
+                Ok(Bytecode::new_analyzed(
+                    code.bytecode,
+                    code.original_len,
+                    JumpTable(code.jump_table),
+                ))
             },
             EvmCode::Eip7702(code) => {
                 let mut raw = EIP7702_MAGIC_BYTES.to_vec();
                 raw.push(code.version);
                 raw.extend(&code.delegated_address);
-                Bytecode::Eip7702(Eip7702Bytecode {
+                Ok(Bytecode::Eip7702(Eip7702Bytecode {
                     delegated_address: code.delegated_address,
                     version: code.version,
                     raw: raw.into(),
-                })
+                }))
             }
-            EvmCode::Eof(code) => Bytecode::Eof(Arc::new(Eof::decode(code).unwrap())),
+            // TODO: Forward the specific errors from revm
+            EvmCode::Eof(code) => Eof::decode(code)
+                .map(|eof| Bytecode::Eof(Arc::new(eof)))
+                .map_err(|_| BytecodeConversionError::EofDecodingError),
         }
     }
 }
@@ -180,49 +194,84 @@ pub trait Storage {
     fn block_hash(&self, number: &u64) -> Result<B256, Self::Error>;
 }
 
+/// revm [Database] errors when using pevm [Storage] as the underlying provider.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum StorageWrapperError<S: Storage> {
+    #[error("storage error")]
+    StorageError(S::Error),
+    #[error("invalid byte code")]
+    InvalidBytecode(BytecodeConversionError),
+}
+
 /// A Storage wrapper that implements REVM's [DatabaseRef] for ease of
 /// integration.
 #[derive(Debug)]
 pub struct StorageWrapper<'a, S: Storage>(pub &'a S);
 
 impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
-    type Error = S::Error;
+    type Error = StorageWrapperError<S>;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(if let Some(basic) = self.0.basic(&address)? {
-            let code_hash = self.0.code_hash(&address)?;
-            let code = if let Some(code_hash) = &code_hash {
-                self.0.code_by_hash(code_hash)?.map(Bytecode::from)
-            } else {
-                None
-            };
-            Some(AccountInfo {
-                balance: basic.balance,
-                nonce: basic.nonce,
-                code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
-                code,
-            })
+        let Some(basic) = self
+            .0
+            .basic(&address)
+            .map_err(StorageWrapperError::StorageError)?
+        else {
+            return Ok(None);
+        };
+
+        let code_hash = self
+            .0
+            .code_hash(&address)
+            .map_err(StorageWrapperError::StorageError)?;
+
+        let code = if let Some(hash) = &code_hash {
+            self.0
+                .code_by_hash(hash)
+                .map_err(StorageWrapperError::StorageError)?
+                .map(|c| Bytecode::try_from(c).map_err(StorageWrapperError::InvalidBytecode))
+                .transpose()?
         } else {
             None
-        })
+        };
+
+        Ok(Some(AccountInfo {
+            balance: basic.balance,
+            nonce: basic.nonce,
+            code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
+            code,
+        }))
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.0
             .code_by_hash(&code_hash)
-            .map(|code| code.map(Bytecode::from).unwrap_or_default())
+            .map_err(StorageWrapperError::StorageError)
+            .and_then(|evm_code| {
+                evm_code
+                    .map(Bytecode::try_from)
+                    .transpose()
+                    .map(|bytecode: Option<Bytecode>| bytecode.unwrap_or_default())
+                    .map_err(StorageWrapperError::InvalidBytecode)
+            })
     }
 
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
-        self.0.has_storage(&address)
+        self.0
+            .has_storage(&address)
+            .map_err(StorageWrapperError::StorageError)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.0.storage(&address, &index)
+        self.0
+            .storage(&address, &index)
+            .map_err(StorageWrapperError::StorageError)
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        self.0.block_hash(&number)
+        self.0
+            .block_hash(&number)
+            .map_err(StorageWrapperError::StorageError)
     }
 }
 
@@ -268,11 +317,11 @@ mod tests {
 
         let evm_code = EvmCode::from(analyzed.clone());
         assert!(eq_bytecodes(&analyzed, &evm_code));
-        assert_eq!(analyzed, Bytecode::from(evm_code));
+        assert_eq!(analyzed, evm_code.try_into().unwrap());
 
         let evm_code = EvmCode::from(contract_bytecode);
         assert!(eq_bytecodes(&analyzed, &evm_code));
-        assert_eq!(analyzed, Bytecode::from(evm_code));
+        assert_eq!(analyzed, evm_code.try_into().unwrap());
     }
 
     #[test]
@@ -282,7 +331,7 @@ mod tests {
         let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new(delegated_address));
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, Bytecode::from(evm_code));
+        assert_eq!(bytecode, evm_code.try_into().unwrap());
 
         let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
         bytes.push(EIP7702_VERSION);
@@ -290,7 +339,7 @@ mod tests {
         let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(bytes.into()).unwrap());
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, Bytecode::from(evm_code));
+        assert_eq!(bytecode, evm_code.try_into().unwrap());
 
         let mut eip_bytecode = Eip7702Bytecode::new(delegated_address);
         // Mutate version and raw bytes after construction.
@@ -303,7 +352,7 @@ mod tests {
         let bytecode = Bytecode::Eip7702(eip_bytecode);
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, Bytecode::from(evm_code));
+        assert_eq!(bytecode, evm_code.try_into().unwrap());
     }
 
     #[test]
@@ -311,6 +360,21 @@ mod tests {
         let bytecode = Bytecode::Eof(Arc::new(Eof::decode(EOF_BYTECODE).unwrap()));
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, Bytecode::from(evm_code));
+        assert_eq!(bytecode, evm_code.try_into().unwrap());
+    }
+
+    #[test]
+    fn eof_bytecodes_error() {
+        assert_eq!(
+            Bytecode::try_from(EvmCode::Eof(Bytes::new())),
+            Err(BytecodeConversionError::EofDecodingError)
+        );
+
+        let mut eof_dangling = EOF_BYTECODE.to_vec();
+        eof_dangling.extend(bytes!("010203"));
+        assert_eq!(
+            Bytecode::try_from(EvmCode::Eof(eof_dangling.into())),
+            Err(BytecodeConversionError::EofDecodingError)
+        );
     }
 }

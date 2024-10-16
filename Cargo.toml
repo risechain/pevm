@@ -32,6 +32,7 @@ bitvec = "1.0.1"
 dashmap = "6.1.0"
 serde = "1.0.210"
 smallvec = "1.13.2"
+thiserror = "1.0.64"
 
 # Let's do our best to port needed REVM changes upstream
 revm = { git = "https://github.com/risechain/revm", rev = "fed0a3d4777d90b0a52a96d556394215cb1c3671", features = [
