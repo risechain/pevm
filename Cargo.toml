@@ -34,7 +34,6 @@ serde = "1.0.210"
 smallvec = "1.13.2"
 thiserror = "1.0.64"
 
-
 # Let's do our best to port needed REVM changes upstream
 revm = { git = "https://github.com/risechain/revm", rev = "72a1b18a87fced07a0f44e40e83e2f28750a27ff", features = [
     "serde",
