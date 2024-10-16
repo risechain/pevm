@@ -1,7 +1,9 @@
 use ahash::HashMapExt;
+use alloy_consensus::Eip658Value;
 use alloy_primitives::TxKind;
 use alloy_rpc_types::Receipt;
 use revm::{
+    interpreter::gas::validate_initial_tx_gas,
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
         ResultAndState, SpecId, TxEnv, B256, KECCAK_EMPTY, U256,
@@ -560,9 +562,59 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         let from_hash = self.hash_basic(tx.caller);
         let to_hash = tx.transact_to.to().map(|to| self.hash_basic(*to));
 
-        // Execute
         let mut db = VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash)
             .map_err(VmExecutionError::from)?;
+
+        // TODO: Generalize this to also non-lazy raw transfers, or just always lazy
+        // update raw transfers.
+        // TODO: Support OP, then remove ad-hoc lazy/raw-transfer handling everywhere
+        // else.
+        #[cfg(not(feature = "optimism"))]
+        if db.is_lazy {
+            let mut write_set = WriteSet::with_capacity(3);
+            if Some(from_hash) != to_hash {
+                write_set.push((from_hash, MemoryValue::LazySender(tx.value)));
+                write_set.push((to_hash.unwrap(), MemoryValue::LazyRecipient(tx.value)));
+            } else {
+                write_set.push((from_hash, MemoryValue::LazySender(U256::ZERO)));
+            }
+            let gas_used = U256::from(validate_initial_tx_gas(
+                self.spec_id,
+                &tx.data,
+                false,
+                &tx.access_list,
+                tx.authorization_list
+                    .as_ref()
+                    .map(|auth_list| auth_list.len() as u64)
+                    .unwrap_or(0),
+            ));
+            let gas_fee = self.apply_rewards(&mut write_set, tx, gas_used)?;
+            if let MemoryValue::LazySender(amount) =
+                &mut unsafe { write_set.get_unchecked_mut(0) }.1
+            {
+                *amount = amount.saturating_add(gas_fee);
+            }
+
+            self.mv_memory
+                .add_lazy_addresses([tx.caller, *tx.transact_to.to().unwrap()]);
+
+            return Ok(VmExecutionResult {
+                execution_result: PevmTxExecutionResult {
+                    receipt: Receipt {
+                        status: Eip658Value::Eip658(true),
+                        cumulative_gas_used: gas_used.try_into().unwrap(),
+                        logs: Vec::new(),
+                    },
+                    state: EvmStateTransitions::new(),
+                },
+                flags: if self.mv_memory.record(tx_version, db.read_set, write_set) {
+                    FinishExecFlags::WroteNewLocation
+                } else {
+                    FinishExecFlags::empty()
+                },
+            });
+        }
+
         // TODO: Share as much [Evm], [Context], [Handler], etc. among threads as possible
         // as creating them is very expensive.
         let mut evm = build_evm(
@@ -727,7 +779,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         tx: &TxEnv,
         gas_used: U256,
         #[cfg(feature = "optimism")] evm_context: &EvmContext<DB>,
-    ) -> Result<(), VmExecutionError> {
+    ) -> Result<U256, VmExecutionError> {
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
             std::cmp::min(
                 tx.gas_price,
@@ -736,6 +788,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         } else {
             tx.gas_price
         };
+        let gas_fee = gas_price.saturating_mul(gas_used);
         if self.chain.is_eip_1559_enabled(self.spec_id) {
             gas_price = gas_price.saturating_sub(self.block_env.basefee);
         }
@@ -803,7 +856,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             }
         }
 
-        Ok(())
+        Ok(gas_fee)
     }
 }
 

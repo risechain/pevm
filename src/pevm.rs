@@ -296,7 +296,11 @@ impl Pevm {
                     }
                     // Assert that evaluated nonce is correct when address is caller.
                     debug_assert!(
-                        tx.caller != address || tx.nonce.map_or(true, |n| n + 1 == nonce)
+                        tx.caller != address || tx.nonce.map_or(true, |n| n + 1 == nonce),
+                        "{} {:?} {}",
+                        tx_idx,
+                        tx.nonce,
+                        nonce
                     );
 
                     // SAFETY: The multi-version data structure should not leak an index over block size.
