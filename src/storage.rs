@@ -212,39 +212,35 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
     type Error = StorageWrapperError<S>;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let basic = self
+        let Some(basic) = self
             .0
             .basic(&address)
+            .map_err(StorageWrapperError::StorageError)?
+        else {
+            return Ok(None);
+        };
+
+        let code_hash = self
+            .0
+            .code_hash(&address)
             .map_err(StorageWrapperError::StorageError)?;
 
-        match basic {
-            Some(basic) => {
-                let code_hash = self
-                    .0
-                    .code_hash(&address)
-                    .map_err(StorageWrapperError::StorageError)?;
+        let code = if let Some(hash) = &code_hash {
+            self.0
+                .code_by_hash(hash)
+                .map_err(StorageWrapperError::StorageError)?
+                .map(|c| Bytecode::try_from(c).map_err(StorageWrapperError::InvalidBytecode))
+                .transpose()?
+        } else {
+            None
+        };
 
-                let code = if let Some(hash) = &code_hash {
-                    self.0
-                        .code_by_hash(hash)
-                        .map_err(StorageWrapperError::StorageError)?
-                        .map(|c| {
-                            Bytecode::try_from(c).map_err(StorageWrapperError::InvalidBytecode)
-                        })
-                        .transpose()?
-                } else {
-                    None
-                };
-
-                Ok(Some(AccountInfo {
-                    balance: basic.balance,
-                    nonce: basic.nonce,
-                    code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
-                    code,
-                }))
-            }
-            None => Ok(None),
-        }
+        Ok(Some(AccountInfo {
+            balance: basic.balance,
+            nonce: basic.nonce,
+            code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
+            code,
+        }))
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
