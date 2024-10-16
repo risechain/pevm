@@ -194,7 +194,7 @@ pub trait Storage {
     fn block_hash(&self, number: &u64) -> Result<B256, Self::Error>;
 }
 
-/// Errors when wrapping storage.
+/// revm [Database] errors when using pevm [Storage] as the underlying provider.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum StorageWrapperError<S: Storage> {
     #[error("storage error")]
