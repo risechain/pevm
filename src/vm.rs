@@ -96,11 +96,11 @@ pub enum ReadError {
     /// Read a self-destructed account that is very hard to handle, as
     /// there is no performant way to mark all storage slots as cleared.
     SelfDestructedAccount,
+    /// The bytecode is invalid and cannot be converted.
+    InvalidBytecode(BytecodeConversionError),
     /// The stored memory value type doesn't match its location type.
     /// TODO: Handle this at the type level?
     InvalidMemoryValueType,
-    /// The bytecode is invalid and cannot be converted.
-    InvalidBytecode(BytecodeConversionError),
 }
 
 impl From<ReadError> for VmExecutionError {
