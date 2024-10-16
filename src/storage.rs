@@ -251,9 +251,9 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
                 evm_code
                     .map(Bytecode::try_from)
                     .transpose()
+                    .map(|bytecode: Option<Bytecode>| bytecode.unwrap_or_default())
                     .map_err(StorageWrapperError::InvalidBytecode)
             })
-            .map(|bytecode| bytecode.unwrap_or_default())
     }
 
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
@@ -370,9 +370,8 @@ mod tests {
             Err(BytecodeConversionError::EofDecodingError)
         );
 
-        let dangling_data = bytes!("010203").to_vec();
         let mut eof_dangling = EOF_BYTECODE.to_vec();
-        eof_dangling.extend(dangling_data);
+        eof_dangling.extend(bytes!("010203"));
         assert_eq!(
             Bytecode::try_from(EvmCode::Eof(eof_dangling.into())),
             Err(BytecodeConversionError::EofDecodingError)
