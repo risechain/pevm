@@ -2,9 +2,9 @@ name: Rust Format Check
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   fmt:
@@ -17,4 +17,3 @@ jobs:
           components: rustfmt
       - name: Run fmt
         run: cargo fmt --all --check
-        
