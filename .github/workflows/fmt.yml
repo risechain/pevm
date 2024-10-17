@@ -12,7 +12,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          components: rustfmt
       - name: Run fmt
         run: cargo fmt --all --check
