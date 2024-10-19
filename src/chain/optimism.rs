@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use alloy_chains::NamedChain;
-use alloy_consensus::{Signed, TxEip1559, TxEip2930, TxEip4844, TxLegacy};
+use alloy_consensus::{Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types::{BlockTransactions, Header};
 use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType, TxDeposit};
@@ -62,7 +62,7 @@ fn get_optimism_gas_price(
             .gas_price
             .map(U256::from)
             .ok_or(OptimismTransactionParsingError::MissingGasPrice),
-        OpTxType::Eip1559 | OpTxType::Eip4844 => tx
+        OpTxType::Eip1559 | OpTxType::Eip7702 => tx
             .inner
             .max_fee_per_gas
             .map(U256::from)
@@ -85,7 +85,7 @@ pub(crate) fn get_optimism_fields(
         OpTxType::Legacy => Signed::<TxLegacy>::try_from(inner).map(OpTxEnvelope::from),
         OpTxType::Eip2930 => Signed::<TxEip2930>::try_from(inner).map(OpTxEnvelope::from),
         OpTxType::Eip1559 => Signed::<TxEip1559>::try_from(inner).map(OpTxEnvelope::from),
-        OpTxType::Eip4844 => Signed::<TxEip4844>::try_from(inner).map(OpTxEnvelope::from),
+        OpTxType::Eip7702 => Signed::<TxEip7702>::try_from(inner).map(OpTxEnvelope::from),
         OpTxType::Deposit => {
             let tx_deposit = TxDeposit {
                 source_hash: tx
@@ -237,7 +237,7 @@ impl PevmChain for PevmOptimism {
                         OpTxType::Legacy => OpReceiptEnvelope::Legacy(receipt.with_bloom()),
                         OpTxType::Eip2930 => OpReceiptEnvelope::Eip2930(receipt.with_bloom()),
                         OpTxType::Eip1559 => OpReceiptEnvelope::Eip1559(receipt.with_bloom()),
-                        OpTxType::Eip4844 => OpReceiptEnvelope::Eip4844(receipt.with_bloom()),
+                        OpTxType::Eip7702 => OpReceiptEnvelope::Eip7702(receipt.with_bloom()),
                         OpTxType::Deposit => {
                             let account_maybe = tx_result
                                 .state
