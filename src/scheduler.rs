@@ -105,19 +105,19 @@ impl Scheduler {
         None
     }
 
-    pub(crate) fn next_task(&self, task_none_counter: &mut usize) -> Option<Task> {
+    pub(crate) fn next_task(&self) -> Option<Task> {
+        let mut task_none_counter = 0;
         while !self.aborted.load(Ordering::Acquire) {
             let execution_idx = self.execution_idx.load(Ordering::Acquire);
             let validation_idx = self.validation_idx.load(Ordering::Acquire);
             if execution_idx >= self.block_size && validation_idx >= self.block_size {
-                if *task_none_counter >= 500
+                if task_none_counter >= 500
                     || (self.num_validated.load(Ordering::Acquire)
                         >= self.block_size - self.min_validation_idx.load(Ordering::Acquire))
                 {
                     break;
                 }
-
-                *task_none_counter += 1;
+                task_none_counter += 1;
                 thread::yield_now();
                 continue;
             }
@@ -164,7 +164,6 @@ impl Scheduler {
                 return Some(Task::Execution(tx_version));
             }
         }
-
         None
     }
 

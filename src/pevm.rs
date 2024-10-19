@@ -172,8 +172,7 @@ impl Pevm {
         thread::scope(|scope| {
             for _ in 0..concurrency_level.into() {
                 scope.spawn(|| {
-                    let mut task_none_counter = 0;
-                    let mut task = scheduler.next_task(&mut task_none_counter);
+                    let mut task = scheduler.next_task();
                     while task.is_some() {
                         task = match task.unwrap() {
                             Task::Execution(tx_version) => {
@@ -195,7 +194,7 @@ impl Pevm {
                         }
 
                         if task.is_none() {
-                            task = scheduler.next_task(&mut task_none_counter);
+                            task = scheduler.next_task();
                         }
                     }
                 });
