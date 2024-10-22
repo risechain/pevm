@@ -497,7 +497,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 }
 
 pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
-    hasher: &'a FxBuildHasher,
+    hasher: FxBuildHasher,
     storage: &'a S,
     mv_memory: &'a MvMemory,
     chain: &'a C,
@@ -510,7 +510,7 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     pub(crate) fn new(
-        hasher: &'a FxBuildHasher,
+        hasher: FxBuildHasher,
         storage: &'a S,
         mv_memory: &'a MvMemory,
         chain: &'a C,
@@ -527,7 +527,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             txs,
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
-            reward_policy: chain.get_reward_policy(hasher),
+            reward_policy: chain.get_reward_policy(&hasher),
         }
     }
 
