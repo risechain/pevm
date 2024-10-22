@@ -16,10 +16,6 @@ name = "fetch"
 path = "bin/fetch.rs"
 
 [dependencies]
-# Put this behind a feature flag if there are use cases & users
-# that need more security guarantees even for internally hashing
-# EVM memory locations (we do not persist these hashes).
-ahash = { version = "0.8.11", features = ["serde"] }
 alloy-chains = "0.1.40"
 alloy-consensus = "0.5.2"
 alloy-primitives = { version = "0.8.8", features = [
@@ -33,6 +29,8 @@ alloy-trie = "0.7.2"
 bitflags = "2.6.0"
 bitvec = "1.0.1"
 dashmap = "6.1.0"
+hashbrown = "0.15.0"
+rustc-hash = "2.0.0"
 serde = "1.0.210"
 smallvec = "1.13.2"
 thiserror = "1.0.64"

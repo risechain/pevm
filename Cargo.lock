@@ -26,7 +26,6 @@ dependencies = [
  "cfg-if",
  "getrandom",
  "once_cell",
- "serde",
  "version_check",
  "zerocopy",
 ]
@@ -2778,7 +2777,6 @@ dependencies = [
 name = "pevm"
 version = "0.1.0"
 dependencies = [
- "ahash",
  "alloy-chains",
  "alloy-consensus",
  "alloy-primitives",
@@ -2795,6 +2793,7 @@ dependencies = [
  "criterion",
  "dashmap",
  "flate2",
+ "hashbrown 0.15.0",
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
@@ -2804,6 +2803,7 @@ dependencies = [
  "revm",
  "revme",
  "rpmalloc",
+ "rustc-hash",
  "serde",
  "serde_json",
  "smallvec",

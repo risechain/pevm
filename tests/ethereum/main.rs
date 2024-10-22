@@ -8,10 +8,10 @@
 // - We use custom handlers (for lazy-updating the beneficiary account, etc.) that require "re-testing".
 // - Help outline the minimal state commitment logic for pevm.
 
-use ahash::AHashMap;
 use pevm::chain::PevmEthereum;
 use pevm::{
-    Bytecodes, EvmAccount, EvmCode, InMemoryStorage, Pevm, PevmError, PevmTxExecutionResult,
+    Bytecodes, ChainState, EvmAccount, EvmCode, InMemoryStorage, Pevm, PevmError,
+    PevmTxExecutionResult,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
@@ -121,7 +121,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 return;
             }
 
-            let mut chain_state = AHashMap::new();
+            let mut chain_state = ChainState::default();
             let mut bytecodes = Bytecodes::default();
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());

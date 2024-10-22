@@ -3,7 +3,6 @@
 
 use std::{fmt::Debug, future::IntoFuture, sync::Mutex, time::Duration};
 
-use ahash::AHashMap;
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{
     network::{BlockResponse, HeaderResponse},
@@ -12,6 +11,7 @@ use alloy_provider::{
 use alloy_rpc_types::{BlockId, BlockNumberOrTag};
 use alloy_transport::TransportError;
 use alloy_transport_http::Http;
+use hashbrown::HashMap;
 use reqwest::Client;
 use revm::{
     precompile::{PrecompileSpecId, Precompiles},
@@ -150,7 +150,7 @@ impl<N: Network> Storage for RpcStorage<N> {
                 nonce,
                 code_hash,
                 code: None,
-                storage: AHashMap::default(),
+                storage: HashMap::default(),
             },
         );
         Ok(Some(AccountBasic { balance, nonce }))

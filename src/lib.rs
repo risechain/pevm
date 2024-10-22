@@ -2,11 +2,11 @@
 
 // TODO: Better types & API for third-party integration
 
-use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
 use alloy_primitives::{Address, B256, U256};
 use bitflags::bitflags;
+use hashbrown::HashMap;
 use smallvec::SmallVec;
 
 /// We use the last 8 bytes of an existing hash like address

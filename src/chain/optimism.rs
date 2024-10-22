@@ -1,10 +1,11 @@
 //! Optimism
-use std::collections::{BTreeMap, HashMap};
+use std::{collections::BTreeMap, hash::BuildHasher};
 
 use alloy_chains::NamedChain;
 use alloy_consensus::{Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types::{BlockTransactions, Header};
+use hashbrown::HashMap;
 use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType, TxDeposit};
 use op_alloy_network::eip2718::Encodable2718;
 use revm::{
@@ -156,9 +157,9 @@ impl PevmChain for PevmOptimism {
         }
     }
 
-    fn build_mv_memory(
+    fn build_mv_memory<H: BuildHasher>(
         &self,
-        hasher: &ahash::RandomState,
+        hasher: &H,
         block_env: &BlockEnv,
         txs: &[TxEnv],
     ) -> MvMemory {
@@ -207,7 +208,7 @@ impl PevmChain for PevmOptimism {
         Handler::optimism_with_spec(spec_id, with_reward_beneficiary)
     }
 
-    fn get_reward_policy(&self, hasher: &ahash::RandomState) -> RewardPolicy {
+    fn get_reward_policy<H: BuildHasher>(&self, hasher: &H) -> RewardPolicy {
         RewardPolicy::Optimism {
             l1_fee_recipient_location_hash: hasher
                 .hash_one(MemoryLocation::Basic(revm::optimism::L1_FEE_RECIPIENT)),
