@@ -8,10 +8,9 @@ pub mod common;
 #[path = "./mod.rs"]
 pub mod erc20;
 
-use ahash::AHashMap;
 use common::test_execute_revm;
 use erc20::generate_cluster;
-use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
+use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use revm::primitives::{Address, TxEnv};
 
 #[test]
@@ -29,7 +28,8 @@ fn erc20_clusters() {
     const NUM_PEOPLE_PER_FAMILY: usize = 15;
     const NUM_TRANSFERS_PER_PERSON: usize = 15;
 
-    let mut final_state = AHashMap::from([(Address::ZERO, EvmAccount::default())]); // Beneficiary
+    let mut final_state = ChainState::default();
+    final_state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
     let mut final_bytecodes = Bytecodes::default();
     let mut final_txs = Vec::<TxEnv>::new();
     for _ in 0..NUM_CLUSTERS {

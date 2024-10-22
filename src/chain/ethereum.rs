@@ -1,15 +1,13 @@
 //! Ethereum
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Debug,
-};
+use std::{collections::BTreeMap, fmt::Debug, hash::BuildHasher};
 
 use alloy_chains::NamedChain;
 use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{B256, U256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{BlockTransactions, Header};
+use hashbrown::HashMap;
 use revm::{
     primitives::{AuthorizationList, BlockEnv, SpecId, TxEnv},
     Handler,
@@ -151,9 +149,9 @@ impl PevmChain for PevmEthereum {
         })
     }
 
-    fn build_mv_memory(
+    fn build_mv_memory<H: BuildHasher>(
         &self,
-        hasher: &ahash::RandomState,
+        hasher: &H,
         block_env: &BlockEnv,
         txs: &[TxEnv],
     ) -> MvMemory {
@@ -178,7 +176,7 @@ impl PevmChain for PevmEthereum {
         Handler::mainnet_with_spec(spec_id, with_reward_beneficiary)
     }
 
-    fn get_reward_policy(&self, _hasher: &ahash::RandomState) -> RewardPolicy {
+    fn get_reward_policy<H: BuildHasher>(&self, _hasher: &H) -> RewardPolicy {
         RewardPolicy::Ethereum
     }
 

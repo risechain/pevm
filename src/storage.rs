@@ -1,8 +1,8 @@
-use std::{collections::HashMap, fmt::Display, sync::Arc};
+use std::{fmt::Display, sync::Arc};
 
-use ahash::AHashMap;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use bitvec::vec::BitVec;
+use hashbrown::HashMap;
 use revm::{
     interpreter::analysis::to_analysed,
     primitives::{
@@ -11,6 +11,7 @@ use revm::{
     },
     DatabaseRef,
 };
+use rustc_hash::FxBuildHasher;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -33,7 +34,7 @@ pub struct EvmAccount {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<EvmCode>,
     /// The account's storage.
-    pub storage: AHashMap<U256, U256>,
+    pub storage: HashMap<U256, U256, FxBuildHasher>,
 }
 
 impl From<Account> for EvmAccount {

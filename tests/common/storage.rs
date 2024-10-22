@@ -1,17 +1,18 @@
-use ahash::AHashMap;
+use hashbrown::HashMap;
 use revm::primitives::{
     alloy_primitives::U160, keccak256, ruint::UintTryFrom, Address, B256, I256, U256,
 };
+use rustc_hash::FxBuildHasher;
 
 #[derive(Debug, Default)]
 pub struct StorageBuilder {
-    dict: AHashMap<U256, U256>,
+    dict: HashMap<U256, U256, FxBuildHasher>,
 }
 
 impl StorageBuilder {
     pub fn new() -> Self {
         StorageBuilder {
-            dict: AHashMap::default(),
+            dict: HashMap::default(),
         }
     }
 
@@ -47,7 +48,7 @@ impl StorageBuilder {
         *entry = buffer.into();
     }
 
-    pub fn build(self) -> AHashMap<U256, U256> {
+    pub fn build(self) -> HashMap<U256, U256, FxBuildHasher> {
         self.dict
     }
 }

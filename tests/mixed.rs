@@ -1,7 +1,6 @@
 // Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
 
-use ahash::AHashMap;
-use pevm::{Bytecodes, EvmAccount, InMemoryStorage};
+use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use rand::random;
 use revm::primitives::{env::TxEnv, Address, TransactTo, U256};
 
@@ -15,7 +14,7 @@ fn mixed_block() {
 
     // TODO: Run a few times
     let mut block_size = 0;
-    let mut final_state = AHashMap::new();
+    let mut final_state = ChainState::default();
     final_state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
     let mut final_bytecodes = Bytecodes::default();
     let mut final_txs = Vec::new();

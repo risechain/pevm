@@ -1,9 +1,9 @@
 use crate::common::storage::{from_address, from_indices, from_short_string, StorageBuilder};
-use ahash::AHashMap;
-use pevm::EvmAccount;
+use pevm::{BuildSuffixHasher, EvmAccount};
 use revm::primitives::{
-    fixed_bytes, hex::FromHex, ruint::UintTryFrom, Address, Bytecode, Bytes, B256, U256,
+    fixed_bytes, hex::FromHex, ruint::UintTryFrom, Address, Bytecode, Bytes, HashMap, B256, U256,
 };
+use rustc_hash::FxBuildHasher;
 
 const ERC20_TOKEN: &str = include_str!("./assets/ERC20Token.hex");
 
@@ -14,8 +14,8 @@ pub struct ERC20Token {
     symbol: String,
     decimals: U256,
     initial_supply: U256,
-    balances: AHashMap<Address, U256>,
-    allowances: AHashMap<(Address, Address), U256>,
+    balances: HashMap<Address, U256, BuildSuffixHasher>,
+    allowances: HashMap<(Address, Address), U256, FxBuildHasher>,
 }
 
 impl ERC20Token {
@@ -29,8 +29,8 @@ impl ERC20Token {
             symbol: String::from(symbol),
             decimals: U256::from(decimals),
             initial_supply: U256::from(initial_supply),
-            balances: AHashMap::new(),
-            allowances: AHashMap::new(),
+            balances: HashMap::default(),
+            allowances: HashMap::default(),
         }
     }
 
