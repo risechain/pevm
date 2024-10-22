@@ -159,7 +159,7 @@ impl Pevm {
 
         let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
         let vm = Vm::new(
-            &self.hasher,
+            self.hasher,
             storage,
             &mv_memory,
             chain,
