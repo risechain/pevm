@@ -8,13 +8,11 @@ use revm::{
     },
     Context, Database, Evm, EvmContext,
 };
-use rustc_hash::FxBuildHasher;
 use smallvec::{smallvec, SmallVec};
-
-use std::hash::{BuildHasher, BuildHasherDefault};
 
 use crate::{
     chain::{PevmChain, RewardPolicy},
+    hash_determinisitic,
     mv_memory::MvMemory,
     storage::BytecodeConversionError,
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
@@ -156,7 +154,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
             is_lazy: false,
             // Unless it is a raw transfer that is lazy updated, we'll
             // read at least from the sender and recipient accounts.
-            read_set: ReadSet::with_capacity_and_hasher(2, BuildHasherDefault::default()),
+            read_set: ReadSet::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
             read_accounts: HashMap::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
         };
         // We only lazy update raw transfers that already have the sender
@@ -183,7 +181,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
                 return self.to_hash.unwrap();
             }
         }
-        self.vm.hash_basic(*address)
+        hash_determinisitic(MemoryLocation::Basic(*address))
     }
 
     // Push a new read origin. Return an error when there's already
@@ -200,7 +198,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
     }
 
     fn get_code_hash(&mut self, address: Address) -> Result<Option<B256>, ReadError> {
-        let location_hash = self.vm.hasher.hash_one(MemoryLocation::CodeHash(address));
+        let location_hash = hash_determinisitic(MemoryLocation::CodeHash(address));
         let read_origins = self.read_set.entry(location_hash).or_default();
 
         // Try to read the latest code hash in [MvMemory]
@@ -449,10 +447,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        let location_hash = self
-            .vm
-            .hasher
-            .hash_one(MemoryLocation::Storage(address, index));
+        let location_hash = hash_determinisitic(MemoryLocation::Storage(address, index));
 
         let read_origins = self.read_set.entry(location_hash).or_default();
 
@@ -497,7 +492,6 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 }
 
 pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
-    hasher: FxBuildHasher,
     storage: &'a S,
     mv_memory: &'a MvMemory,
     chain: &'a C,
@@ -510,7 +504,6 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     pub(crate) fn new(
-        hasher: FxBuildHasher,
         storage: &'a S,
         mv_memory: &'a MvMemory,
         chain: &'a C,
@@ -519,21 +512,17 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         spec_id: SpecId,
     ) -> Self {
         Self {
-            hasher,
             storage,
             mv_memory,
             chain,
             block_env,
             txs,
             spec_id,
-            beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
-            reward_policy: chain.get_reward_policy(&hasher),
+            beneficiary_location_hash: hash_determinisitic(MemoryLocation::Basic(
+                block_env.coinbase,
+            )),
+            reward_policy: chain.get_reward_policy(),
         }
-    }
-
-    #[inline(always)]
-    fn hash_basic(&self, address: Address) -> MemoryLocationHash {
-        self.hasher.hash_one(MemoryLocation::Basic(address))
     }
 
     // Execute a transaction. This can read from memory but cannot modify any state.
@@ -558,8 +547,11 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     ) -> Result<VmExecutionResult, VmExecutionError> {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
         let tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
-        let from_hash = self.hash_basic(tx.caller);
-        let to_hash = tx.transact_to.to().map(|to| self.hash_basic(*to));
+        let from_hash = hash_determinisitic(MemoryLocation::Basic(tx.caller));
+        let to_hash = tx
+            .transact_to
+            .to()
+            .map(|to| hash_determinisitic(MemoryLocation::Basic(*to)));
 
         // Execute
         let mut db = VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash)
@@ -585,14 +577,15 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         // For now we are betting on [code_hash] triggering the sequential
                         // fallback when we read a self-destructed contract.
                         write_set.push((
-                            self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
+                            hash_determinisitic(MemoryLocation::CodeHash(*address)),
                             MemoryValue::SelfDestructed,
                         ));
                         continue;
                     }
 
                     if account.is_touched() {
-                        let account_location_hash = self.hash_basic(*address);
+                        let account_location_hash =
+                            hash_determinisitic(MemoryLocation::Basic(*address));
                         let read_account = evm.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
@@ -644,7 +637,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         // Write new contract
                         if is_new_code {
                             write_set.push((
-                                self.hasher.hash_one(MemoryLocation::CodeHash(*address)),
+                                hash_determinisitic(MemoryLocation::CodeHash(*address)),
                                 MemoryValue::CodeHash(account.info.code_hash),
                             ));
                             self.mv_memory
@@ -657,8 +650,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     // TODO: We should move this changed check to our read set like for account info?
                     for (slot, value) in account.changed_storage_slots() {
                         write_set.push((
-                            self.hasher
-                                .hash_one(MemoryLocation::Storage(*address, *slot)),
+                            hash_determinisitic(MemoryLocation::Storage(*address, *slot)),
                             MemoryValue::Storage(value.present_value),
                         ));
                     }

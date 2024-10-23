@@ -1,6 +1,6 @@
 //! Chain specific utils
 
-use std::{fmt::Debug, hash::BuildHasher};
+use std::fmt::Debug;
 
 use alloy_primitives::B256;
 use alloy_rpc_types::{BlockTransactions, Header};
@@ -63,12 +63,7 @@ pub trait PevmChain: Debug {
     fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, Self::TransactionParsingError>;
 
     /// Build [MvMemory]
-    fn build_mv_memory<H: BuildHasher>(
-        &self,
-        _hasher: &H,
-        _block_env: &BlockEnv,
-        txs: &[TxEnv],
-    ) -> MvMemory {
+    fn build_mv_memory(&self, _block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
         MvMemory::new(txs.len(), [], [])
     }
 
@@ -80,7 +75,7 @@ pub trait PevmChain: Debug {
     ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB>;
 
     /// Get [RewardPolicy]
-    fn get_reward_policy<H: BuildHasher>(&self, hasher: &H) -> RewardPolicy;
+    fn get_reward_policy(&self) -> RewardPolicy;
 
     /// Calculate receipt root
     fn calculate_receipt_root(

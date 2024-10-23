@@ -2,11 +2,12 @@
 
 // TODO: Better types & API for third-party integration
 
-use std::hash::{BuildHasherDefault, Hasher};
+use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 
 use alloy_primitives::{Address, B256, U256};
 use bitflags::bitflags;
 use hashbrown::HashMap;
+use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
 
 /// We use the last 8 bytes of an existing hash like address
@@ -63,6 +64,13 @@ impl Hasher for IdentityHasher {
 
 /// Build an identity hasher
 pub type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
+
+// TODO: Ensure it's not easy to hand-craft transactions and storage slots
+// that can cause a lot of collisions that destroys pevm's performance.
+#[inline(always)]
+fn hash_determinisitic<T: Hash>(x: T) -> u64 {
+    FxBuildHasher.hash_one(x)
+}
 
 // TODO: It would be nice if we could tie the different cases of
 // memory locations & values at the type level, to prevent lots of
