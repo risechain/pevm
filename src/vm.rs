@@ -378,10 +378,8 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             if location_hash == self.from_hash
                 && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
             {
-                if self.tx_idx > 0 {
-                    // TODO: Better retry strategy -- immediately, to the
-                    // closest sender tx, to the missing sender tx, etc.
-                    return Err(ReadError::Blocking(self.tx_idx - 1));
+                if let Some(prev_tx_idx) = self.vm.get_prev_sender(self.tx_idx, &self.tx.caller) {
+                    return Err(ReadError::Blocking(prev_tx_idx));
                 } else {
                     return Err(ReadError::InvalidNonce(self.tx_idx));
                 }
@@ -534,6 +532,13 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     #[inline(always)]
     fn hash_basic(&self, address: Address) -> MemoryLocationHash {
         self.hasher.hash_one(MemoryLocation::Basic(address))
+    }
+
+    #[inline(always)]
+    fn get_prev_sender(&self, tx_idx: TxIdx, sender: &Address) -> Option<TxIdx> {
+        (0..tx_idx)
+            .rev()
+            .find(|&i| &unsafe { self.txs.get_unchecked(i) }.caller == sender)
     }
 
     // Execute a transaction. This can read from memory but cannot modify any state.
@@ -706,17 +711,24 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 // Since this retry is safe for syncing canonical blocks but can deadlock
                 // on new or faulty blocks. We can skip the transaction for new blocks and
                 // error out after a number of tries for the latter.
-                if tx_version.tx_idx > 0
-                    && matches!(
+                if tx_version.tx_idx > 0 {
+                    if matches!(
                         err,
                         EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee { .. })
-                            | EVMError::Transaction(InvalidTransaction::NonceTooHigh { .. })
-                    )
-                {
-                    Err(VmExecutionError::Blocking(tx_version.tx_idx - 1))
-                } else {
-                    Err(VmExecutionError::ExecutionError(err))
+                    ) {
+                        return Err(VmExecutionError::Blocking(tx_version.tx_idx - 1));
+                    } else if matches!(
+                        err,
+                        EVMError::Transaction(InvalidTransaction::NonceTooHigh { .. })
+                    ) {
+                        if let Some(blocking_tx_idx) =
+                            self.get_prev_sender(tx_version.tx_idx, &tx.caller)
+                        {
+                            return Err(VmExecutionError::Blocking(blocking_tx_idx));
+                        }
+                    }
                 }
+                Err(VmExecutionError::ExecutionError(err))
             }
         }
     }
