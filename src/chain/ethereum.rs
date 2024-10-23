@@ -1,6 +1,6 @@
 //! Ethereum
 
-use std::{collections::BTreeMap, fmt::Debug, hash::BuildHasher};
+use std::{collections::BTreeMap, fmt::Debug};
 
 use alloy_chains::NamedChain;
 use alloy_consensus::{ReceiptEnvelope, TxType};
@@ -15,7 +15,8 @@ use revm::{
 
 use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};
 use crate::{
-    mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx,
+    hash_determinisitic, mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation,
+    PevmTxExecutionResult, TxIdx,
 };
 
 /// Implementation of [PevmChain] for Ethereum
@@ -149,14 +150,10 @@ impl PevmChain for PevmEthereum {
         })
     }
 
-    fn build_mv_memory<H: BuildHasher>(
-        &self,
-        hasher: &H,
-        block_env: &BlockEnv,
-        txs: &[TxEnv],
-    ) -> MvMemory {
+    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
         let block_size = txs.len();
-        let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
+        let beneficiary_location_hash =
+            hash_determinisitic(MemoryLocation::Basic(block_env.coinbase));
 
         // TODO: Estimate more locations based on sender, to, etc.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
@@ -176,7 +173,7 @@ impl PevmChain for PevmEthereum {
         Handler::mainnet_with_spec(spec_id, with_reward_beneficiary)
     }
 
-    fn get_reward_policy<H: BuildHasher>(&self, _hasher: &H) -> RewardPolicy {
+    fn get_reward_policy(&self) -> RewardPolicy {
         RewardPolicy::Ethereum
     }
 

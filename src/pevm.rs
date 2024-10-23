@@ -1,6 +1,5 @@
 use std::{
     fmt::Debug,
-    hash::BuildHasher,
     num::NonZeroUsize,
     sync::{mpsc, Mutex, OnceLock},
     thread,
@@ -14,11 +13,11 @@ use revm::{
     primitives::{BlockEnv, SpecId, TxEnv},
     DatabaseCommit,
 };
-use rustc_hash::FxBuildHasher;
 
 use crate::{
     chain::PevmChain,
     compat::get_block_env,
+    hash_determinisitic,
     mv_memory::MvMemory,
     scheduler::Scheduler,
     storage::StorageWrapper,
@@ -82,19 +81,12 @@ impl<T> AsyncDropper<T> {
 }
 
 // TODO: Port more recyclable resources into here.
-#[derive(Default)]
+#[derive(Debug, Default)]
 /// The main pevm struct that executes blocks.
 pub struct Pevm {
-    hasher: FxBuildHasher,
     execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
     abort_reason: OnceLock<AbortReason>,
     dropper: AsyncDropper<(MvMemory, Scheduler, Vec<TxEnv>)>,
-}
-
-impl Debug for Pevm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("pevm")
-    }
 }
 
 impl Pevm {
@@ -157,16 +149,8 @@ impl Pevm {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
 
-        let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
-        let vm = Vm::new(
-            self.hasher,
-            storage,
-            &mv_memory,
-            chain,
-            &block_env,
-            &txs,
-            spec_id,
-        );
+        let mv_memory = chain.build_mv_memory(&block_env, &txs);
+        let vm = Vm::new(storage, &mv_memory, chain, &block_env, &txs, spec_id);
 
         let additional = block_size.saturating_sub(self.execution_results.len());
         if additional > 0 {
@@ -235,7 +219,7 @@ impl Pevm {
         // We fully evaluate (the balance and nonce of) the beneficiary account
         // and raw transfer recipients that may have been atomically updated.
         for address in mv_memory.consume_lazy_addresses() {
-            let location_hash = self.hasher.hash_one(MemoryLocation::Basic(address));
+            let location_hash = hash_determinisitic(MemoryLocation::Basic(address));
             if let Some(write_history) = mv_memory.data.get(&location_hash) {
                 let mut balance = U256::ZERO;
                 let mut nonce = 0;
