@@ -64,13 +64,23 @@ pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<T
 
 pub fn bench_raw_transfers(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / common::RAW_TRANSFER_GAS_LIMIT as f64).ceil() as usize;
+    // Skip the built-in precompiled contracts addresses.
+    const START_ADDRESS: usize = 1000;
+    const MINER_ADDRESS: usize = 0;
+    let storage = InMemoryStorage::new(
+        std::iter::once(MINER_ADDRESS)
+            .chain(START_ADDRESS..START_ADDRESS + block_size)
+            .map(common::mock_account),
+        None,
+        [],
+    );
     bench(
         c,
         "Independent Raw Transfers",
-        InMemoryStorage::new((0..=block_size).map(common::mock_account), None, []),
-        (1..=block_size)
+        storage,
+        (0..block_size)
             .map(|i| {
-                let address = Address::from(U160::from(i));
+                let address = Address::from(U160::from(START_ADDRESS + i));
                 TxEnv {
                     caller: address,
                     transact_to: TransactTo::Call(address),
@@ -85,7 +95,7 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
 }
 
 pub fn bench_erc20(c: &mut Criterion) {
-    let block_size = (GIGA_GAS as f64 / erc20::GAS_LIMIT as f64).ceil() as usize;
+    let block_size = (GIGA_GAS as f64 / erc20::ESTIMATED_GAS_USED as f64).ceil() as usize;
     let (mut state, bytecodes, txs) = erc20::generate_cluster(block_size, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
     bench(
@@ -97,7 +107,7 @@ pub fn bench_erc20(c: &mut Criterion) {
 }
 
 pub fn bench_uniswap(c: &mut Criterion) {
-    let block_size = (GIGA_GAS as f64 / uniswap::GAS_LIMIT as f64).ceil() as usize;
+    let block_size = (GIGA_GAS as f64 / uniswap::ESTIMATED_GAS_USED as f64).ceil() as usize;
     let mut final_state = ChainState::from_iter([(Address::ZERO, EvmAccount::default())]); // Beneficiary
     let mut final_bytecodes = Bytecodes::default();
     let mut final_txs = Vec::<TxEnv>::new();

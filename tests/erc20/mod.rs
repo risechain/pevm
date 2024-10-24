@@ -4,7 +4,8 @@ use contract::ERC20Token;
 use pevm::{Bytecodes, ChainState, EvmAccount};
 use revm::primitives::{uint, Address, TransactTo, TxEnv, U256};
 
-pub const GAS_LIMIT: u64 = 26_938;
+pub const GAS_LIMIT: u64 = 35_000;
+pub const ESTIMATED_GAS_USED: u64 = 29_738;
 
 // TODO: Better randomness control. Sometimes we want duplicates to test
 // dependent transactions, sometimes we want to guarantee non-duplicates
