@@ -5,7 +5,8 @@ use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
 use pevm::{Bytecodes, ChainState, EvmAccount};
 use revm::primitives::{fixed_bytes, uint, Address, Bytes, TransactTo, TxEnv, B256, U256};
 
-pub const GAS_LIMIT: u64 = 155_934;
+pub const GAS_LIMIT: u64 = 200_000;
+pub const ESTIMATED_GAS_USED: u64 = 155_934;
 
 pub fn generate_cluster(
     num_people: usize,
