@@ -12,7 +12,7 @@
 
 ## Solution
 
-**RISE pevm** sets to address this problem by designing an **EVM-specialized parallel executor** and implementing it in Rust to minimise runtime overheads. The result is the **fastest EVM block executor**, with a peak speedup of 22x and a raw execution throughput of 55 Gigagas/s on 32 AWS Graviton3 CPUs. RISE pevm also **enables new parallel dApp designs for EVM** like [Sharded AMM](https://arxiv.org/abs/2406.05568).
+**RISE pevm** sets to address this problem by designing an **EVM-specialized parallel executor** and implementing it in Rust to minimise runtime overheads. The result is the **fastest EVM block executor**, with a peak speedup of 22x and a raw execution throughput of 30 Gigagas/s on 32 AWS Graviton3 CPUs. RISE pevm also **enables new parallel dApp designs for EVM** like [Sharded AMM](https://arxiv.org/abs/2406.05568).
 
 ## Design
 
