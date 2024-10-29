@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use alloy_chains::NamedChain;
 use alloy_consensus::{Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy};
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{Bytes, ChainId, B256, U256};
 use alloy_rpc_types::{BlockTransactions, Header};
 use hashbrown::HashMap;
 use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType, TxDeposit};
@@ -23,7 +23,7 @@ use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};
 /// Implementation of [PevmChain] for Optimism
 #[derive(Debug, Clone, PartialEq)]
 pub struct PevmOptimism {
-    id: u64,
+    id: ChainId,
 }
 
 impl PevmOptimism {
@@ -32,6 +32,11 @@ impl PevmOptimism {
         PevmOptimism {
             id: NamedChain::Optimism.into(),
         }
+    }
+
+    /// Custom network
+    pub fn custom(id: ChainId) -> Self {
+        PevmOptimism { id }
     }
 }
 
@@ -124,7 +129,7 @@ impl PevmChain for PevmOptimism {
     type BlockSpecError = OptimismBlockSpecError;
     type TransactionParsingError = OptimismTransactionParsingError;
 
-    fn id(&self) -> u64 {
+    fn id(&self) -> ChainId {
         self.id
     }
 
