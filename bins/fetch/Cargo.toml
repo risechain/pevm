@@ -16,4 +16,4 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
 
-pevm.workspace = true
+pevm = { workspace = true, features = ["rpc"] }

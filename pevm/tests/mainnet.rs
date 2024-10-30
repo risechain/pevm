@@ -5,13 +5,13 @@ use tokio::runtime::Runtime;
 
 use pevm::{
     chain::{PevmChain, PevmEthereum},
-    RpcStorage,
 };
 
 pub mod common;
 
 // TODO: [tokio::test]?
 #[test]
+#[cfg(feature = "rpc")]
 fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
@@ -45,7 +45,7 @@ fn mainnet_blocks_from_rpc() {
             .unwrap();
         let chain = PevmEthereum::mainnet();
         let spec_id = chain.get_block_spec(&block.header).unwrap();
-        let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
+        let rpc_storage = pevm::RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         common::test_execute_alloy(&rpc_storage, &chain, block, true);
     }
 }

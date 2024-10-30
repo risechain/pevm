@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+defaults = []
+rpc = [
+  "tokio",
+  "reqwest",
+  "alloy-transport",
+  "alloy-transport-http",
+]
 optimism = [
     "revm/optimism",
     "dep:op-alloy-consensus",
@@ -33,14 +40,13 @@ thiserror.workspace = true
 
 revm = { workspace = true, features = ["serde"] }
 
-# RPC Storage dependencies
-# TODO: Put these behind an RPC flag to not pollute the core
-# library with RPC network & transport dependencies, etc.
 alloy-provider.workspace = true
-alloy-transport.workspace = true
-alloy-transport-http.workspace = true
-reqwest.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+# RPC feature dependencies
+alloy-transport = { workspace = true, optional = true }
+alloy-transport-http = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 
 # OP dependencies
 op-alloy-consensus = { workspace = true, optional = true }
