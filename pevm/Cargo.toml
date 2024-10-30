@@ -11,10 +11,6 @@ optimism = [
     "dep:op-alloy-rpc-types",
 ]
 
-[[bin]]
-name = "fetch"
-path = "bin/fetch.rs"
-
 [dependencies]
 alloy-chains.workspace = true
 alloy-consensus.workspace = true
@@ -46,25 +42,24 @@ alloy-transport-http.workspace = true
 reqwest.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
-# CLI dependencies
-bincode.workspace = true
-clap = { workspace = true, features = ["derive"] }
-flate2.workspace = true
-serde_json = { workspace = true, features = ["preserve_order"] }
-
 # OP dependencies
 op-alloy-consensus = { workspace = true, optional = true }
 op-alloy-network = { workspace = true, optional = true }
 op-alloy-rpc-types = { workspace = true, optional = true }
 
 [dev-dependencies]
+bincode.workspace = true
 criterion.workspace = true
+flate2.workspace = true
 rand.workspace = true
 rayon.workspace = true
+reqwest.workspace = true
 revme.workspace = true
 rpmalloc = { workspace = true, features = ["thread_cache", "global_cache"] }
+serde_json.workspace = true
 snmalloc-rs.workspace = true
 tikv-jemallocator.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 walkdir.workspace = true
 
 [lints]

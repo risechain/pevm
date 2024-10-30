@@ -2786,13 +2786,10 @@ dependencies = [
  "alloy-transport",
  "alloy-transport-http",
  "alloy-trie",
- "bincode",
  "bitflags 2.6.0",
  "bitvec",
- "clap 4.5.20",
  "criterion",
  "dashmap",
- "flate2",
  "hashbrown 0.15.0",
  "op-alloy-consensus",
  "op-alloy-network",
@@ -2805,13 +2802,29 @@ dependencies = [
  "rpmalloc",
  "rustc-hash",
  "serde",
- "serde_json",
  "smallvec",
  "snmalloc-rs",
  "thiserror",
  "tikv-jemallocator",
  "tokio",
  "walkdir",
+]
+
+[[package]]
+name = "pevm-fetch"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types",
+ "bincode",
+ "clap 4.5.20",
+ "flate2",
+ "pevm",
+ "reqwest 0.12.8",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

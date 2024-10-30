@@ -221,9 +221,11 @@ mod pevm;
 pub use pevm::{execute_revm_sequential, Pevm, PevmError, PevmResult};
 mod scheduler;
 mod storage;
+#[cfg(feature = "rpc")]
+pub use storage::RpcStorage;
 pub use storage::{
     AccountBasic, BlockHashes, Bytecodes, ChainState, EvmAccount, EvmCode, InMemoryStorage,
-    RpcStorage, Storage, StorageWrapper,
+    Storage, StorageWrapper,
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};
