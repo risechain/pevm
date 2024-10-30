@@ -41,7 +41,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     withdrawals_root: None,
     blob_gas_used: None,
     parent_beacon_block_root: None,
-    requests_hash: None,
+    requests_root: None,
 };
 
 const MOCK_SIGNATURE: Signature = Signature {
