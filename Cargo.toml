@@ -17,14 +17,14 @@ path = "bin/fetch.rs"
 
 [dependencies]
 alloy-chains = "0.1.40"
-alloy-consensus = "0.5.2"
-alloy-primitives = { version = "0.8.8", features = [
+alloy-consensus = "0.4.2"
+alloy-primitives = { version = "0.8.7", features = [
     "asm-keccak",
     "map-fxhash",
 ] }
-alloy-rlp = "0.3.8"
-alloy-rpc-types = "0.5.2"
-alloy-trie = "0.7.2"
+alloy-rlp = "0.3.4"
+alloy-rpc-types = "0.4.2"
+alloy-trie = "0.6"
 # We can roll our own but [revm] depends on this anyway.
 bitflags = "2.6.0"
 bitvec = "1.0.1"
@@ -36,16 +36,16 @@ smallvec = "1.13.2"
 thiserror = "1.0.64"
 
 # Let's do our best to port needed REVM changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "bb350a971e5f39a8f822ace081584a3a45fd7c6a", features = [
+revm = { git = "https://github.com/risechain/revm", rev = "fa685fbacc56718bdcc8aa11f851e5070c2d63b3", features = [
     "serde",
 ] }
 
 # RPC Storage dependencies
 # TODO: Put these behind an RPC flag to not pollute the core
 # library with RPC network & transport dependencies, etc.
-alloy-provider = "0.5.2"
-alloy-transport = "0.5.2"
-alloy-transport-http = "0.5.2"
+alloy-provider = "0.4.2"
+alloy-transport = "0.4.2"
+alloy-transport-http = "0.4.2"
 reqwest = "0.12.8"
 tokio = { version = "1.40.0", features = ["rt-multi-thread"] }
 
@@ -56,15 +56,15 @@ flate2 = "1.0.34"
 serde_json = { version = "1.0.132", features = ["preserve_order"] }
 
 # OP dependencies
-op-alloy-consensus = { version = "0.5.0", optional = true }
-op-alloy-network = { version = "0.5.0", optional = true }
-op-alloy-rpc-types = { version = "0.5.0", optional = true }
+op-alloy-consensus = { version = "0.4.0", optional = true }
+op-alloy-network = { version = "0.4.0", optional = true }
+op-alloy-rpc-types = { version = "0.4.0", optional = true }
 
 [dev-dependencies]
 criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"
-revme = { git = "https://github.com/risechain/revm", rev = "bb350a971e5f39a8f822ace081584a3a45fd7c6a" }
+revme = { git = "https://github.com/risechain/revm", rev = "fa685fbacc56718bdcc8aa11f851e5070c2d63b3" }
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
 snmalloc-rs = "0.3.6"
 tikv-jemallocator = "0.6.0"
