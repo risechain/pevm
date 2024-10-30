@@ -1,0 +1,79 @@
+[package]
+name = "pevm"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+optimism = [
+    "revm/optimism",
+    "dep:op-alloy-consensus",
+    "dep:op-alloy-network",
+    "dep:op-alloy-rpc-types",
+]
+
+[[bin]]
+name = "fetch"
+path = "bin/fetch.rs"
+
+[dependencies]
+alloy-chains.workspace = true
+alloy-consensus.workspace = true
+alloy-primitives = { workspace = true, features = [
+    "asm-keccak",
+    "map-fxhash",
+] }
+alloy-rlp.workspace = true
+alloy-rpc-types.workspace = true
+alloy-trie.workspace = true
+# We can roll our own but [revm] depends on this anyway.
+bitflags.workspace = true
+bitvec.workspace = true
+dashmap.workspace = true
+hashbrown.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+revm = { workspace = true, features = ["serde"] }
+
+# RPC Storage dependencies
+# TODO: Put these behind an RPC flag to not pollute the core
+# library with RPC network & transport dependencies, etc.
+alloy-provider.workspace = true
+alloy-transport.workspace = true
+alloy-transport-http.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+# CLI dependencies
+bincode.workspace = true
+clap = { workspace = true, features = ["derive"] }
+flate2.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+
+# OP dependencies
+op-alloy-consensus = { workspace = true, optional = true }
+op-alloy-network = { workspace = true, optional = true }
+op-alloy-rpc-types = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion.workspace = true
+rand.workspace = true
+rayon.workspace = true
+revme.workspace = true
+rpmalloc = { workspace = true, features = ["thread_cache", "global_cache"] }
+snmalloc-rs.workspace = true
+tikv-jemallocator.workspace = true
+walkdir.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "mainnet"
+harness = false
+
+[[bench]]
+name = "gigagas"
+harness = false
