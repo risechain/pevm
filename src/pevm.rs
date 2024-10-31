@@ -5,7 +5,7 @@ use std::{
     thread,
 };
 
-use alloy_primitives::U256;
+use alloy_primitives::{TxNonce, U256};
 use alloy_rpc_types::{Block, BlockTransactions};
 use hashbrown::HashMap;
 use revm::{
@@ -24,7 +24,7 @@ use crate::{
     vm::{
         build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult,
     },
-    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
+    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxIdx, TxVersion,
 };
 
 /// Errors when executing a block with pevm.
@@ -36,6 +36,15 @@ pub enum PevmError<C: PevmChain> {
     MissingTransactionData,
     /// Invalid input transaction.
     InvalidTransaction(C::TransactionParsingError),
+    /// Nonce too low or too high
+    NonceMismatch {
+        /// Transaction index
+        tx_idx: TxIdx,
+        /// Nonce from tx (from the very input)
+        tx_nonce: TxNonce,
+        /// Nonce from state and execution
+        executed_nonce: TxNonce,
+    },
     /// Storage error.
     // TODO: More concrete types than just an arbitrary string.
     StorageError(String),
@@ -287,10 +296,23 @@ impl Pevm {
                         _ => unreachable!(),
                     }
                     // Assert that evaluated nonce is correct when address is caller.
-                    debug_assert!(
-                        tx.caller != address || tx.nonce.map_or(true, |n| n + 1 == nonce)
-                    );
-
+                    if tx.caller == address {
+                        if let Some(tx_nonce) = tx.nonce {
+                            let executed_nonce = if nonce == 0 {
+                                return Err(PevmError::UnreachableError);
+                            } else {
+                                nonce - 1
+                            };
+                            if tx_nonce != executed_nonce {
+                                // TODO: Consider falling back to sequential instead
+                                return Err(PevmError::NonceMismatch {
+                                    tx_idx: *tx_idx,
+                                    tx_nonce,
+                                    executed_nonce,
+                                });
+                            }
+                        }
+                    }
                     // SAFETY: The multi-version data structure should not leak an index over block size.
                     let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
                     let account = tx_result.state.entry(address).or_default();
