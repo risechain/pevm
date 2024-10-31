@@ -229,7 +229,10 @@ impl Pevm {
                     let tx = unsafe { txs.get_unchecked(*tx_idx) };
                     match memory_entry {
                         MemoryEntry::Data(_, MemoryValue::Basic(basic)) => {
-                            debug_assert!(!(basic.balance.is_zero() && info.nonce == 0));
+                            // Self-destructed accounts should already be handled (falling back to sequential execution).
+                            // Therefore, an empty account here indicates a bug.
+                            // See https://github.com/risechain/pevm/pull/345
+                            debug_assert!(!basic.balance.is_zero() || basic.nonce != 0);
                             info.balance = basic.balance;
                             info.nonce = basic.nonce;
                         }
