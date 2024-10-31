@@ -78,6 +78,116 @@ pub(crate) enum VmExecutionError {
     ExecutionError(ExecutionError),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum InconsistentReadError {
+    // Longer than the reference value
+    TooLong,
+    // Shorter than the reference value
+    TooShort,
+    // Different from the reference value
+    Forked,
+}
+
+impl From<InconsistentReadError> for ReadError {
+    fn from(error: InconsistentReadError) -> Self {
+        Self::InconsistentRead(error)
+    }
+}
+
+/// Builder for [ReadOrigins].
+/// - `push(read_origin)`: Add an entry. This can be called multiple times.
+/// - `create()`: Build the final [ReadOrigins].
+///
+/// In verify mode ([ReadOriginsBuilder::Verify]), `push` and `create`
+/// might throw [InconsistentReadError] if the building items does not match a reference [ReadOrigins].
+/// In this mode, use `verify()` instead of `create()` if the final [ReadOrigins] is not needed.
+enum ReadOriginsBuilder<'a> {
+    Create {
+        origins: ReadOrigins,
+    },
+    Verify {
+        origins: &'a ReadOrigins,
+        position: usize,
+    },
+}
+
+/// Create [ReadOriginsBuilder] from &[ReadOrigins].
+/// If the argument is an empty value, returns a [ReadOriginsBuilder::Create],
+/// otherwise, returns a [ReadOriginsBuilder::Verify].
+impl<'a> From<&'a ReadOrigins> for ReadOriginsBuilder<'a> {
+    fn from(read_origins: &'a ReadOrigins) -> Self {
+        if read_origins.is_empty() {
+            Self::Create {
+                origins: ReadOrigins::new(),
+            }
+        } else {
+            Self::Verify {
+                origins: read_origins,
+                position: 0,
+            }
+        }
+    }
+}
+
+impl<'a> ReadOriginsBuilder<'a> {
+    /// Pushes a [ReadOrigin].
+    fn push(&mut self, origin: ReadOrigin) -> Result<(), InconsistentReadError> {
+        match self {
+            ReadOriginsBuilder::Create { origins } => {
+                origins.push(origin);
+                Ok(())
+            }
+            ReadOriginsBuilder::Verify {
+                ref mut origins,
+                ref mut position,
+            } => match origins.get(*position) {
+                Some(existing_origin) => {
+                    if existing_origin != &origin {
+                        Err(InconsistentReadError::Forked)
+                    } else {
+                        *position += 1;
+                        Ok(())
+                    }
+                }
+                None => Err(InconsistentReadError::TooLong),
+            },
+        }
+    }
+
+    /// Stop building.
+    /// In `Verify` mode, check if the final result is exactly the same as the reference [ReadOrigins].
+    /// In `Create` mode, simply returns `Ok(_)`.
+    fn verify(self) -> Result<(), InconsistentReadError> {
+        match self {
+            ReadOriginsBuilder::Create { .. } => Ok(()),
+            ReadOriginsBuilder::Verify { origins, position } => {
+                if origins.len() != position {
+                    Err(InconsistentReadError::TooShort)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// Stop building.
+    /// In `Create` mode, simply returns the built [ReadOrigins].
+    /// In `Verify` mode, verifies then clones the reference [ReadOrigins].
+    fn create(self) -> Result<ReadOrigins, InconsistentReadError> {
+        match self {
+            ReadOriginsBuilder::Create { origins } => Ok(origins),
+            ReadOriginsBuilder::Verify { origins, .. } => {
+                self.verify()?;
+                Ok(origins.clone())
+            }
+        }
+    }
+
+    fn is_create_mode(&self) -> bool {
+        matches!(self, Self::Create { .. })
+    }
+}
+
 /// Errors when reading a memory location.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReadError {
@@ -88,7 +198,7 @@ pub enum ReadError {
     /// There has been an inconsistent read like reading the same
     /// location from storage in the first call but from [VmMemory] in
     /// the next.
-    InconsistentRead,
+    InconsistentRead(InconsistentReadError),
     /// Found an invalid nonce, like the first transaction of a sender
     /// not having a (+1) nonce from storage.
     InvalidNonce(TxIdx),
@@ -105,7 +215,7 @@ pub enum ReadError {
 impl From<ReadError> for VmExecutionError {
     fn from(err: ReadError) -> Self {
         match err {
-            ReadError::InconsistentRead => VmExecutionError::Retry,
+            ReadError::InconsistentRead(_) => VmExecutionError::Retry,
             ReadError::SelfDestructedAccount => VmExecutionError::FallbackToSequential,
             ReadError::Blocking(tx_idx) => VmExecutionError::Blocking(tx_idx),
             _ => VmExecutionError::ExecutionError(EVMError::Database(err)),
@@ -184,22 +294,10 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         hash_determinisitic(MemoryLocation::Basic(*address))
     }
 
-    // Push a new read origin. Return an error when there's already
-    // an origin but doesn't match the new one to force re-execution.
-    fn push_origin(read_origins: &mut ReadOrigins, origin: ReadOrigin) -> Result<(), ReadError> {
-        if let Some(prev_origin) = read_origins.last() {
-            if prev_origin != &origin {
-                return Err(ReadError::InconsistentRead);
-            }
-        } else {
-            read_origins.push(origin);
-        }
-        Ok(())
-    }
-
     fn get_code_hash(&mut self, address: Address) -> Result<Option<B256>, ReadError> {
         let location_hash = hash_determinisitic(MemoryLocation::CodeHash(address));
-        let read_origins = self.read_set.entry(location_hash).or_default();
+        let read_origins_entry_mut = self.read_set.entry(location_hash).or_default();
+        let mut read_origins_builder = ReadOriginsBuilder::from(&*read_origins_entry_mut);
 
         // Try to read the latest code hash in [MvMemory]
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
@@ -213,13 +311,10 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
                         return Err(ReadError::SelfDestructedAccount);
                     }
                     MemoryValue::CodeHash(code_hash) => {
-                        Self::push_origin(
-                            read_origins,
-                            ReadOrigin::MvMemory(TxVersion {
-                                tx_idx: *tx_idx,
-                                tx_incarnation: *tx_incarnation,
-                            }),
-                        )?;
+                        read_origins_builder.push(ReadOrigin::MvMemory(TxVersion {
+                            tx_idx: *tx_idx,
+                            tx_incarnation: *tx_incarnation,
+                        }))?;
                         return Ok(Some(*code_hash));
                     }
                     _ => {}
@@ -227,8 +322,13 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
             }
         };
 
-        // Fallback to storage
-        Self::push_origin(read_origins, ReadOrigin::Storage)?;
+        read_origins_builder.push(ReadOrigin::Storage)?;
+        if read_origins_builder.is_create_mode() {
+            *read_origins_entry_mut = read_origins_builder.create()?;
+        } else {
+            read_origins_builder.verify()?;
+        }
+
         self.vm
             .storage
             .code_hash(&address)
@@ -257,12 +357,8 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             }
         }
 
-        let read_origins = self.read_set.entry(location_hash).or_default();
-        let has_prev_origins = !read_origins.is_empty();
-        // We accumulate new origins to either:
-        // - match with the previous origins to check consistency
-        // - register origins on the first read
-        let mut new_origins = SmallVec::new();
+        let read_origins_entry_mut = self.read_set.entry(location_hash).or_default();
+        let mut read_origins_builder = ReadOriginsBuilder::from(&*read_origins_entry_mut);
 
         let mut final_account = None;
         let mut balance_addition = U256::ZERO;
@@ -282,23 +378,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                             return Err(ReadError::Blocking(*blocking_idx))
                         }
                         Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
-                            // About to push a new origin
-                            // Inconsistent: new origin will be longer than the previous!
-                            if has_prev_origins && read_origins.len() == new_origins.len() {
-                                return Err(ReadError::InconsistentRead);
-                            }
-                            let origin = ReadOrigin::MvMemory(TxVersion {
+                            read_origins_builder.push(ReadOrigin::MvMemory(TxVersion {
                                 tx_idx: *closest_idx,
                                 tx_incarnation: *tx_incarnation,
-                            });
-                            // Inconsistent: new origin is different from the previous!
-                            if has_prev_origins
-                                && unsafe { read_origins.get_unchecked(new_origins.len()) }
-                                    != &origin
-                            {
-                                return Err(ReadError::InconsistentRead);
-                            }
-                            new_origins.push(origin);
+                            }))?;
                             match value {
                                 MemoryValue::Basic(basic) => {
                                     // TODO: Return [SelfDestructedAccount] if [basic] is
@@ -340,17 +423,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // Fall back to storage
         if final_account.is_none() {
-            // Populate [Storage] on the first read
-            if !has_prev_origins {
-                new_origins.push(ReadOrigin::Storage);
-            }
-            // Inconsistent: previous origin is longer or didn't read
-            // from storage for the last origin.
-            else if read_origins.len() != new_origins.len() + 1
-                || read_origins.last() != Some(&ReadOrigin::Storage)
-            {
-                return Err(ReadError::InconsistentRead);
-            }
+            read_origins_builder.push(ReadOrigin::Storage)?;
             final_account = match self.vm.storage.basic(&address) {
                 Ok(Some(basic)) => Some(basic),
                 Ok(None) => {
@@ -364,10 +437,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             };
         }
 
-        // Populate read origins on the first read.
-        // Otherwise [read_origins] matches [new_origins] already.
-        if !has_prev_origins {
-            *read_origins = new_origins;
+        if read_origins_builder.is_create_mode() {
+            *read_origins_entry_mut = read_origins_builder.create()?;
+        } else {
+            read_origins_builder.verify()?;
         }
 
         if let Some(mut account) = final_account {
@@ -448,8 +521,8 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         let location_hash = hash_determinisitic(MemoryLocation::Storage(address, index));
-
-        let read_origins = self.read_set.entry(location_hash).or_default();
+        let read_origins_entry_mut = self.read_set.entry(location_hash).or_default();
+        let mut read_origins_builder = ReadOriginsBuilder::from(&*read_origins_entry_mut);
 
         // Try reading from multi-version data
         if self.tx_idx > 0 {
@@ -459,13 +532,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                 {
                     match entry {
                         MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
-                            Self::push_origin(
-                                read_origins,
-                                ReadOrigin::MvMemory(TxVersion {
-                                    tx_idx: *closest_idx,
-                                    tx_incarnation: *tx_incarnation,
-                                }),
-                            )?;
+                            read_origins_builder.push(ReadOrigin::MvMemory(TxVersion {
+                                tx_idx: *closest_idx,
+                                tx_incarnation: *tx_incarnation,
+                            }))?;
                             return Ok(*value);
                         }
                         MemoryEntry::Estimate => return Err(ReadError::Blocking(*closest_idx)),
@@ -476,7 +546,13 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         }
 
         // Fall back to storage
-        Self::push_origin(read_origins, ReadOrigin::Storage)?;
+        read_origins_builder.push(ReadOrigin::Storage)?;
+        if read_origins_builder.is_create_mode() {
+            *read_origins_entry_mut = read_origins_builder.create()?;
+        } else {
+            read_origins_builder.verify()?;
+        }
+
         self.vm
             .storage
             .storage(&address, &index)
