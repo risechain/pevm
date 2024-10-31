@@ -156,17 +156,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 ),
             ) {
                 // EIP-2681
-                (Some("TR_NonceHasMaxValue"), Ok(exec_results)) => {
-                    assert!(exec_results.len() == 1);
-                    assert!(exec_results[0].receipt.status.coerce_status());
-                    // This is overly strict as we only need the newly created account's code to be empty.
-                    // Extracting such account is unjustified complexity so let's live with this for now.
-                    assert!(exec_results[0].state.values().all(|account| {
-                        match account {
-                            Some(account) => account.code_hash.is_none(),
-                            None => true,
-                        }
-                    }));
+                (Some("TR_NonceHasMaxValue"), Err(err)) => {
+                    assert!(matches!(err, PevmError::NonceMismatch { .. }))
                 }
                 // Skipping special cases where REVM returns `Ok` on unsupported features.
                 (Some("TR_TypeNotSupported"), Ok(_)) => {}
