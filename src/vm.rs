@@ -1,6 +1,8 @@
+use std::cmp::Ordering;
+
 use alloy_primitives::TxKind;
 use alloy_rpc_types::Receipt;
-use hashbrown::HashMap;
+use hashbrown::{hash_map::Entry, HashMap};
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
@@ -272,6 +274,15 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // Try reading from multi-version data
         if self.tx_idx > 0 {
+            // `current_parent_tx_idx` will go through values `Some(p_0)`, `Some(p_1)`, ..., `None`
+            // where `p_0` is the parent of `tx_idx`, and `p_i` is the parent of `p_{i-1}`.
+            // Think of this as a stream of TxIdx, waiting to be fully drained.
+            let mut current_parent_tx_idx = if location_hash == self.from_hash {
+                self.vm.parent_tx_idxs.get(&self.tx_idx).copied()
+            } else {
+                None
+            };
+
             if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
                 let mut iter = written_transactions.range(..self.tx_idx);
 
@@ -281,14 +292,33 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                         Some((blocking_idx, MemoryEntry::Estimate)) => {
                             return Err(ReadError::Blocking(*blocking_idx))
                         }
-                        Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                        Some((&closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                            if location_hash == self.from_hash {
+                                if let Some(parent_tx_idx) = current_parent_tx_idx {
+                                    match closest_idx.cmp(&parent_tx_idx) {
+                                        Ordering::Less => {
+                                            // `written_transactions` does not contain `parent_tx_idx`,
+                                            // meaning `parent_tx_idx` is not executed,
+                                            // meaning we have to interrupt otherwise the resulted nonce will be incorrect.
+                                            return Err(ReadError::Blocking(parent_tx_idx));
+                                        }
+                                        Ordering::Equal => {
+                                            // Set current_parent_tx_idx to be the next parent.
+                                            // This variable `current_parent_tx_idx` will not be accessed from now to the end of the iteration.
+                                            current_parent_tx_idx =
+                                                self.vm.parent_tx_idxs.get(&parent_tx_idx).copied();
+                                        }
+                                        Ordering::Greater => {}
+                                    }
+                                }
+                            }
                             // About to push a new origin
                             // Inconsistent: new origin will be longer than the previous!
                             if has_prev_origins && read_origins.len() == new_origins.len() {
                                 return Err(ReadError::InconsistentRead);
                             }
                             let origin = ReadOrigin::MvMemory(TxVersion {
-                                tx_idx: *closest_idx,
+                                tx_idx: closest_idx,
                                 tx_incarnation: *tx_incarnation,
                             });
                             // Inconsistent: new origin is different from the previous!
@@ -331,9 +361,28 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                             }
                         }
                         None => {
+                            if location_hash == self.from_hash {
+                                if let Some(parent_tx_idx) = current_parent_tx_idx {
+                                    // Consider `current_parent_tx_idx` as a stream of `TxIdx`.
+                                    // If `current_parent_tx_idx` is `Some(_)`, the stream is not drained.
+                                    // Hence we conclude that `written_transactions` does not contain `parent_tx_idx`,
+                                    // meaning `parent_tx_idx` is not executed,
+                                    // meaning we have to interrupt otherwise the resulted nonce will be incorrect.
+                                    return Err(ReadError::Blocking(parent_tx_idx));
+                                }
+                            }
                             break;
                         }
                     }
+                }
+            } else if location_hash == self.from_hash {
+                if let Some(parent_tx_idx) = current_parent_tx_idx {
+                    // Consider `current_parent_tx_idx` as a stream of `TxIdx`.
+                    // If `current_parent_tx_idx` is `Some(_)`, the stream is not drained.
+                    // Hence we conclude that `written_transactions` does not contain `parent_tx_idx`,
+                    // meaning `parent_tx_idx` is not executed,
+                    // meaning we have to interrupt otherwise the resulted nonce will be incorrect.
+                    return Err(ReadError::Blocking(parent_tx_idx));
                 }
             }
         }
@@ -376,13 +425,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             if location_hash == self.from_hash
                 && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
             {
-                if self.tx_idx > 0 {
-                    // TODO: Better retry strategy -- immediately, to the
-                    // closest sender tx, to the missing sender tx, etc.
-                    return Err(ReadError::Blocking(self.tx_idx - 1));
-                } else {
-                    return Err(ReadError::InvalidNonce(self.tx_idx));
-                }
+                return Err(ReadError::InvalidNonce(self.tx_idx));
             }
 
             // Fully evaluate the account and register it to read cache
@@ -500,6 +543,7 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
+    parent_tx_idxs: HashMap<TxIdx, TxIdx>,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
@@ -511,6 +555,21 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         txs: &'a [TxEnv],
         spec_id: SpecId,
     ) -> Self {
+        let mut parent_tx_idxs = HashMap::new();
+        let mut address_to_tx_idx = HashMap::new();
+
+        for (tx_idx, tx) in txs.iter().enumerate() {
+            match address_to_tx_idx.entry(tx.caller) {
+                Entry::Occupied(mut occupied_entry) => {
+                    let old_value = occupied_entry.insert(tx_idx);
+                    parent_tx_idxs.insert(tx_idx, old_value);
+                }
+                Entry::Vacant(vacant_entry) => {
+                    vacant_entry.insert(tx_idx);
+                }
+            }
+        }
+
         Self {
             storage,
             mv_memory,
@@ -522,6 +581,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 block_env.coinbase,
             )),
             reward_policy: chain.get_reward_policy(),
+            parent_tx_idxs,
         }
     }
 
