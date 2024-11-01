@@ -40,6 +40,8 @@ use crate::{FinishExecFlags, IncarnationStatus, Task, TxIdx, TxStatus, TxVersion
 pub(crate) struct Scheduler {
     // The number of transactions in this block.
     block_size: usize,
+    // The number of threads that can concurrently execute transactions.
+    concurrency_level: usize,
     // The most up-to-date incarnation number (initially 0) and
     // the status of this incarnation.
     // TODO: Consider packing [TxStatus]s into atomics instead of
@@ -65,9 +67,10 @@ pub(crate) struct Scheduler {
 // TODO: Better error handling.
 // Like returning errors instead of panicking on [unreachable]s.
 impl Scheduler {
-    pub(crate) fn new(block_size: usize) -> Self {
+    pub(crate) fn new(block_size: usize, concurrency_level: usize) -> Self {
         Self {
             block_size,
+            concurrency_level,
             execution_idx: AtomicUsize::new(0),
             transactions_status: (0..block_size)
                 .map(|_| {
@@ -110,7 +113,7 @@ impl Scheduler {
             let execution_idx = self.execution_idx.load(Ordering::Relaxed);
             let validation_idx = self.validation_idx.load(Ordering::Relaxed);
             if execution_idx >= self.block_size && validation_idx >= self.block_size {
-                if self.num_validated.load(Ordering::Relaxed)
+                if self.concurrency_level + self.num_validated.load(Ordering::Relaxed)
                     >= self.block_size - self.min_validation_idx.load(Ordering::Relaxed)
                 {
                     break;
