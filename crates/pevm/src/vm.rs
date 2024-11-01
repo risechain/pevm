@@ -372,39 +372,47 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             *read_origins = new_origins;
         }
 
-        if location_hash == self.from_hash {
-            let mut current_parent: Option<TxIdx> =
-                self.vm.parent_tx_idxs.get(&self.tx_idx).copied();
-            for read_origin in read_origins.iter() {
-                match read_origin {
-                    ReadOrigin::MvMemory(tx_version) => {
-                        if let Some(parent) = current_parent {
-                            match parent.cmp(&tx_version.tx_idx) {
-                                Ordering::Less => {}
-                                Ordering::Equal => {
-                                    current_parent = self.vm.parent_tx_idxs.get(&parent).copied();
-                                }
-                                Ordering::Greater => {
-                                    return Err(ReadError::Blocking(parent));
-                                }
-                            }
-                        }
-                    }
-                    ReadOrigin::Storage => {
-                        if let Some(parent) = current_parent {
-                            return Err(ReadError::Blocking(parent));
-                        }
-                    }
-                }
-            }
-        }
-
         if let Some(mut account) = final_account {
             // Check sender nonce
             account.nonce += nonce_addition;
             if location_hash == self.from_hash
                 && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
             {
+                let get_parent = |tx_idx: TxIdx| {
+                    let parent_tx_idx = unsafe { *self.vm.parent_tx_idxs.get_unchecked(tx_idx) };
+                    if parent_tx_idx == tx_idx {
+                        None
+                    } else {
+                        Some(parent_tx_idx)
+                    }
+                };
+
+                // BEGIN: nonce check
+                let mut current_parent: Option<TxIdx> = get_parent(self.tx_idx);
+                for read_origin in read_origins.iter() {
+                    match read_origin {
+                        ReadOrigin::MvMemory(tx_version) => {
+                            if let Some(parent) = current_parent {
+                                match parent.cmp(&tx_version.tx_idx) {
+                                    Ordering::Less => {}
+                                    Ordering::Equal => {
+                                        current_parent = get_parent(parent);
+                                    }
+                                    Ordering::Greater => {
+                                        return Err(ReadError::Blocking(parent));
+                                    }
+                                }
+                            }
+                        }
+                        ReadOrigin::Storage => {
+                            if let Some(parent) = current_parent {
+                                return Err(ReadError::Blocking(parent));
+                            }
+                        }
+                    }
+                }
+                // END: nonce check
+
                 return Err(ReadError::InvalidNonce(self.tx_idx));
             }
 
@@ -523,7 +531,7 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
-    parent_tx_idxs: HashMap<TxIdx, TxIdx>,
+    parent_tx_idxs: Vec<TxIdx>, // parent_tx_idxs[i] = i if i does not have parent
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
@@ -535,14 +543,17 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         txs: &'a [TxEnv],
         spec_id: SpecId,
     ) -> Self {
-        let mut parent_tx_idxs = HashMap::new();
-        let mut address_to_tx_idx = HashMap::new();
+        let mut parent_tx_idxs: Vec<_> = txs.iter().enumerate().map(|(index, _)| index).collect();
+        let mut address_to_tx_idx =
+            HashMap::with_capacity_and_hasher(txs.len(), BuildSuffixHasher::default());
 
         for (tx_idx, tx) in txs.iter().enumerate() {
             match address_to_tx_idx.entry(tx.caller) {
                 Entry::Occupied(mut occupied_entry) => {
                     let old_value = occupied_entry.insert(tx_idx);
-                    parent_tx_idxs.insert(tx_idx, old_value);
+                    unsafe {
+                        *parent_tx_idxs.get_unchecked_mut(tx_idx) = old_value;
+                    }
                 }
                 Entry::Vacant(vacant_entry) => {
                     vacant_entry.insert(tx_idx);
