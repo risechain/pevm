@@ -21,8 +21,7 @@ pub struct ERC20Token {
 impl ERC20Token {
     pub fn new<U, V>(name: &str, symbol: &str, decimals: U, initial_supply: V) -> Self
     where
-        U256: UintTryFrom<U>,
-        U256: UintTryFrom<V>,
+        U256: UintTryFrom<U> + UintTryFrom<V>,
     {
         Self {
             name: String::from(name),
@@ -73,11 +72,11 @@ impl ERC20Token {
         store.set(4, from_short_string(&self.symbol));
         store.set(5, self.decimals);
 
-        for (address, amount) in self.balances.iter() {
+        for (address, amount) in &self.balances {
             store.set(from_indices(0, &[from_address(*address)]), *amount);
         }
 
-        for ((address, spender), amount) in self.allowances.iter() {
+        for ((address, spender), amount) in &self.allowances {
             store.set(
                 from_indices(1, &[from_address(*address), from_address(*spender)]),
                 *amount,

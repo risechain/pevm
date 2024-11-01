@@ -21,7 +21,7 @@ use crate::{BuildIdentityHasher, BuildSuffixHasher};
 // on the [Storage] interface here.
 
 /// An EVM account.
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvmAccount {
     /// The account's balance.
     pub balance: U256,
@@ -56,7 +56,7 @@ impl From<Account> for EvmAccount {
 
 /// Basic information of an account
 // TODO: Reuse something sane from Alloy?
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountBasic {
     /// The balance of the account.
     pub balance: U256,
@@ -74,7 +74,7 @@ impl Default for AccountBasic {
 }
 
 /// Analyzed legacy code.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LegacyCode {
     /// Bytecode with 32 zero bytes padding.
     // TODO: Store unpadded bytecode and pad on revm conversion
@@ -86,7 +86,7 @@ pub struct LegacyCode {
 }
 
 /// EIP7702 delegated code.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Eip7702Code {
     /// Address of the EOA which will inherit the bytecode.
     delegated_address: Address,
@@ -94,8 +94,8 @@ pub struct Eip7702Code {
     version: u8,
 }
 
-/// EVM Code, currently mapping to REVM's [ByteCode].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// EVM Code, currently mapping to REVM's [`ByteCode`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EvmCode {
     /// Maps both analyzed and non-analyzed REVM legacy bytecode.
     Legacy(LegacyCode),
@@ -105,7 +105,7 @@ pub enum EvmCode {
     Eof(Bytes),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BytecodeConversionError {
     EofDecodingError,
 }
@@ -116,7 +116,7 @@ impl TryFrom<EvmCode> for Bytecode {
         match code {
             // TODO: Turn this [unsafe] into a proper [Result]
             EvmCode::Legacy(code) => unsafe {
-                Ok(Bytecode::new_analyzed(
+                Ok(Self::new_analyzed(
                     code.bytecode,
                     code.original_len,
                     JumpTable(code.jump_table),
@@ -126,7 +126,7 @@ impl TryFrom<EvmCode> for Bytecode {
                 let mut raw = EIP7702_MAGIC_BYTES.to_vec();
                 raw.push(code.version);
                 raw.extend(&code.delegated_address);
-                Ok(Bytecode::Eip7702(Eip7702Bytecode {
+                Ok(Self::Eip7702(Eip7702Bytecode {
                     delegated_address: code.delegated_address,
                     version: code.version,
                     raw: raw.into(),
@@ -134,7 +134,7 @@ impl TryFrom<EvmCode> for Bytecode {
             }
             // TODO: Forward the specific errors from revm
             EvmCode::Eof(code) => Eof::decode(code)
-                .map(|eof| Bytecode::Eof(Arc::new(eof)))
+                .map(|eof| Self::Eof(Arc::new(eof)))
                 .map_err(|_| BytecodeConversionError::EofDecodingError),
         }
     }
@@ -145,24 +145,24 @@ impl From<Bytecode> for EvmCode {
         match code {
             // This arm will recursively fallback to LegacyAnalyzed.
             Bytecode::LegacyRaw(_) => to_analysed(code).into(),
-            Bytecode::LegacyAnalyzed(code) => EvmCode::Legacy(LegacyCode {
+            Bytecode::LegacyAnalyzed(code) => Self::Legacy(LegacyCode {
                 bytecode: code.bytecode,
                 original_len: code.original_len,
                 jump_table: code.jump_table.0,
             }),
-            Bytecode::Eip7702(code) => EvmCode::Eip7702(Eip7702Code {
+            Bytecode::Eip7702(code) => Self::Eip7702(Eip7702Code {
                 delegated_address: code.delegated_address,
                 version: code.version,
             }),
-            Bytecode::Eof(code) => EvmCode::Eof(Arc::unwrap_or_clone(code).raw),
+            Bytecode::Eof(code) => Self::Eof(Arc::unwrap_or_clone(code).raw),
         }
     }
 }
 
-/// Mapping from address to [EvmAccount]
+/// Mapping from address to [`EvmAccount`]
 pub type ChainState = HashMap<Address, EvmAccount, BuildSuffixHasher>;
 
-/// Mapping from code hashes to [EvmCode]s
+/// Mapping from code hashes to [`EvmCode`]s
 pub type Bytecodes = HashMap<B256, EvmCode, BuildSuffixHasher>;
 
 /// Mapping from block numbers to block hashes
@@ -204,7 +204,7 @@ pub enum StorageWrapperError<S: Storage> {
     InvalidBytecode(BytecodeConversionError),
 }
 
-/// A Storage wrapper that implements REVM's [DatabaseRef] for ease of
+/// A Storage wrapper that implements REVM's [`DatabaseRef`] for ease of
 /// integration.
 #[derive(Debug)]
 pub struct StorageWrapper<'a, S: Storage>(pub &'a S);

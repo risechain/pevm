@@ -34,7 +34,7 @@ pub fn generate_cluster(
     let mut state = ChainState::from_iter([(gld_address, gld_account)]);
     let mut txs = Vec::new();
 
-    for person in people_addresses.iter() {
+    for person in &people_addresses {
         state.insert(
             *person,
             EvmAccount {
@@ -45,7 +45,7 @@ pub fn generate_cluster(
     }
 
     for nonce in 0..num_transfers_per_person {
-        for family in families.iter() {
+        for family in &families {
             for person in family {
                 let recipient = family[(rand::random::<usize>()) % (family.len())];
                 let calldata = ERC20Token::transfer(recipient, U256::from(rand::random::<u8>()));

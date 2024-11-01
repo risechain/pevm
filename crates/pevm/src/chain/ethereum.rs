@@ -19,8 +19,8 @@ use crate::{
     PevmTxExecutionResult, TxIdx,
 };
 
-/// Implementation of [PevmChain] for Ethereum
-#[derive(Debug, Clone, PartialEq)]
+/// Implementation of [`PevmChain`] for Ethereum
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PevmEthereum {
     id: u64,
 }
@@ -36,21 +36,21 @@ impl PevmEthereum {
     // TODO: support Ethereum Sepolia and other testnets
 }
 
-/// Error type for [PevmEthereum::get_block_spec].
-#[derive(Debug, Clone, PartialEq)]
+/// Error type for [`PevmEthereum::get_block_spec`].
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EthereumBlockSpecError {
-    /// When [header.total_difficulty] is none.
+    /// When [`header.total_difficulty`] is none.
     MissingTotalDifficulty,
 }
 
 /// Represents errors that can occur when parsing transactions
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EthereumTransactionParsingError {
     /// [tx.type] is invalid.
     InvalidType(u8),
-    /// [tx.gas_price] is none.
+    /// [`tx.gas_price`] is none.
     MissingGasPrice,
-    /// [tx.max_fee_per_gas] is none.
+    /// [`tx.max_fee_per_gas`] is none.
     MissingMaxFeePerGas,
 }
 

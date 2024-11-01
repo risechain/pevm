@@ -110,7 +110,7 @@ pub fn generate_cluster(
         (single_swap_address, single_swap_account),
     ]);
 
-    for person in people_addresses.iter() {
+    for person in &people_addresses {
         state.insert(
             *person,
             EvmAccount {
@@ -127,7 +127,7 @@ pub fn generate_cluster(
     // buyToken0(uint256,uint256): 8dc33f82
     // buyToken1(uint256,uint256): b2db18a2
     for nonce in 0..num_swaps_per_person {
-        for person in people_addresses.iter() {
+        for person in &people_addresses {
             let data_bytes: Vec<u8> = match nonce % 4 {
                 0 => [
                     &fixed_bytes!("c92b0891")[..],

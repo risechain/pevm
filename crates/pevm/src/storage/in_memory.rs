@@ -14,7 +14,7 @@ pub struct InMemoryStorage<'a> {
 }
 
 impl<'a> InMemoryStorage<'a> {
-    /// Construct a new [InMemoryStorage]
+    /// Construct a new [`InMemoryStorage`]
     pub fn new(
         accounts: impl IntoIterator<Item = (Address, EvmAccount)>,
         bytecodes: Option<&'a Bytecodes>,
@@ -65,7 +65,7 @@ impl<'a> Storage for InMemoryStorage<'a> {
             .accounts
             .get(address)
             .and_then(|account| account.storage.get(index))
-            .cloned()
+            .copied()
             .unwrap_or_default())
     }
 
@@ -73,7 +73,7 @@ impl<'a> Storage for InMemoryStorage<'a> {
         Ok(self
             .block_hashes
             .get(number)
-            .cloned()
+            .copied()
             // Matching REVM's [EmptyDB] for now
             .unwrap_or_else(|| keccak256(number.to_string().as_bytes())))
     }

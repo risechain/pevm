@@ -351,7 +351,7 @@ impl Pevm {
 
     fn try_execute<S: Storage, C: PevmChain>(
         &self,
-        vm: &Vm<S, C>,
+        vm: &Vm<'_, S, C>,
         scheduler: &Scheduler,
         tx_version: TxVersion,
     ) -> Option<Task> {

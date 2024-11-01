@@ -242,10 +242,9 @@ impl Scheduler {
                 if flags.contains(FinishExecFlags::NeedValidation) {
                     tx.status = IncarnationStatus::Executed;
                     return Some(Task::Validation(tx_version));
-                } else {
-                    tx.status = IncarnationStatus::Validated;
-                    self.num_validated.fetch_add(1, Ordering::Relaxed);
                 }
+                tx.status = IncarnationStatus::Validated;
+                self.num_validated.fetch_add(1, Ordering::Relaxed);
             }
             // Don't need to validate anything if the current validation index is
             // lower or equal -- it will catch up later.

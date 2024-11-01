@@ -21,7 +21,7 @@ struct LastLocations {
 
 type LazyAddresses = HashSet<Address, BuildSuffixHasher>;
 
-/// The MvMemory contains shared memory in a form of a multi-version data
+/// The `MvMemory` contains shared memory in a form of a multi-version data
 /// structure for values written and read by different transactions. It stores
 /// multiple writes for each memory location, along with a value and an associated
 /// version of a corresponding transaction.
@@ -98,7 +98,7 @@ impl MvMemory {
         let mut last_location_idx = 0;
         while last_location_idx < last_locations.write.len() {
             let prev_location = unsafe { last_locations.write.get_unchecked(last_location_idx) };
-            if !write_set.iter().any(|(l, _)| l == prev_location) {
+            if write_set.iter().all(|(l, _)| l != prev_location) {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
                     written_transactions.remove(&tx_version.tx_idx);
                 }
@@ -138,7 +138,7 @@ impl MvMemory {
     // validations that successfully abort affect the state and each incarnation
     // can be aborted at most once).
     pub(crate) fn validate_read_locations(&self, tx_idx: TxIdx) -> bool {
-        for (location, prior_origins) in index_mutex!(self.last_locations, tx_idx).read.iter() {
+        for (location, prior_origins) in &index_mutex!(self.last_locations, tx_idx).read {
             if let Some(written_transactions) = self.data.get(location) {
                 let mut iter = written_transactions.range(..tx_idx);
                 for prior_origin in prior_origins {
@@ -179,7 +179,7 @@ impl MvMemory {
     // structure with special ESTIMATE markers to quickly abort higher transactions
     // that read them.
     pub(crate) fn convert_writes_to_estimates(&self, tx_idx: TxIdx) {
-        for location in index_mutex!(self.last_locations, tx_idx).write.iter() {
+        for location in &index_mutex!(self.last_locations, tx_idx).write {
             if let Some(mut written_transactions) = self.data.get_mut(location) {
                 written_transactions.insert(tx_idx, MemoryEntry::Estimate);
             }

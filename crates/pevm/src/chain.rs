@@ -28,7 +28,7 @@ pub enum RewardPolicy {
     },
 }
 
-/// The error type of [PevmChain::calculate_receipt_root]
+/// The error type of [`PevmChain::calculate_receipt_root`]
 #[derive(Debug, Clone)]
 pub enum CalculateReceiptRootError {
     /// Unsupported
@@ -44,25 +44,25 @@ pub trait PevmChain: Debug {
     /// The transaction type
     type Transaction: Debug + Clone + PartialEq;
 
-    /// The error type for [Self::get_block_spec].
+    /// The error type for [`Self::get_block_spec`].
     type BlockSpecError: Debug + Clone + PartialEq;
 
-    /// The error type for [Self::get_tx_env].
+    /// The error type for [`Self::get_tx_env`].
     type TransactionParsingError: Debug + Clone + PartialEq;
 
     /// Get chain id.
     fn id(&self) -> u64;
 
-    /// Build Self::Transaction type from Alloy's transaction
+    /// Build `Self::Transaction` type from Alloy's transaction
     fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types::Transaction) -> Self::Transaction;
 
-    /// Get block's [SpecId]
+    /// Get block's [`SpecId`]
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError>;
 
-    /// Get [TxEnv]
+    /// Get [`TxEnv`]
     fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, Self::TransactionParsingError>;
 
-    /// Build [MvMemory]
+    /// Build [`MvMemory`]
     fn build_mv_memory(&self, _block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
         MvMemory::new(txs.len(), [], [])
     }
@@ -74,7 +74,7 @@ pub trait PevmChain: Debug {
         with_reward_beneficiary: bool,
     ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB>;
 
-    /// Get [RewardPolicy]
+    /// Get [`RewardPolicy`]
     fn get_reward_policy(&self) -> RewardPolicy;
 
     /// Calculate receipt root
@@ -86,11 +86,11 @@ pub trait PevmChain: Debug {
     ) -> Result<B256, CalculateReceiptRootError>;
 
     /// Check whether EIP-1559 is enabled
-    /// https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-1559.md
+    /// <https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-1559.md>
     fn is_eip_1559_enabled(&self, spec_id: SpecId) -> bool;
 
     /// Check whether EIP-161 is enabled
-    /// https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
+    /// <https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md>
     fn is_eip_161_enabled(&self, spec_id: SpecId) -> bool;
 }
 
