@@ -5,32 +5,34 @@ edition = "2021"
 
 [features]
 defaults = []
-full = ["rpc-storage", "optimism"]
-rpc-storage = [
-  "dep:tokio",
-  "dep:reqwest",
-  "dep:alloy-transport",
-  "dep:alloy-transport-http",
-]
+
+full = ["optimism", "rpc-storage"]
+
 optimism = [
   "revm/optimism",
   "dep:op-alloy-consensus",
   "dep:op-alloy-network",
   "dep:op-alloy-rpc-types",
 ]
-global-alloc = [
-  "dep:rpmalloc",
-  "dep:snmalloc-rs",
-  "dep:tikv-jemallocator",
+
+rpc-storage = [
+  "dep:alloy-transport",
+  "dep:alloy-transport-http",
+  "dep:reqwest",
+  "dep:tokio",
 ]
+
+global-alloc = ["dep:rpmalloc", "dep:snmalloc-rs", "dep:tikv-jemallocator"]
 
 [dependencies]
 alloy-chains.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+alloy-provider.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
 alloy-trie.workspace = true
+
 bitflags.workspace = true
 bitvec.workspace = true
 dashmap.workspace = true
@@ -42,9 +44,12 @@ thiserror.workspace = true
 
 revm.workspace = true
 
-alloy-provider.workspace = true
+# OP dependencies
+op-alloy-consensus = { workspace = true, optional = true }
+op-alloy-network = { workspace = true, optional = true }
+op-alloy-rpc-types = { workspace = true, optional = true }
 
-# RPC feature dependencies
+# Storage RPC feature dependencies
 alloy-transport = { workspace = true, optional = true }
 alloy-transport-http = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
@@ -54,11 +59,6 @@ tokio = { workspace = true, optional = true }
 rpmalloc = { workspace = true, optional = true }
 snmalloc-rs = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
-
-# OP dependencies
-op-alloy-consensus = { workspace = true, optional = true }
-op-alloy-network = { workspace = true, optional = true }
-op-alloy-rpc-types = { workspace = true, optional = true }
 
 [dev-dependencies]
 bincode.workspace = true
