@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use alloy_primitives::TxKind;
 use alloy_rpc_types::Receipt;
-use hashbrown::{hash_map::Entry, HashMap};
+use hashbrown::HashMap;
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
@@ -548,16 +548,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             HashMap::with_capacity_and_hasher(txs.len(), BuildSuffixHasher::default());
 
         for (tx_idx, tx) in txs.iter().enumerate() {
-            match address_to_tx_idx.entry(tx.caller) {
-                Entry::Occupied(mut occupied_entry) => {
-                    let old_value = occupied_entry.insert(tx_idx);
-                    unsafe {
-                        *parent_tx_idxs.get_unchecked_mut(tx_idx) = old_value;
-                    }
-                }
-                Entry::Vacant(vacant_entry) => {
-                    vacant_entry.insert(tx_idx);
-                }
+            // We use the fact that `insert` returns the previous value.
+            if let Some(parent_tx_idx) = address_to_tx_idx.insert(tx.caller, tx_idx) {
+                parent_tx_idxs[tx_idx] = parent_tx_idx;
             }
         }
 
