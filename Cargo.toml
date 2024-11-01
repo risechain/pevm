@@ -9,7 +9,10 @@ panic = "abort"
 lto = "fat"
 
 [workspace.lints]
+rust.missing_debug_implementations = "warn"
+rust.missing_docs = "warn"
 rust.rust_2018_idioms = "warn"
+rust.unreachable_pub = "warn"
 rust.unused_crate_dependencies = "warn"
 
 [workspace.lints.clippy]
