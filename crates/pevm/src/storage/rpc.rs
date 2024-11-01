@@ -1,6 +1,3 @@
-// TODO: Put this behind an RPC flag to not pollute the core
-// library with RPC network & transport dependencies, etc.
-
 use std::{fmt::Debug, future::IntoFuture, sync::Mutex, time::Duration};
 
 use alloy_primitives::{Address, B256, U256};
