@@ -21,8 +21,7 @@ pub struct ERC20Token {
 impl ERC20Token {
     pub fn new<U, V>(name: &str, symbol: &str, decimals: U, initial_supply: V) -> Self
     where
-        U256: UintTryFrom<U>,
-        U256: UintTryFrom<V>,
+        U256: UintTryFrom<U> + UintTryFrom<V>,
     {
         Self {
             name: String::from(name),

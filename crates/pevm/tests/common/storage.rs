@@ -18,16 +18,14 @@ impl StorageBuilder {
 
     pub fn set<K, V>(&mut self, slot: K, value: V)
     where
-        U256: UintTryFrom<K>,
-        U256: UintTryFrom<V>,
+        U256: UintTryFrom<K> + UintTryFrom<V>,
     {
         self.dict.insert(U256::from(slot), U256::from(value));
     }
 
     pub fn set_many<K: Copy, const L: usize>(&mut self, starting_slot: K, value: &[U256; L])
     where
-        U256: UintTryFrom<K>,
-        U256: UintTryFrom<usize>,
+        U256: UintTryFrom<K> + UintTryFrom<usize>,
     {
         for (index, item) in value.iter().enumerate() {
             let slot = U256::from(starting_slot).wrapping_add(U256::from(index));
@@ -37,8 +35,7 @@ impl StorageBuilder {
 
     pub fn set_with_offset<K: Copy, V>(&mut self, key: K, offset: usize, length: usize, value: V)
     where
-        U256: UintTryFrom<K>,
-        U256: UintTryFrom<V>,
+        U256: UintTryFrom<K> + UintTryFrom<V>,
     {
         let entry = self.dict.entry(U256::from(key)).or_default();
         let mut buffer = B256::from(*entry);
@@ -69,8 +66,7 @@ pub fn from_short_string(text: &str) -> U256 {
 
 pub fn from_indices<K, V: Copy>(slot: K, indices: &[V]) -> U256
 where
-    U256: UintTryFrom<K>,
-    U256: UintTryFrom<V>,
+    U256: UintTryFrom<K> + UintTryFrom<V>,
 {
     let mut result = B256::from(U256::from(slot));
     for index in indices {

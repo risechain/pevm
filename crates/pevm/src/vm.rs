@@ -353,13 +353,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             }
             final_account = match self.vm.storage.basic(&address) {
                 Ok(Some(basic)) => Some(basic),
-                Ok(None) => {
-                    if balance_addition > U256::ZERO {
-                        Some(AccountBasic::default())
-                    } else {
-                        None
-                    }
-                }
+                Ok(None) => (balance_addition > U256::ZERO).then(AccountBasic::default),
                 Err(err) => return Err(ReadError::StorageError(err.to_string())),
             };
         }
@@ -376,13 +370,13 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             if location_hash == self.from_hash
                 && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
             {
-                if self.tx_idx > 0 {
+                return if self.tx_idx > 0 {
                     // TODO: Better retry strategy -- immediately, to the
                     // closest sender tx, to the missing sender tx, etc.
-                    return Err(ReadError::Blocking(self.tx_idx - 1));
+                    Err(ReadError::Blocking(self.tx_idx - 1))
                 } else {
-                    return Err(ReadError::InvalidNonce(self.tx_idx));
-                }
+                    Err(ReadError::InvalidNonce(self.tx_idx))
+                };
             }
 
             // Fully evaluate the account and register it to read cache
@@ -701,8 +695,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 if tx_version.tx_idx > 0
                     && matches!(
                         err,
-                        EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee { .. } |
-InvalidTransaction::NonceTooHigh { .. })
+                        EVMError::Transaction(
+                            InvalidTransaction::LackOfFundForMaxFee { .. }
+                                | InvalidTransaction::NonceTooHigh { .. }
+                        )
                     )
                 {
                     Err(VmExecutionError::Blocking(tx_version.tx_idx - 1))

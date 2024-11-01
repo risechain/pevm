@@ -169,29 +169,20 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     assert!(match exception {
                         "TR_TypeNotSupported" => true, // REVM is yielding arbitrary errors in these cases.
                         "SenderNotEOA" => error == "Transaction(RejectCallerWithCode)",
-                        "TR_NoFunds" => error[..31].to_string() == "Transaction(LackOfFundForMaxFee",
-                        "TR_NoFundsOrGas" => error == "Transaction(CallGasCostMoreThanGasLimit)",
-                        "IntrinsicGas" => error == "Transaction(CallGasCostMoreThanGasLimit)",
                         "TR_NoFundsX" => error == "Transaction(OverflowPaymentInTransaction)",
-                        "TR_IntrinsicGas" => error == "Transaction(CallGasCostMoreThanGasLimit)",
                         "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => error == "Transaction(BlobGasPriceGreaterThanMax)",
-                        "TR_FeeCapLessThanBlocks" => error == "Transaction(GasPriceLessThanBasefee)",
-                        "TransactionException.INTRINSIC_GAS_TOO_LOW" => error == "Transaction(CallGasCostMoreThanGasLimit)",
-                        "TR_BLOBLIST_OVERSIZE" => error[..24].to_string() == "Transaction(TooManyBlobs",
                         "TR_BLOBCREATE" => error == "Transaction(BlobCreateTransaction)",
-                        "TransactionException.INITCODE_SIZE_EXCEEDED" => error == "Transaction(CreateInitCodeSizeLimit)",
-                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS" => error == "Transaction(GasPriceLessThanBasefee)",
                         "TR_GasLimitReached" => error == "Transaction(CallerGasLimitMoreThanBlock)",
-                        "TR_EMPTYBLOB" => error == "Transaction(EmptyBlobs)",
-                        "TR_BLOBVERSION_INVALID" => error == "Transaction(BlobVersionNotSupported)",
-                        "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" => error[..31].to_string() == "Transaction(LackOfFundForMaxFee",
-                        "TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(EmptyBlobs)",
-                        "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => error[..24].to_string() == "Transaction(TooManyBlobs",
                         "TR_TipGtFeeCap" => error == "Transaction(PriorityFeeGreaterThanMaxFee)",
-                        "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == "Transaction(BlobVersionNotSupported)",
-                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(BlobVersionedHashesNotSupported)",
-                        "TransactionException.TYPE_3_TX_PRE_FORK" => error == "Transaction(BlobVersionedHashesNotSupported)",
-                        "TR_InitCodeLimitExceeded" => error == "Transaction(CreateInitCodeSizeLimit)",
+
+                        "TR_NoFundsOrGas" | "IntrinsicGas" | "TR_IntrinsicGas" | "TransactionException.INTRINSIC_GAS_TOO_LOW" => error == "Transaction(CallGasCostMoreThanGasLimit)",
+                        "TR_FeeCapLessThanBlocks" | "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS" => error == "Transaction(GasPriceLessThanBasefee)",
+                        "TR_NoFunds" | "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" => &error[..31] == "Transaction(LackOfFundForMaxFee",
+                        "TR_EMPTYBLOB" | "TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(EmptyBlobs)",
+                        "TR_BLOBLIST_OVERSIZE" | "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => &error[..24] == "Transaction(TooManyBlobs",
+                        "TR_BLOBVERSION_INVALID" | "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == "Transaction(BlobVersionNotSupported)",
+                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" | "TransactionException.TYPE_3_TX_PRE_FORK" => error == "Transaction(BlobVersionedHashesNotSupported)",
+                        "TransactionException.INITCODE_SIZE_EXCEEDED" | "TR_InitCodeLimitExceeded" => error == "Transaction(CreateInitCodeSizeLimit)",
                         _ => panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}")
                     });
                 }

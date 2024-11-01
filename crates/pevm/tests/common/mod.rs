@@ -53,7 +53,7 @@ const MOCK_SIGNATURE: Signature = Signature {
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
+pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'_>)) {
     let data_dir = std::path::PathBuf::from("../../data");
 
     // TODO: Deduplicate logic with [bin/fetch.rs] when there is more usage

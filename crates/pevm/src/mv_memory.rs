@@ -98,7 +98,7 @@ impl MvMemory {
         let mut last_location_idx = 0;
         while last_location_idx < last_locations.write.len() {
             let prev_location = unsafe { last_locations.write.get_unchecked(last_location_idx) };
-            if !write_set.iter().any(|(l, _)| l == prev_location) {
+            if write_set.iter().all(|(l, _)| l != prev_location) {
                 if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
                     written_transactions.remove(&tx_version.tx_idx);
                 }
