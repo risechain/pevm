@@ -5,7 +5,7 @@ use tokio::runtime::Runtime;
 
 use pevm::{
     chain::{PevmChain, PevmEthereum},
-    RpcStorage,
+    RpcStorage, StorageWrapper,
 };
 
 pub mod common;
@@ -46,17 +46,19 @@ fn mainnet_blocks_from_rpc() {
         let chain = PevmEthereum::mainnet();
         let spec_id = chain.get_block_spec(&block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
-        common::test_execute_alloy(&rpc_storage, &chain, block, true);
+        let wrapped_storage = StorageWrapper(&rpc_storage);
+        common::test_execute_alloy(&wrapped_storage, &chain, block, true);
     }
 }
 
 #[test]
 fn mainnet_blocks_from_disk() {
     common::for_each_block_from_disk(|block, storage| {
+        let db = StorageWrapper(&storage);
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(&storage, &PevmEthereum::mainnet(), block.clone(), true)
+            common::test_execute_alloy(&db, &PevmEthereum::mainnet(), block.clone(), true)
         }
     });
 }

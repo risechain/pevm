@@ -10,7 +10,7 @@ pub mod erc20;
 
 use common::test_execute_revm;
 use erc20::generate_cluster;
-use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
+use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage, StorageWrapper};
 use revm::primitives::{Address, TxEnv};
 
 #[test]
@@ -18,7 +18,10 @@ fn erc20_independent() {
     const N: usize = 37123;
     let (mut state, bytecodes, txs) = generate_cluster(N, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
-    test_execute_revm(InMemoryStorage::new(state, Some(&bytecodes), []), txs);
+    test_execute_revm(
+        StorageWrapper(&InMemoryStorage::new(state, Some(&bytecodes), [])),
+        txs,
+    );
 }
 
 #[test]
@@ -43,7 +46,11 @@ fn erc20_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
-        InMemoryStorage::new(final_state, Some(&final_bytecodes), []),
+        StorageWrapper(&InMemoryStorage::new(
+            final_state,
+            Some(&final_bytecodes),
+            [],
+        )),
         final_txs,
     )
 }

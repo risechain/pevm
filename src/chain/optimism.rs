@@ -94,7 +94,7 @@ pub(crate) fn get_optimism_fields(
         OpTxType::Legacy => Signed::<TxLegacy>::try_from(inner).map(OpTxEnvelope::from),
         OpTxType::Eip2930 => Signed::<TxEip2930>::try_from(inner).map(OpTxEnvelope::from),
         OpTxType::Eip1559 => Signed::<TxEip1559>::try_from(inner).map(OpTxEnvelope::from),
-        OpTxType::Eip7702 => Signed::<TxEip7702>::try_from(inner).map(OpTxEnvelope::from),
+        OpTxType::Eip7702 => Signed::<TxEip7702>::try_from(inner).map(OpTxEnvelope::Eip7702),
         OpTxType::Deposit => {
             let tx_deposit = TxDeposit {
                 source_hash: tx
