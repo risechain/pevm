@@ -26,6 +26,7 @@ pub mod uniswap;
 
 const GIGA_GAS: u64 = 1_000_000_000;
 
+#[cfg(feature = "global-alloc")]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
