@@ -47,7 +47,7 @@ pub struct RpcStorage<N: Network> {
 impl<N: Network> RpcStorage<N> {
     /// Create a new RPC Storage
     pub fn new(provider: RpcProvider<N>, spec_id: SpecId, block_id: BlockId) -> Self {
-        RpcStorage {
+        Self {
             provider,
             precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)),
             block_id,
@@ -61,7 +61,7 @@ impl<N: Network> RpcStorage<N> {
 
     /// Send a request and retry many times if needed.
     /// This util is made to avoid error 429 Too Many Requests
-    /// https://en.wikipedia.org/wiki/Exponential_backoff
+    /// <https://en.wikipedia.org/wiki/Exponential_backoff>
     fn fetch<T, E, R: IntoFuture<Output = Result<T, E>>>(
         &self,
         request: impl Fn() -> R,

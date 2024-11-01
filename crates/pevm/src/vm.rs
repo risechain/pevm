@@ -26,11 +26,11 @@ pub type ExecutionError = EVMError<ReadError>;
 
 /// Represents the state transitions of the EVM accounts after execution.
 /// If the value is [None], it indicates that the account is marked for removal.
-/// If the value is [Some(new_state)], it indicates that the account has become [new_state].
+/// If the value is [`Some(new_state)`], it indicates that the account has become [`new_state`].
 type EvmStateTransitions = HashMap<Address, Option<EvmAccount>, BuildSuffixHasher>;
 
 /// Execution result of a transaction
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PevmTxExecutionResult {
     /// Receipt of execution
     // TODO: Consider promoting to [ReceiptEnvelope] if there is high demand
@@ -41,7 +41,7 @@ pub struct PevmTxExecutionResult {
 
 impl PevmTxExecutionResult {
     /// Construct a Pevm execution result from a raw Revm result.
-    /// Note that [cumulative_gas_used] is preset to the gas used of this transaction.
+    /// Note that [`cumulative_gas_used`] is preset to the gas used of this transaction.
     /// It should be post-processed with the remaining transactions in the block.
     pub fn from_revm<C: PevmChain>(
         chain: &C,
@@ -79,14 +79,14 @@ pub(crate) enum VmExecutionError {
 }
 
 /// Errors when reading a memory location.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadError {
     /// Cannot read memory location from storage.
     StorageError(String),
     /// This memory location has been written by a lower transaction.
     Blocking(TxIdx),
     /// There has been an inconsistent read like reading the same
-    /// location from storage in the first call but from [VmMemory] in
+    /// location from storage in the first call but from [`VmMemory`] in
     /// the next.
     InconsistentRead,
     /// Found an invalid nonce, like the first transaction of a sender
@@ -105,10 +105,10 @@ pub enum ReadError {
 impl From<ReadError> for VmExecutionError {
     fn from(err: ReadError) -> Self {
         match err {
-            ReadError::InconsistentRead => VmExecutionError::Retry,
-            ReadError::SelfDestructedAccount => VmExecutionError::FallbackToSequential,
-            ReadError::Blocking(tx_idx) => VmExecutionError::Blocking(tx_idx),
-            _ => VmExecutionError::ExecutionError(EVMError::Database(err)),
+            ReadError::InconsistentRead => Self::Retry,
+            ReadError::SelfDestructedAccount => Self::FallbackToSequential,
+            ReadError::Blocking(tx_idx) => Self::Blocking(tx_idx),
+            _ => Self::ExecutionError(EVMError::Database(err)),
         }
     }
 }
@@ -571,7 +571,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
                 let mut write_set = WriteSet::with_capacity(3);
-                for (address, account) in result_and_state.state.iter() {
+                for (address, account) in &result_and_state.state {
                     if account.is_selfdestructed() {
                         // TODO: Also write [SelfDestructed] to the basic location?
                         // For now we are betting on [code_hash] triggering the sequential
@@ -701,8 +701,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 if tx_version.tx_idx > 0
                     && matches!(
                         err,
-                        EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee { .. })
-                            | EVMError::Transaction(InvalidTransaction::NonceTooHigh { .. })
+                        EVMError::Transaction(InvalidTransaction::LackOfFundForMaxFee { .. } |
+InvalidTransaction::NonceTooHigh { .. })
                     )
                 {
                     Err(VmExecutionError::Blocking(tx_version.tx_idx - 1))

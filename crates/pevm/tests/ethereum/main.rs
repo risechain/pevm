@@ -125,7 +125,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
 
             let mut chain_state = ChainState::default();
             let mut bytecodes = Bytecodes::default();
-            for (address, raw_info) in unit.pre.iter() {
+            for (address, raw_info) in &unit.pre {
                 let code = Bytecode::new_raw(raw_info.code.clone());
                 let code_hash = if code.is_empty() {
                     None

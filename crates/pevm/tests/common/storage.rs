@@ -11,7 +11,7 @@ pub struct StorageBuilder {
 
 impl StorageBuilder {
     pub fn new() -> Self {
-        StorageBuilder {
+        Self {
             dict: HashMap::default(),
         }
     }

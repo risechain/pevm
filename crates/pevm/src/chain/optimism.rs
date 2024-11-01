@@ -20,8 +20,8 @@ use crate::{
 
 use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};
 
-/// Implementation of [PevmChain] for Optimism
-#[derive(Debug, Clone, PartialEq)]
+/// Implementation of [`PevmChain`] for Optimism
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PevmOptimism {
     id: ChainId,
 }
@@ -29,25 +29,25 @@ pub struct PevmOptimism {
 impl PevmOptimism {
     /// Optimism Mainnet
     pub fn mainnet() -> Self {
-        PevmOptimism {
+        Self {
             id: NamedChain::Optimism.into(),
         }
     }
 
     /// Custom network
-    pub fn custom(id: ChainId) -> Self {
-        PevmOptimism { id }
+    pub const fn custom(id: ChainId) -> Self {
+        Self { id }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OptimismBlockSpecError {
     MissingBlockNumber,
     UnsupportedSpec,
 }
 
 /// Represents errors that can occur when parsing transactions
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OptimismTransactionParsingError {
     ConversionError(String),
     InvalidType(u8),
@@ -80,8 +80,8 @@ fn get_optimism_gas_price(
     }
 }
 
-/// Convert [Transaction] to [OptimismFields]
-/// https://github.com/paradigmxyz/reth/blob/fc4c037e60b623b81b296fe9242fa905ff36b89a/crates/primitives/src/transaction/compat.rs#L99
+/// Convert [Transaction] to [`OptimismFields`]
+/// <https://github.com/paradigmxyz/reth/blob/fc4c037e60b623b81b296fe9242fa905ff36b89a/crates/primitives/src/transaction/compat.rs#L99>
 pub(crate) fn get_optimism_fields(
     tx: &op_alloy_rpc_types::Transaction,
 ) -> Result<OptimismFields, OptimismTransactionParsingError> {

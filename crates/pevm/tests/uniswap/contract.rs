@@ -29,7 +29,7 @@ fn keccak256_all(chunks: &[&[u8]]) -> B256 {
 pub struct WETH9 {}
 
 impl WETH9 {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {}
     }
     // | Name      | Type                                            | Slot | Offset | Bytes |
@@ -111,7 +111,7 @@ impl UniswapV3Factory {
         store.set(from_indices(4, &[3000]), 60);
         store.set(from_indices(4, &[10000]), 200);
 
-        for ((token_0, token_1, pool_fee), pool_address) in self.pools.iter() {
+        for ((token_0, token_1, pool_fee), pool_address) in &self.pools {
             store.set(
                 from_indices(
                     5,
@@ -236,15 +236,15 @@ impl UniswapV3Pool {
             uint!(0x0100000000000000000000000000000000000000000000000000000000000001_U256),
         );
 
-        for (key, value) in self.ticks.iter() {
+        for (key, value) in &self.ticks {
             store.set_many(from_indices(5, &[*key]), value);
         }
 
-        for (key, value) in self.tick_bitmap.iter() {
+        for (key, value) in &self.tick_bitmap {
             store.set(from_indices(6, &[*key]), *value);
         }
 
-        for (key, value) in self.positions.iter() {
+        for (key, value) in &self.positions {
             store.set_many(from_indices(7, &[*key]), value);
         }
 
@@ -283,7 +283,7 @@ pub struct SwapRouter {
 }
 
 impl SwapRouter {
-    pub fn new(weth9: Address, factory: Address, pool_init_code_hash: B256) -> Self {
+    pub const fn new(weth9: Address, factory: Address, pool_init_code_hash: B256) -> Self {
         Self {
             weth9,
             factory,
@@ -337,7 +337,7 @@ pub struct SingleSwap {
 }
 
 impl SingleSwap {
-    pub fn new(swap_router: Address, token_0: Address, token_1: Address) -> Self {
+    pub const fn new(swap_router: Address, token_0: Address, token_1: Address) -> Self {
         Self {
             swap_router,
             token_0,
