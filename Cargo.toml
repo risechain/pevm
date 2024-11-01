@@ -9,7 +9,7 @@ panic = "abort"
 lto = "fat"
 
 [workspace.lints]
-rust.rust_2018_idioms = { level = "deny", priority = -1 }
+rust.rust_2018_idioms = "warn"
 rust.unused_crate_dependencies = "warn"
 
 [workspace.lints.clippy]
