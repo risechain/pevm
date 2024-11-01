@@ -54,36 +54,35 @@ pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
 pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
+    let data_dir = std::path::PathBuf::from("../../data");
+
     // TODO: Deduplicate logic with [bin/fetch.rs] when there is more usage
     let bytecodes: Bytecodes = bincode::deserialize_from(GzDecoder::new(BufReader::new(
-        File::open("data/bytecodes.bincode.gz").unwrap(),
+        File::open(data_dir.join("bytecodes.bincode.gz")).unwrap(),
     )))
     .unwrap();
 
-    for block_path in fs::read_dir("data/blocks").unwrap() {
+    for block_path in fs::read_dir(data_dir.join("blocks")).unwrap() {
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
 
+        let dir = data_dir.join("blocks").join(block_number);
+
         // Parse block
-        let block: Block = serde_json::from_reader(BufReader::new(
-            File::open(format!("data/blocks/{block_number}/block.json")).unwrap(),
-        ))
-        .unwrap();
+        let block: Block =
+            serde_json::from_reader(BufReader::new(File::open(dir.join("block.json")).unwrap()))
+                .unwrap();
 
         // Parse state
-        let accounts: HashMap<Address, EvmAccount, BuildSuffixHasher> =
-            serde_json::from_reader(BufReader::new(
-                File::open(format!("data/blocks/{block_number}/pre_state.json")).unwrap(),
-            ))
-            .unwrap();
+        let accounts: HashMap<Address, EvmAccount, BuildSuffixHasher> = serde_json::from_reader(
+            BufReader::new(File::open(dir.join("pre_state.json")).unwrap()),
+        )
+        .unwrap();
 
         // Parse block hashes
-        let block_hashes: BlockHashes =
-            File::open(format!("data/blocks/{block_number}/block_hashes.json"))
-                .map(|file| {
-                    serde_json::from_reader::<_, BlockHashes>(BufReader::new(file)).unwrap()
-                })
-                .unwrap_or_default();
+        let block_hashes: BlockHashes = File::open(dir.join("block_hashes.json"))
+            .map(|file| serde_json::from_reader::<_, BlockHashes>(BufReader::new(file)).unwrap())
+            .unwrap_or_default();
 
         handler(
             block,
