@@ -11,7 +11,7 @@ pub mod common;
 
 // TODO: [tokio::test]?
 #[test]
-#[cfg(feature = "rpc")]
+#[cfg(feature = "rpc-storage")]
 fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?

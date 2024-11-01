@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 defaults = []
-rpc = [
+rpc-storage = [
   "dep:tokio",
   "dep:reqwest",
   "dep:alloy-transport",
@@ -25,7 +25,6 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
 alloy-trie.workspace = true
-# We can roll our own but [revm] depends on this anyway.
 bitflags.workspace = true
 bitvec.workspace = true
 dashmap.workspace = true

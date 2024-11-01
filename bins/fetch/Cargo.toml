@@ -5,10 +5,10 @@ edition = "2021"
 
 [dependencies]
 bincode.workspace = true
-clap = { workspace = true, features = ["derive"] }
+clap.workspace = true
 flate2.workspace = true
-serde_json = { workspace = true, features = ["preserve_order"] }
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+serde_json.workspace = true
+tokio.workspace = true
 reqwest.workspace = true
 
 alloy-provider.workspace = true
@@ -16,4 +16,4 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types.workspace = true
 
-pevm = { workspace = true, features = ["rpc"] }
+pevm.workspace = true

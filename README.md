@@ -89,17 +89,17 @@ Where `<BLOCK_ID>` may be a hash or a number.
 
 We have three test groups:
 
-- [ethereum/tests](https://github.com/ethereum/tests)'s [general state tests](tests/ethereum/main.rs).
-- Mocked blocks: [raw transfers](tests/raw_transfers.rs), [erc20](tests/erc20/main.rs), [uniswap](tests/uniswap/main.rs), [mixed](tests/mixed.rs), [beneficiary](tests/beneficiary.rs), and [small blocks](tests/small_blocks.rs).
-- [Ethereum mainnet blocks](tests/mainnet.rs).
+- [ethereum/tests](https://github.com/ethereum/tests)'s [general state tests](crates/pevm/tests/ethereum/main.rs).
+- Mocked blocks: [raw transfers](crates/pevm/tests/raw_transfers.rs), [erc20](crates/pevm/tests/erc20/main.rs), [uniswap](crates/pevm/tests/uniswap/main.rs), [mixed](crates/pevm/tests/mixed.rs), [beneficiary](crates/pevm/tests/beneficiary.rs), and [small blocks](crates/pevm/tests/small_blocks.rs).
+- [Ethereum mainnet blocks](crates/pevm/tests/mainnet.rs).
 
 ```sh
 $ git submodule update --init
 # Running our heavy tests in parallel would congest resources.
 # Each test still executes parallelly anyway.
-$ cargo test --release -- --test-threads=1
+$ cargo test --workspace --release -- --test-threads=1
 ```
 
 ### Benchmarks
 
-See the dedicated doc [here](./benches/README.md).
+See the dedicated doc [here](./crates/pevm/benches/README.md).

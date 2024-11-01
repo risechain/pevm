@@ -66,21 +66,22 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
 
-        let dir = data_dir.join("blocks").join(block_number);
+        let block_dir = data_dir.join("blocks").join(block_number);
 
         // Parse block
-        let block: Block =
-            serde_json::from_reader(BufReader::new(File::open(dir.join("block.json")).unwrap()))
-                .unwrap();
+        let block: Block = serde_json::from_reader(BufReader::new(
+            File::open(block_dir.join("block.json")).unwrap(),
+        ))
+        .unwrap();
 
         // Parse state
         let accounts: HashMap<Address, EvmAccount, BuildSuffixHasher> = serde_json::from_reader(
-            BufReader::new(File::open(dir.join("pre_state.json")).unwrap()),
+            BufReader::new(File::open(block_dir.join("pre_state.json")).unwrap()),
         )
         .unwrap();
 
         // Parse block hashes
-        let block_hashes: BlockHashes = File::open(dir.join("block_hashes.json"))
+        let block_hashes: BlockHashes = File::open(block_dir.join("block_hashes.json"))
             .map(|file| serde_json::from_reader::<_, BlockHashes>(BufReader::new(file)).unwrap())
             .unwrap_or_default();
 

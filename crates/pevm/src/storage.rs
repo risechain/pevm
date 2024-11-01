@@ -278,9 +278,9 @@ impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
 
 mod in_memory;
 pub use in_memory::InMemoryStorage;
-#[cfg(feature = "rpc")]
+#[cfg(feature = "rpc-storage")]
 mod rpc;
-#[cfg(feature = "rpc")]
+#[cfg(feature = "rpc-storage")]
 pub use rpc::RpcStorage;
 
 #[cfg(test)]
