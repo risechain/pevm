@@ -1,9 +1,6 @@
 [workspace]
-default-members = ["bins/*"]
-members = [
-  "bins/*",
-  "pevm",
-]
+default-members = ["crates/pevm"]
+members = ["bins/fetch", "crates/pevm"]
 resolver = "2"
 
 [profile.release]
@@ -18,11 +15,14 @@ rust.unreachable_pub = "warn"
 rust.unused_crate_dependencies = "warn"
 
 [workspace.dependencies]
-pevm.path = "pevm"
+pevm.path = "crates/pevm"
 
 alloy-chains = "0.1.40"
 alloy-consensus = "0.5.2"
-alloy-primitives = "0.8.8"
+alloy-primitives = { version = "0.8.8", features = [
+  "asm-keccak",
+  "map-fxhash",
+] }
 alloy-provider = "0.5.2"
 alloy-rlp = "0.3.8"
 alloy-rpc-types = "0.5.2"
@@ -32,7 +32,9 @@ alloy-trie = "0.7.2"
 
 # Let's do our best to port needed REVM changes upstream
 revme = { git = "https://github.com/risechain/revm", rev = "7345c07ae7f65a976e9db4866872066aef0bdce4" }
-revm = { git = "https://github.com/risechain/revm", rev = "7345c07ae7f65a976e9db4866872066aef0bdce4" }
+revm = { git = "https://github.com/risechain/revm", rev = "7345c07ae7f65a976e9db4866872066aef0bdce4", features = [
+  "serde",
+] }
 
 # OP dependencies
 op-alloy-consensus = "0.5.0"
@@ -50,7 +52,7 @@ hashbrown = "0.15.0"
 rand = "0.8.5"
 rayon = "1.10.0"
 reqwest = "0.12.8"
-rpmalloc = "0.2.2"
+rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
 rustc-hash = "2.0.0"
 serde = "1.0.210"
 serde_json = "1.0.132"
@@ -58,5 +60,6 @@ smallvec = "1.13.2"
 snmalloc-rs = "0.3.6"
 thiserror = "1.0.64"
 tikv-jemallocator = "0.6.0"
-tokio = "1.40.0"
+tokio = { version = "1.40.0", features = ["rt-multi-thread"] }
 walkdir = "2.5.0"
+

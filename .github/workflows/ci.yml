@@ -25,7 +25,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Lint
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --all --all-targets --all-features
 
       - name: Test
         env:
@@ -34,4 +34,4 @@ jobs:
         # Each test still executes parallelly anyway.
         run: |
           git submodule update --init
-          cargo test --release --all-features -- --test-threads=1
+          cargo test --release --all --all-features -- --test-threads=1

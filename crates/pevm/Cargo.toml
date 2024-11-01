@@ -6,25 +6,22 @@ edition = "2021"
 [features]
 defaults = []
 rpc = [
-  "tokio",
-  "reqwest",
-  "alloy-transport",
-  "alloy-transport-http",
+  "dep:tokio",
+  "dep:reqwest",
+  "dep:alloy-transport",
+  "dep:alloy-transport-http",
 ]
 optimism = [
-    "revm/optimism",
-    "dep:op-alloy-consensus",
-    "dep:op-alloy-network",
-    "dep:op-alloy-rpc-types",
+  "revm/optimism",
+  "dep:op-alloy-consensus",
+  "dep:op-alloy-network",
+  "dep:op-alloy-rpc-types",
 ]
 
 [dependencies]
 alloy-chains.workspace = true
 alloy-consensus.workspace = true
-alloy-primitives = { workspace = true, features = [
-    "asm-keccak",
-    "map-fxhash",
-] }
+alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
 alloy-trie.workspace = true
@@ -38,7 +35,7 @@ serde.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
 
-revm = { workspace = true, features = ["serde"] }
+revm.workspace = true
 
 alloy-provider.workspace = true
 
@@ -46,7 +43,7 @@ alloy-provider.workspace = true
 alloy-transport = { workspace = true, optional = true }
 alloy-transport-http = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, optional = true }
 
 # OP dependencies
 op-alloy-consensus = { workspace = true, optional = true }
@@ -61,11 +58,10 @@ rand.workspace = true
 rayon.workspace = true
 reqwest.workspace = true
 revme.workspace = true
-rpmalloc = { workspace = true, features = ["thread_cache", "global_cache"] }
+rpmalloc.workspace = true
 serde_json.workspace = true
 snmalloc-rs.workspace = true
 tikv-jemallocator.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
 walkdir.workspace = true
 
 [lints]
