@@ -15,7 +15,7 @@ rust.unreachable_pub = "warn"
 rust.unused_crate_dependencies = "warn"
 
 [workspace.dependencies]
-pevm = { path = "crates/pevm", features = ["rpc-storage"] }
+pevm = { path = "crates/pevm", features = ["full"] }
 
 alloy-chains = "0.1.40"
 alloy-consensus = "0.5.2"
