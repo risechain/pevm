@@ -1,0 +1,75 @@
+[package]
+name = "pevm"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+defaults = []
+rpc-storage = [
+  "dep:tokio",
+  "dep:reqwest",
+  "dep:alloy-transport",
+  "dep:alloy-transport-http",
+]
+optimism = [
+  "revm/optimism",
+  "dep:op-alloy-consensus",
+  "dep:op-alloy-network",
+  "dep:op-alloy-rpc-types",
+]
+
+[dependencies]
+alloy-chains.workspace = true
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-rpc-types.workspace = true
+alloy-trie.workspace = true
+bitflags.workspace = true
+bitvec.workspace = true
+dashmap.workspace = true
+hashbrown.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+revm.workspace = true
+
+alloy-provider.workspace = true
+
+# RPC feature dependencies
+alloy-transport = { workspace = true, optional = true }
+alloy-transport-http = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+# OP dependencies
+op-alloy-consensus = { workspace = true, optional = true }
+op-alloy-network = { workspace = true, optional = true }
+op-alloy-rpc-types = { workspace = true, optional = true }
+
+[dev-dependencies]
+bincode.workspace = true
+criterion.workspace = true
+flate2.workspace = true
+rand.workspace = true
+rayon.workspace = true
+reqwest.workspace = true
+revme.workspace = true
+rpmalloc.workspace = true
+serde_json.workspace = true
+snmalloc-rs.workspace = true
+tikv-jemallocator.workspace = true
+walkdir.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "mainnet"
+harness = false
+
+[[bench]]
+name = "gigagas"
+harness = false

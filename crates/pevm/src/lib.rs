@@ -1,5 +1,7 @@
 //! Blazingly fast Parallel EVM in Rust.
 
+#![cfg_attr(test, allow(unused_crate_dependencies))]
+
 // TODO: Better types & API for third-party integration
 
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
@@ -223,7 +225,10 @@ mod scheduler;
 mod storage;
 pub use storage::{
     AccountBasic, BlockHashes, Bytecodes, ChainState, EvmAccount, EvmCode, InMemoryStorage,
-    RpcStorage, Storage, StorageWrapper,
+    Storage, StorageWrapper,
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};
+
+#[cfg(feature = "rpc-storage")]
+pub use storage::RpcStorage;

@@ -1,17 +1,17 @@
+#![allow(unused_crate_dependencies)]
+
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use reqwest::Url;
 use tokio::runtime::Runtime;
 
-use pevm::{
-    chain::{PevmChain, PevmEthereum},
-    RpcStorage,
-};
+use pevm::chain::{PevmChain, PevmEthereum};
 
 pub mod common;
 
 // TODO: [tokio::test]?
 #[test]
+#[cfg(feature = "rpc-storage")]
 fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
@@ -45,7 +45,8 @@ fn mainnet_blocks_from_rpc() {
             .unwrap();
         let chain = PevmEthereum::mainnet();
         let spec_id = chain.get_block_spec(&block.header).unwrap();
-        let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
+        let rpc_storage =
+            pevm::RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         common::test_execute_alloy(&rpc_storage, &chain, block, true);
     }
 }

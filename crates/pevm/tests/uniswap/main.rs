@@ -2,6 +2,8 @@
 //! Each cluster has M people.
 //! Each person makes N swaps.
 
+#![allow(unused_crate_dependencies)]
+
 #[path = "../common/mod.rs"]
 pub mod common;
 

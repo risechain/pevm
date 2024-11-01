@@ -1,6 +1,8 @@
 // Tests for the beneficiary account, especially for the lazy update of its balance to avoid
 // "implicit" dependency among consecutive transactions.
 
+#![allow(unused_crate_dependencies)]
+
 use pevm::InMemoryStorage;
 use rand::random;
 use revm::primitives::{alloy_primitives::U160, env::TxEnv, Address, TransactTo, U256};
