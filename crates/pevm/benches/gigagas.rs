@@ -2,7 +2,7 @@
 
 // TODO: More fancy benchmarks & plots.
 
-#![allow(missing_docs)]
+#![allow(missing_docs, unused_crate_dependencies)]
 
 use std::{num::NonZeroUsize, thread};
 

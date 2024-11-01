@@ -1,5 +1,7 @@
 //! Blazingly fast Parallel EVM in Rust.
 
+#![cfg_attr(test, allow(unused_crate_dependencies))]
+
 // TODO: Better types & API for third-party integration
 
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
