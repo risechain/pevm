@@ -3,7 +3,6 @@
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use reqwest::Url;
-use tokio::runtime::Runtime;
 
 use pevm::chain::{PevmChain, PevmEthereum};
 
@@ -35,7 +34,7 @@ fn mainnet_blocks_from_rpc() {
                // 17035010, // SHANGHAI
                // 19426587, // CANCUN
     ] {
-        let runtime = Runtime::new().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
         let block = runtime
             .block_on(
