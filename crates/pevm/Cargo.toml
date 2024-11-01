@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-defaults = ["rpc-storage", "optimism"]
+defaults = []
+full = ["rpc-storage", "optimism"]
 rpc-storage = [
   "dep:tokio",
   "dep:reqwest",
