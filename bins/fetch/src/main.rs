@@ -14,11 +14,11 @@ use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use clap::Parser;
 use flate2::{bufread::GzDecoder, write::GzEncoder, Compression};
 use pevm::{
+    block_on,
     chain::{PevmChain, PevmEthereum},
     EvmAccount, EvmCode, Pevm, RpcStorage,
 };
 use reqwest::Url;
-use tokio::runtime::Runtime;
 
 #[derive(Parser, Debug)]
 /// Fetch is a CLI tool to fetch a block from an RPC provider, and snapshot that block to disk.
@@ -40,9 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     // Retrive block from provider.
-    let runtime = Runtime::new()?;
-    let block = runtime
-        .block_on(provider.get_block(block_id, BlockTransactionsKind::Full))
+    let block = block_on(provider.get_block(block_id, BlockTransactionsKind::Full))
         .map_err(|err| format!("Failed to fetch block from provider. {err}"))?
         .ok_or(format!("No block found for ID: {:?}", block_id))?;
 

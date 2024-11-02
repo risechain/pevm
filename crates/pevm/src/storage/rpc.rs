@@ -1,5 +1,6 @@
 use std::{fmt::Debug, future::IntoFuture, sync::Mutex, time::Duration};
 
+use crate::{block_on, AccountBasic, EvmAccount, Storage};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{
     network::{BlockResponse, HeaderResponse},
@@ -14,9 +15,7 @@ use revm::{
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{Bytecode, SpecId},
 };
-use tokio::runtime::Runtime;
-
-use crate::{AccountBasic, EvmAccount, Storage};
+use tokio::time::sleep;
 
 use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
 
@@ -37,8 +36,6 @@ pub struct RpcStorage<N: Network> {
     cache_accounts: Mutex<ChainState>,
     cache_bytecodes: Mutex<Bytecodes>,
     cache_block_hashes: Mutex<BlockHashes>,
-    // TODO: Better async handling.
-    runtime: Runtime,
 }
 
 impl<N: Network> RpcStorage<N> {
@@ -51,36 +48,32 @@ impl<N: Network> RpcStorage<N> {
             cache_accounts: Mutex::default(),
             cache_bytecodes: Mutex::default(),
             cache_block_hashes: Mutex::default(),
-            // TODO: Better error handling.
-            runtime: Runtime::new().unwrap(),
         }
     }
 
     /// Send a request and retry many times if needed.
     /// This util is made to avoid error 429 Too Many Requests
-    /// <https://en.wikipedia.org/wiki/Exponential_backoff>
-    fn fetch<T, E, R: IntoFuture<Output = Result<T, E>>>(
+    /// https://en.wikipedia.org/wiki/Exponential_backoff
+    async fn fetch<T, E, R: IntoFuture<Output = Result<T, E>>>(
         &self,
         request: impl Fn() -> R,
     ) -> Result<T, E> {
         const RETRY_LIMIT: usize = 8;
         const INITIAL_DELAY_MILLIS: u64 = 125;
 
-        self.runtime.block_on(async {
-            let mut lives = RETRY_LIMIT;
-            let mut delay = Duration::from_millis(INITIAL_DELAY_MILLIS);
+        let mut lives = RETRY_LIMIT;
+        let mut delay = Duration::from_millis(INITIAL_DELAY_MILLIS);
 
-            loop {
-                let result = request().await;
-                if lives > 0 && result.is_err() {
-                    tokio::time::sleep(delay).await;
-                    lives -= 1;
-                    delay *= 2;
-                } else {
-                    return result;
-                }
+        loop {
+            let result = request().await;
+            if lives > 0 && result.is_err() {
+                sleep(delay).await;
+                lives -= 1;
+                delay *= 2;
+            } else {
+                return result;
             }
-        })
+        }
     }
 
     /// Get a snapshot of accounts
@@ -109,13 +102,21 @@ impl<N: Network> Storage for RpcStorage<N> {
                 nonce: account.nonce,
             }));
         }
-        let nonce = self.fetch(|| {
-            self.provider
-                .get_transaction_count(*address)
-                .block_id(self.block_id)
-        })?;
-        let balance = self.fetch(|| self.provider.get_balance(*address).block_id(self.block_id))?;
-        let code = self.fetch(|| self.provider.get_code_at(*address).block_id(self.block_id))?;
+
+        let (nonce, balance, code) = block_on(async move {
+            tokio::join!(
+                self.fetch(|| {
+                    self.provider
+                        .get_transaction_count(*address)
+                        .block_id(self.block_id)
+                }),
+                self.fetch(|| self.provider.get_balance(*address).block_id(self.block_id)),
+                self.fetch(|| self.provider.get_code_at(*address).block_id(self.block_id)),
+            )
+        });
+        let nonce = nonce?;
+        let balance = balance?;
+        let code = code?;
 
         // We need to distinguish new non-precompile accounts for gas calculation
         // in early hard-forks (creating new accounts cost extra gas, etc.).
@@ -168,13 +169,13 @@ impl<N: Network> Storage for RpcStorage<N> {
     }
 
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
-        let proof = self.fetch(|| {
+        let proof = block_on(self.fetch(|| {
             self.provider
                 // [get_account] is simpler but it yields deserialization
                 // error on an empty account.
                 .get_proof(*address, Vec::new())
                 .block_id(self.block_id)
-        })?;
+        }))?;
         Ok(proof.storage_hash != alloy_consensus::EMPTY_ROOT_HASH)
     }
 
@@ -184,11 +185,12 @@ impl<N: Network> Storage for RpcStorage<N> {
                 return Ok(*value);
             }
         }
-        let value = self.fetch(|| {
+
+        let value = block_on(self.fetch(|| {
             self.provider
                 .get_storage_at(*address, *index)
                 .block_id(self.block_id)
-        })?;
+        }))?;
         // We only cache if the pre-state account is non-empty. Else this
         // could be a false alarm that results in the default 0. Caching
         // that would make this account non-empty and may fail a tx that
@@ -206,12 +208,11 @@ impl<N: Network> Storage for RpcStorage<N> {
             return Ok(block_hash);
         }
 
-        let block_hash = self
-            .fetch(|| {
-                self.provider
-                    .get_block_by_number(BlockNumberOrTag::Number(*number), false)
-            })
-            .map(|block| block.unwrap().header().hash())?;
+        let block_hash = block_on(self.fetch(|| {
+            self.provider
+                .get_block_by_number(BlockNumberOrTag::Number(*number), false)
+        }))
+        .map(|block| block.unwrap().header().hash())?;
 
         self.cache_block_hashes
             .lock()

@@ -5,23 +5,17 @@ edition = "2021"
 
 [features]
 defaults = []
-
 full = ["optimism", "rpc-storage"]
-
+rpc-storage = ["dep:reqwest", "dep:alloy-transport", "dep:alloy-transport-http"]
 optimism = [
   "revm/optimism",
+  "dep:alloy-transport",
+  "dep:alloy-transport-http",
   "dep:op-alloy-consensus",
   "dep:op-alloy-network",
   "dep:op-alloy-rpc-types",
+  "dep:reqwest"
 ]
-
-rpc-storage = [
-  "dep:alloy-transport",
-  "dep:alloy-transport-http",
-  "dep:reqwest",
-  "dep:tokio",
-]
-
 global-alloc = ["dep:rpmalloc", "dep:snmalloc-rs", "dep:tikv-jemallocator"]
 
 [dependencies]
@@ -53,7 +47,7 @@ op-alloy-rpc-types = { workspace = true, optional = true }
 alloy-transport = { workspace = true, optional = true }
 alloy-transport-http = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true }
 
 # Various allocators for benchmarks
 rpmalloc = { workspace = true, optional = true }
@@ -69,6 +63,8 @@ rayon.workspace = true
 reqwest.workspace = true
 revme.workspace = true
 serde_json.workspace = true
+snmalloc-rs.workspace = true
+tikv-jemallocator.workspace = true
 walkdir.workspace = true
 
 [lints]

@@ -4,13 +4,48 @@
 
 // TODO: Better types & API for third-party integration
 
-use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
+use std::{
+    future::Future,
+    hash::{BuildHasher, BuildHasherDefault, Hash, Hasher},
+    sync::OnceLock,
+    thread,
+};
+use tokio::runtime::{Handle, Runtime};
 
 use alloy_primitives::{Address, B256, U256};
 use bitflags::bitflags;
 use hashbrown::HashMap;
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
+
+static GLOBAL_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+#[inline(always)]
+/// Awaits on a future using the current Tokio runtime if it exists,
+/// or creates a new one (at most once) if it doesn't.
+pub fn block_on<F: Future + Send>(future: F) -> F::Output
+where
+    F::Output: Send,
+{
+    // Get a handle to the current Tokio runtime
+    if Handle::try_current().is_ok() {
+        thread::scope(|s| {
+            s.spawn(move || {
+                GLOBAL_RUNTIME
+                    .get_or_init(|| Runtime::new().expect("Failed to create Tokio runtime"))
+                    .handle()
+                    .block_on(future)
+            })
+            .join()
+            .expect("valid")
+        })
+    } else {
+        GLOBAL_RUNTIME
+            .get_or_init(|| Runtime::new().expect("Failed to create Tokio runtime"))
+            .handle()
+            .block_on(future)
+    }
+}
 
 /// We use the last 8 bytes of an existing hash like address
 /// or code hash instead of rehashing it.
