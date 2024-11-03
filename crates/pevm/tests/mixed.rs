@@ -1,5 +1,4 @@
 // Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
-#![allow(unused_crate_dependencies)]
 
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use rand::random;

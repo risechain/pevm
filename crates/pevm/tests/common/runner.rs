@@ -7,8 +7,8 @@ use pevm::{
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
 use std::{num::NonZeroUsize, thread};
 
-// Mock an account from an integer index that is used as the address.
-// Useful for mock iterations.
+/// Mock an account from an integer index that is used as the address.
+/// Useful for mock iterations.
 pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
     let address = Address::from(U160::from(idx));
     let account = EvmAccount {
@@ -21,8 +21,8 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
     (address, account)
 }
 
-// Execute an REVM block sequentially & with PEVM and assert that
-// the execution results match.
+/// Execute an REVM block sequentially and parallelly with PEVM and assert that
+/// the execution results match.
 pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_eq!(
@@ -44,8 +44,8 @@ pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) 
     );
 }
 
-// Execute an Alloy block sequentially & with pevm and assert that
-// the execution results match.
+/// Execute an Alloy block sequentially & with pevm and assert that
+/// the execution results match.
 pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync + PartialEq>(
     storage: &S,
     chain: &C,

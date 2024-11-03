@@ -2,8 +2,6 @@
 
 // TODO: More fancy benchmarks & plots.
 
-#![allow(missing_docs, unused_crate_dependencies)]
-
 use std::{num::NonZeroUsize, thread};
 
 use alloy_primitives::{Address, U160, U256};
@@ -15,21 +13,27 @@ use pevm::{
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
 
 // Better project structure
+
+/// common module
 #[path = "../tests/common/mod.rs"]
 pub mod common;
 
+/// erc20 module
 #[path = "../tests/erc20/mod.rs"]
 pub mod erc20;
 
+/// uniswap module
 #[path = "../tests/uniswap/mod.rs"]
 pub mod uniswap;
 
+///  large gas value
 const GIGA_GAS: u64 = 1_000_000_000;
 
 #[cfg(feature = "global-alloc")]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+/// Runs a benchmark for executing a set of transactions on a given blockchain state.
 pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage<'_>, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let chain = PevmEthereum::mainnet();
@@ -63,6 +67,7 @@ pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage<'_>, txs: V
     group.finish();
 }
 
+/// Benchmarks the execution time of raw token transfers.
 pub fn bench_raw_transfers(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / common::RAW_TRANSFER_GAS_LIMIT as f64).ceil() as usize;
     // Skip the built-in precompiled contracts addresses.
@@ -95,6 +100,7 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
     );
 }
 
+/// Benchmarks the execution time of ERC-20 token transfers.
 pub fn bench_erc20(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / erc20::ESTIMATED_GAS_USED as f64).ceil() as usize;
     let (mut state, bytecodes, txs) = erc20::generate_cluster(block_size, 1, 1);
@@ -107,6 +113,7 @@ pub fn bench_erc20(c: &mut Criterion) {
     );
 }
 
+/// Benchmarks the execution time of Uniswap V3 swap transactions.
 pub fn bench_uniswap(c: &mut Criterion) {
     let block_size = (GIGA_GAS as f64 / uniswap::ESTIMATED_GAS_USED as f64).ceil() as usize;
     let mut final_state = ChainState::from_iter([(Address::ZERO, EvmAccount::default())]); // Beneficiary
@@ -126,11 +133,18 @@ pub fn bench_uniswap(c: &mut Criterion) {
     );
 }
 
+/// Runs a series of benchmarks to evaluate the performance of different transaction types.
 pub fn benchmark_gigagas(c: &mut Criterion) {
     bench_raw_transfers(c);
     bench_erc20(c);
     bench_uniswap(c);
 }
 
-criterion_group!(benches, benchmark_gigagas);
-criterion_main!(benches);
+// HACK: we can't document public items inside of the macro
+#[allow(missing_docs)]
+mod benches {
+    use super::*;
+    criterion_group!(benches, benchmark_gigagas);
+}
+
+criterion_main!(benches::benches);

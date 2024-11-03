@@ -1,15 +1,14 @@
 //! Benchmark mainnet blocks with needed state loaded in memory.
 
 // TODO: More fancy benchmarks & plots.
-
-#![allow(missing_docs, unused_crate_dependencies)]
-
 use std::{num::NonZeroUsize, thread};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{chain::PevmEthereum, Pevm};
 
 // Better project structure
+
+/// common module
 #[path = "../tests/common/mod.rs"]
 pub mod common;
 
@@ -23,6 +22,7 @@ static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 #[global_allocator]
 static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
+/// Benchmark for the Ethereum Mainnet Simulation using `PevmEthereum`.
 pub fn criterion_benchmark(c: &mut Criterion) {
     let chain = PevmEthereum::mainnet();
     let concurrency_level = thread::available_parallelism()
@@ -75,5 +75,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);
+// HACK: we can't document public items inside of the macro
+#[allow(missing_docs)]
+mod benches {
+    use super::*;
+    criterion_group!(benches, criterion_benchmark);
+}
+
+criterion_main!(benches::benches);

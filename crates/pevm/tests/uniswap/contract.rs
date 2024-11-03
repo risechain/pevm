@@ -24,21 +24,23 @@ fn keccak256_all(chunks: &[&[u8]]) -> B256 {
     keccak256(chunks.concat())
 }
 
-// @gnosis/canonical-weth/contracts/WETH9.sol
+/// @gnosis/canonical-weth/contracts/WETH9.sol
 #[derive(Debug, Default)]
 pub struct WETH9 {}
 
 impl WETH9 {
+    /// Creates a new instance of `WETH9`.
     pub const fn new() -> Self {
         Self {}
     }
-    // | Name      | Type                                            | Slot | Offset | Bytes |
-    // |-----------|-------------------------------------------------|------|--------|-------|
-    // | name      | string                                          | 0    | 0      | 32    |
-    // | symbol    | string                                          | 1    | 0      | 32    |
-    // | decimals  | uint8                                           | 2    | 0      | 1     |
-    // | balanceOf | mapping(address => uint256)                     | 3    | 0      | 32    |
-    // | allowance | mapping(address => mapping(address => uint256)) | 4    | 0      | 32    |
+
+    /// | Name      | Type                                            | Slot | Offset | Bytes |
+    /// |-----------|-------------------------------------------------|------|--------|-------|
+    /// | name      | string                                          | 0    | 0      | 32    |
+    /// | symbol    | string                                          | 1    | 0      | 32    |
+    /// | decimals  | uint8                                           | 2    | 0      | 1     |
+    /// | balanceOf | mapping(address => uint256)                     | 3    | 0      | 32    |
+    /// | allowance | mapping(address => mapping(address => uint256)) | 4    | 0      | 32    |
     pub fn build(&self) -> EvmAccount {
         let hex = WETH9.trim();
         let bytecode = Bytecode::new_raw(Bytes::from_hex(hex).unwrap());
@@ -60,7 +62,7 @@ impl WETH9 {
     }
 }
 
-// @uniswap/v3-core/contracts/UniswapV3Factory.sol
+/// @uniswap/v3-core/contracts/UniswapV3Factory.sol
 #[derive(Debug, Default)]
 pub struct UniswapV3Factory {
     owner: Address,
@@ -68,6 +70,7 @@ pub struct UniswapV3Factory {
 }
 
 impl UniswapV3Factory {
+    /// Creates a new `UniswapV3Factory` instance.
     pub fn new(owner: Address) -> Self {
         Self {
             owner,
@@ -75,6 +78,7 @@ impl UniswapV3Factory {
         }
     }
 
+    /// Adds a new liquidity pool to the factory's registry.
     pub fn add_pool(
         &mut self,
         token_0: Address,
@@ -86,12 +90,12 @@ impl UniswapV3Factory {
         self
     }
 
-    // | Name                 | Type                                                               | Slot | Offset | Bytes |
-    // |----------------------|--------------------------------------------------------------------|------|--------|-------|
-    // | parameters           | struct UniswapV3PoolDeployer.Parameters                            | 0    | 0      | 96    |
-    // | owner                | address                                                            | 3    | 0      | 20    |
-    // | feeAmountTickSpacing | mapping(uint24 => int24)                                           | 4    | 0      | 32    |
-    // | getPool              | mapping(address => mapping(address => mapping(uint24 => address))) | 5    | 0      | 32    |
+    /// | Name                 | Type                                                               | Slot | Offset | Bytes |
+    /// |----------------------|--------------------------------------------------------------------|------|--------|-------|
+    /// | parameters           | struct UniswapV3PoolDeployer.Parameters                            | 0    | 0      | 96    |
+    /// | owner                | address                                                            | 3    | 0      | 20    |
+    /// | feeAmountTickSpacing | mapping(uint24 => int24)                                           | 4    | 0      | 32    |
+    /// | getPool              | mapping(address => mapping(address => mapping(uint24 => address))) | 5    | 0      | 32    |
     pub fn build(&self, address: Address) -> EvmAccount {
         let hex = UNISWAP_V3_FACTORY.trim().replace(
             "0b748751e6f8b1a38c9386a19d9f8966b3593a9e",
@@ -138,7 +142,7 @@ impl UniswapV3Factory {
     }
 }
 
-// @uniswap/v3-core/contracts/UniswapV3Pool.sol
+/// @uniswap/v3-core/contracts/UniswapV3Pool.sol
 #[derive(Debug, Default)]
 pub struct UniswapV3Pool {
     token_0: Address,
@@ -150,6 +154,7 @@ pub struct UniswapV3Pool {
 }
 
 impl UniswapV3Pool {
+    /// Creates a new `UniswapV3Pool` instance.
     pub fn new(token_0: Address, token_1: Address, factory: Address) -> Self {
         Self {
             token_0,
@@ -161,6 +166,7 @@ impl UniswapV3Pool {
         }
     }
 
+    /// Adds a new position to the pool, associated with the specified owner and tick range.
     pub fn add_position(
         &mut self,
         owner: Address,
@@ -176,6 +182,7 @@ impl UniswapV3Pool {
         self
     }
 
+    /// Adds a new tick to the data structure, updating both the ticks map and the tick bitmap.
     pub fn add_tick(&mut self, tick: i32, value: [U256; 4]) -> &mut Self {
         self.ticks.insert(from_tick(tick), value);
 
@@ -187,17 +194,17 @@ impl UniswapV3Pool {
         self
     }
 
-    // | Name                 | Type                                     | Slot | Offset | Bytes   |
-    // |----------------------|------------------------------------------|------|--------|---------|
-    // | slot0                | struct UniswapV3Pool.Slot0               | 0    | 0      | 32      |
-    // | feeGrowthGlobal0X128 | uint256                                  | 1    | 0      | 32      |
-    // | feeGrowthGlobal1X128 | uint256                                  | 2    | 0      | 32      |
-    // | protocolFees         | struct UniswapV3Pool.ProtocolFees        | 3    | 0      | 32      |
-    // | liquidity            | uint128                                  | 4    | 0      | 16      |
-    // | ticks                | mapping(int24 => struct Tick.Info)       | 5    | 0      | 32      |
-    // | tickBitmap           | mapping(int16 => uint256)                | 6    | 0      | 32      |
-    // | positions            | mapping(bytes32 => struct Position.Info) | 7    | 0      | 32      |
-    // | observations         | struct Oracle.Observation[65535]         | 8    | 0      | 2097120 |
+    /// | Name                 | Type                                     | Slot | Offset | Bytes   |
+    /// |----------------------|------------------------------------------|------|--------|---------|
+    /// | slot0                | struct UniswapV3Pool.Slot0               | 0    | 0      | 32      |
+    /// | feeGrowthGlobal0X128 | uint256                                  | 1    | 0      | 32      |
+    /// | feeGrowthGlobal1X128 | uint256                                  | 2    | 0      | 32      |
+    /// | protocolFees         | struct UniswapV3Pool.ProtocolFees        | 3    | 0      | 32      |
+    /// | liquidity            | uint128                                  | 4    | 0      | 16      |
+    /// | ticks                | mapping(int24 => struct Tick.Info)       | 5    | 0      | 32      |
+    /// | tickBitmap           | mapping(int16 => uint256)                | 6    | 0      | 32      |
+    /// | positions            | mapping(bytes32 => struct Position.Info) | 7    | 0      | 32      |
+    /// | observations         | struct Oracle.Observation[65535]         | 8    | 0      | 2097120 |
     pub fn build(&self, address: Address) -> EvmAccount {
         let hex = UNISWAP_V3_POOL
             .trim()
@@ -257,7 +264,7 @@ impl UniswapV3Pool {
         }
     }
 
-    // @uniswap/v3-periphery/contracts/libraries/PoolAddress.sol
+    /// @uniswap/v3-periphery/contracts/libraries/PoolAddress.sol
     pub fn get_address(&self, factory_address: Address, pool_init_code_hash: B256) -> Address {
         let hash = keccak256_all(&[
             fixed_bytes!("ff").as_slice(),
@@ -274,7 +281,7 @@ impl UniswapV3Pool {
     }
 }
 
-// @uniswap/v3-periphery/contracts/SwapRouter.sol
+/// @uniswap/v3-periphery/contracts/SwapRouter.sol
 #[derive(Debug, Default)]
 pub struct SwapRouter {
     weth9: Address,
@@ -283,6 +290,8 @@ pub struct SwapRouter {
 }
 
 impl SwapRouter {
+    /// Creates a new instance of the `SwapRouter` with the specified WETH9 address,
+    /// factory address, and pool initialization code hash.
     pub const fn new(weth9: Address, factory: Address, pool_init_code_hash: B256) -> Self {
         Self {
             weth9,
@@ -291,9 +300,12 @@ impl SwapRouter {
         }
     }
 
-    // | Name           | Type    | Slot | Offset | Bytes |
-    // |----------------|---------|------|--------|-------|
-    // | amountInCached | uint256 | 0    | 0      | 32    |
+    /// Builds an `EvmAccount` instance for the `SwapRouter` contract from
+    /// contract bytecode, storage, and initial properties.
+    ///
+    /// | Name           | Type    | Slot | Offset | Bytes |
+    /// |----------------|---------|------|--------|-------|
+    /// | amountInCached | uint256 | 0    | 0      | 32    |
     pub fn build(&self) -> EvmAccount {
         let hex = SWAP_ROUTER
             .trim()
@@ -337,6 +349,8 @@ pub struct SingleSwap {
 }
 
 impl SingleSwap {
+    /// Creates a new instance of `SingleSwap` with the specified addresses for the swap router
+    /// and the two tokens involved in the swap.
     pub const fn new(swap_router: Address, token_0: Address, token_1: Address) -> Self {
         Self {
             swap_router,
@@ -345,11 +359,14 @@ impl SingleSwap {
         }
     }
 
-    // | Name   | Type    | Slot | Offset | Bytes |
-    // |--------|---------|------|--------|-------|
-    // | token0 | address | 0    | 0      | 20    |
-    // | token1 | address | 1    | 0      | 20    |
-    // | fee    | uint24  | 1    | 20     | 3     |
+    /// Builds an `EvmAccount` instance for the `SingleSwap` contract from
+    /// contract bytecode, storage, and initial properties.
+    ///
+    /// | Name   | Type    | Slot | Offset | Bytes |
+    /// |--------|---------|------|--------|-------|
+    /// | token0 | address | 0    | 0      | 20    |
+    /// | token1 | address | 1    | 0      | 20    |
+    /// | fee    | uint24  | 1    | 20     | 3     |
     pub fn build(&self) -> EvmAccount {
         let hex = SINGLE_SWAP.trim().replace(
             "e7cfcccb38ce07ba9d8d13431afe8cf6172de031",

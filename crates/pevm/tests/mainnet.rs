@@ -1,5 +1,3 @@
-#![allow(unused_crate_dependencies)]
-
 use pevm::chain::PevmEthereum;
 
 pub mod common;

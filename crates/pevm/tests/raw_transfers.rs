@@ -1,7 +1,5 @@
 // Test raw transfers -- only send some ETH from one account to another without extra data.
 
-#![allow(unused_crate_dependencies)]
-
 use pevm::{chain::PevmEthereum, InMemoryStorage};
 use rand::random;
 use revm::primitives::{alloy_primitives::U160, env::TxEnv, Address, TransactTo, U256};
