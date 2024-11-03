@@ -1,9 +1,6 @@
 //! Benchmark mainnet blocks with needed state loaded in memory.
 
 // TODO: More fancy benchmarks & plots.
-
-#![allow(missing_docs, unused_crate_dependencies)]
-
 use std::{num::NonZeroUsize, thread};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};

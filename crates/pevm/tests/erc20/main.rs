@@ -2,8 +2,6 @@
 // Each family has Y people.
 // Each person performs Z transfers to random people within the family.
 
-#![allow(unused_crate_dependencies)]
-
 #[path = "../common/mod.rs"]
 pub mod common;
 

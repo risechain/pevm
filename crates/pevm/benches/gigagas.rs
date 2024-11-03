@@ -2,8 +2,6 @@
 
 // TODO: More fancy benchmarks & plots.
 
-#![allow(missing_docs, unused_crate_dependencies)]
-
 use std::{num::NonZeroUsize, thread};
 
 use alloy_primitives::{Address, U160, U256};

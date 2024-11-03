@@ -8,8 +8,6 @@
 // - We use custom handlers (for lazy-updating the beneficiary account, etc.) that require "re-testing".
 // - Help outline the minimal state commitment logic for pevm.
 
-#![allow(unused_crate_dependencies)]
-
 use pevm::chain::PevmEthereum;
 use pevm::{
     Bytecodes, ChainState, EvmAccount, EvmCode, InMemoryStorage, Pevm, PevmError,
