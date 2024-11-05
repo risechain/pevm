@@ -100,6 +100,6 @@ $ git submodule update --init
 $ cargo test --workspace --release -- --test-threads=1
 ```
 
-### Benchmarks
+## Benchmarks
 
 See the dedicated doc [here](./crates/pevm/benches/README.md).
