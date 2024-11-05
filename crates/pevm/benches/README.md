@@ -18,7 +18,7 @@ The benchmark runs with a single transaction type, not representing real-world b
 To run the benchmark yourself:
 
 ```sh
-$ JEMALLOC_SYS_WITH_MALLOC_CONF="thp:always,metadata_thp:always" cargo bench --bench gigagas
+$ JEMALLOC_SYS_WITH_MALLOC_CONF="thp:always,metadata_thp:always" cargo bench --features global-alloc --bench gigagas
 ```
 
 |                 | No. Transactions | Gas Used      | Sequential (ms) | Parallel (ms) | Speedup    |
@@ -38,7 +38,7 @@ We pick `rpmalloc` for x86 and `snmalloc` for ARM as the global memory allocator
 To run the benchmark yourself:
 
 ```sh
-$ cargo bench --bench mainnet
+$ cargo bench --features global-alloc --bench mainnet
 ```
 
 To benchmark with profiling for development (preferably after commenting out the sequential run):
