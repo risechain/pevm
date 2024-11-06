@@ -15,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: bnjbvr/cargo-machete@main
 
       # TODO: Tighter cache control.
       - uses: actions/cache@v4
@@ -24,6 +23,8 @@ jobs:
             ~/.cargo
             ./target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - uses: bnjbvr/cargo-machete@main
 
       - name: Lint
         run: cargo clippy --workspace --all-targets
