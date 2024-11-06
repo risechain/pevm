@@ -53,7 +53,6 @@ checksum = "836cf02383d9ebb35502d379bcd1ae803155094077eaab9c29131d888cd5fa3e"
 dependencies = [
  "alloy-primitives",
  "num_enum",
- "serde",
  "strum",
 ]
 
@@ -2913,7 +2912,6 @@ dependencies = [
 name = "pevm"
 version = "0.1.0"
 dependencies = [
- "alloy-chains",
  "alloy-consensus",
  "alloy-primitives",
  "alloy-provider",
