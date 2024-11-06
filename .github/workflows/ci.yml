@@ -24,6 +24,8 @@ jobs:
             ./target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - uses: bnjbvr/cargo-machete@main
+
       - name: Lint
         run: cargo clippy --workspace --all-targets
 
