@@ -25,7 +25,6 @@ rpc-storage = [
 global-alloc = ["dep:rpmalloc", "dep:snmalloc-rs", "dep:tikv-jemallocator"]
 
 [dependencies]
-alloy-chains.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-provider.workspace = true

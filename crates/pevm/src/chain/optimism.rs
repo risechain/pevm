@@ -1,7 +1,6 @@
 //! Optimism
 use std::collections::BTreeMap;
 
-use alloy_chains::NamedChain;
 use alloy_consensus::{Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy};
 use alloy_primitives::{Bytes, ChainId, B256, U256};
 use alloy_rpc_types::{BlockTransactions, Header};
@@ -28,10 +27,8 @@ pub struct PevmOptimism {
 
 impl PevmOptimism {
     /// Optimism Mainnet
-    pub fn mainnet() -> Self {
-        Self {
-            id: NamedChain::Optimism.into(),
-        }
+    pub const fn mainnet() -> Self {
+        Self { id: 10 }
     }
 
     /// Custom network

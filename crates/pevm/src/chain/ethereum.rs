@@ -2,7 +2,6 @@
 
 use std::{collections::BTreeMap, fmt::Debug};
 
-use alloy_chains::NamedChain;
 use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{B256, U256};
 use alloy_provider::network::eip2718::Encodable2718;
@@ -27,10 +26,8 @@ pub struct PevmEthereum {
 
 impl PevmEthereum {
     /// Ethereum Mainnet
-    pub fn mainnet() -> Self {
-        Self {
-            id: NamedChain::Mainnet.into(),
-        }
+    pub const fn mainnet() -> Self {
+        Self { id: 1 }
     }
 
     // TODO: support Ethereum Sepolia and other testnets
