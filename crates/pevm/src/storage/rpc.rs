@@ -1,6 +1,11 @@
-use std::{fmt::Debug, future::IntoFuture, sync::Mutex, time::Duration};
+use std::{
+    fmt::Debug,
+    future::{Future, IntoFuture},
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
 
-use crate::{block_on, AccountBasic, EvmAccount, Storage};
+use crate::{AccountBasic, EvmAccount, Storage};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{
     network::{BlockResponse, HeaderResponse},
@@ -15,7 +20,10 @@ use revm::{
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{Bytecode, SpecId},
 };
-use tokio::time::sleep;
+use tokio::{
+    runtime::{Handle, Runtime},
+    task,
+};
 
 use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
 
@@ -36,6 +44,7 @@ pub struct RpcStorage<N: Network> {
     cache_accounts: Mutex<ChainState>,
     cache_bytecodes: Mutex<Bytecodes>,
     cache_block_hashes: Mutex<BlockHashes>,
+    runtime: OnceLock<Runtime>,
 }
 
 impl<N: Network> RpcStorage<N> {
@@ -48,12 +57,27 @@ impl<N: Network> RpcStorage<N> {
             cache_accounts: Mutex::default(),
             cache_bytecodes: Mutex::default(),
             cache_block_hashes: Mutex::default(),
+            runtime: OnceLock::new(),
+        }
+    }
+
+    #[inline(always)]
+    /// Awaits on a future using the current Tokio runtime if it exists,
+    /// or creates a new one (at most once) if it doesn't.
+    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        if let Ok(runtime) = Handle::try_current() {
+            task::block_in_place(|| runtime.block_on(future))
+        } else {
+            self.runtime
+                .get_or_init(|| Runtime::new().expect("Failed to create Tokio runtime"))
+                .handle()
+                .block_on(future)
         }
     }
 
     /// Send a request and retry many times if needed.
     /// This util is made to avoid error 429 Too Many Requests
-    /// https://en.wikipedia.org/wiki/Exponential_backoff
+    /// <https://en.wikipedia.org/wiki/Exponential_backoff>
     async fn fetch<T, E, R: IntoFuture<Output = Result<T, E>>>(
         &self,
         request: impl Fn() -> R,
@@ -67,7 +91,7 @@ impl<N: Network> RpcStorage<N> {
         loop {
             let result = request().await;
             if lives > 0 && result.is_err() {
-                sleep(delay).await;
+                tokio::time::sleep(delay).await;
                 lives -= 1;
                 delay *= 2;
             } else {
@@ -103,7 +127,7 @@ impl<N: Network> Storage for RpcStorage<N> {
             }));
         }
 
-        let (nonce, balance, code) = block_on(async move {
+        let (nonce, balance, code) = self.block_on(async {
             tokio::join!(
                 self.fetch(|| {
                     self.provider
@@ -169,7 +193,7 @@ impl<N: Network> Storage for RpcStorage<N> {
     }
 
     fn has_storage(&self, address: &Address) -> Result<bool, Self::Error> {
-        let proof = block_on(self.fetch(|| {
+        let proof = self.block_on(self.fetch(|| {
             self.provider
                 // [get_account] is simpler but it yields deserialization
                 // error on an empty account.
@@ -185,8 +209,7 @@ impl<N: Network> Storage for RpcStorage<N> {
                 return Ok(*value);
             }
         }
-
-        let value = block_on(self.fetch(|| {
+        let value = self.block_on(self.fetch(|| {
             self.provider
                 .get_storage_at(*address, *index)
                 .block_id(self.block_id)
@@ -208,11 +231,12 @@ impl<N: Network> Storage for RpcStorage<N> {
             return Ok(block_hash);
         }
 
-        let block_hash = block_on(self.fetch(|| {
-            self.provider
-                .get_block_by_number(BlockNumberOrTag::Number(*number), false)
-        }))
-        .map(|block| block.unwrap().header().hash())?;
+        let block_hash = self
+            .block_on(self.fetch(|| {
+                self.provider
+                    .get_block_by_number(BlockNumberOrTag::Number(*number), false)
+            }))
+            .map(|block| block.unwrap().header().hash())?;
 
         self.cache_block_hashes
             .lock()
