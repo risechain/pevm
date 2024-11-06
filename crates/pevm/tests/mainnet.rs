@@ -8,7 +8,7 @@ use pevm::chain::{PevmChain, PevmEthereum};
 
 pub mod common;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+#[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "rpc-storage")]
 async fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
