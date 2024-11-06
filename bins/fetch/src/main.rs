@@ -26,6 +26,8 @@ struct Fetch {
     block_id: BlockId,
 }
 
+// TODO: Binary formats to save disk?
+// TODO: Test block after fetching it.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let Fetch { block_id, rpc_url } = Fetch::parse();

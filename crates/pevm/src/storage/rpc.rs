@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use crate::{AccountBasic, EvmAccount, Storage};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{
     network::{BlockResponse, HeaderResponse},
@@ -25,6 +24,8 @@ use tokio::{
     task,
 };
 
+use crate::{AccountBasic, EvmAccount, Storage};
+
 use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
 
 type RpcProvider<N> = RootProvider<Http<Client>, N>;
@@ -35,6 +36,12 @@ pub struct RpcStorage<N: Network> {
     provider: RpcProvider<N>,
     block_id: BlockId,
     precompiles: &'static Precompiles,
+    /// `OnceLock` is used to lazy-initialize a Tokio multi-threaded runtime if no
+    /// runtime is available already.
+    ///
+    /// This is needed because some futures should be executed synchronously to
+    /// comply with some traits
+    runtime: OnceLock<Runtime>,
     // Convenient types for persisting then reconstructing block's state
     // as in-memory storage for benchmarks & testing. Also work well when
     // the storage is re-used, like for comparing sequential & parallel
@@ -44,7 +51,6 @@ pub struct RpcStorage<N: Network> {
     cache_accounts: Mutex<ChainState>,
     cache_bytecodes: Mutex<Bytecodes>,
     cache_block_hashes: Mutex<BlockHashes>,
-    runtime: OnceLock<Runtime>,
 }
 
 impl<N: Network> RpcStorage<N> {
@@ -54,23 +60,21 @@ impl<N: Network> RpcStorage<N> {
             provider,
             precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)),
             block_id,
+            runtime: OnceLock::new(),
             cache_accounts: Mutex::default(),
             cache_bytecodes: Mutex::default(),
             cache_block_hashes: Mutex::default(),
-            runtime: OnceLock::new(),
         }
     }
 
-    #[inline(always)]
-    /// Awaits on a future using the current Tokio runtime if it exists,
-    /// or creates a new one (at most once) if it doesn't.
+    /// `block_on` is a helper method since `RpcStorage` only works in synchronous
+    /// code or a Tokio multi-thread runtime.
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
-        if let Ok(runtime) = Handle::try_current() {
-            task::block_in_place(|| runtime.block_on(future))
+        if let Ok(handle) = Handle::try_current() {
+            task::block_in_place(|| handle.block_on(future))
         } else {
             self.runtime
                 .get_or_init(|| Runtime::new().expect("Failed to create Tokio runtime"))
-                .handle()
                 .block_on(future)
         }
     }
