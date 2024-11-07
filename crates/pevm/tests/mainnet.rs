@@ -8,10 +8,9 @@ use pevm::chain::{PevmChain, PevmEthereum};
 
 pub mod common;
 
-// TODO: [tokio::test]?
-#[test]
+#[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "rpc-storage")]
-fn mainnet_blocks_from_rpc() {
+async fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
@@ -34,12 +33,10 @@ fn mainnet_blocks_from_rpc() {
                // 17035010, // SHANGHAI
                // 19426587, // CANCUN
     ] {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
-        let block = runtime
-            .block_on(
-                provider.get_block(BlockId::number(block_number), BlockTransactionsKind::Full),
-            )
+        let block = provider
+            .get_block(BlockId::number(block_number), BlockTransactionsKind::Full)
+            .await
             .unwrap()
             .unwrap();
         let chain = PevmEthereum::mainnet();

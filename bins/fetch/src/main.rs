@@ -18,7 +18,6 @@ use pevm::{
     EvmAccount, EvmCode, Pevm, RpcStorage,
 };
 use reqwest::Url;
-use tokio::runtime::Runtime;
 
 #[derive(Parser, Debug)]
 /// Fetch is a CLI tool to fetch a block from an RPC provider, and snapshot that block to disk.
@@ -27,10 +26,10 @@ struct Fetch {
     block_id: BlockId,
 }
 
-// TODO: async main?
 // TODO: Binary formats to save disk?
 // TODO: Test block after fetching it.
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let Fetch { block_id, rpc_url } = Fetch::parse();
 
     // Define provider.
@@ -40,9 +39,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     // Retrive block from provider.
-    let runtime = Runtime::new()?;
-    let block = runtime
-        .block_on(provider.get_block(block_id, BlockTransactionsKind::Full))
+    let block = provider
+        .get_block(block_id, BlockTransactionsKind::Full)
+        .await
         .map_err(|err| format!("Failed to fetch block from provider. {err}"))?
         .ok_or(format!("No block found for ID: {:?}", block_id))?;
 
