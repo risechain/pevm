@@ -168,6 +168,9 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
             db.is_lazy = db.to_code_hash.is_none()
                 && (vm.mv_memory.data.contains_key(&from_hash)
                     || vm.mv_memory.data.contains_key(&to_hash.unwrap()));
+            if !db.is_lazy && vm.mv_memory.is_lazy(&to) {
+                vm.mv_memory.remove_lazy_address(&to);
+            }
         }
         Ok(db)
     }

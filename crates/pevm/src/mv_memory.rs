@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashSet},
-    sync::Mutex,
+    sync::{Mutex, RwLock},
 };
 
 use alloy_primitives::{Address, B256};
@@ -36,7 +36,7 @@ pub struct MvMemory {
     /// Last read & written locations of each transaction
     last_locations: Vec<Mutex<LastLocations>>,
     /// Lazy addresses that need full evaluation at the end of the block
-    lazy_addresses: Mutex<LazyAddresses>,
+    lazy_addresses: RwLock<LazyAddresses>,
     /// New bytecodes deployed in this block
     pub(crate) new_bytecodes: DashMap<B256, Bytecode, BuildSuffixHasher>,
 }
@@ -66,7 +66,7 @@ impl MvMemory {
         Self {
             data,
             last_locations: (0..block_size).map(|_| Mutex::default()).collect(),
-            lazy_addresses: Mutex::new(LazyAddresses::from_iter(lazy_addresses)),
+            lazy_addresses: RwLock::new(LazyAddresses::from_iter(lazy_addresses)),
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DashMap::default(),
@@ -74,10 +74,19 @@ impl MvMemory {
     }
 
     pub(crate) fn add_lazy_addresses(&self, new_lazy_addresses: impl IntoIterator<Item = Address>) {
-        let mut lazy_addresses = self.lazy_addresses.lock().unwrap();
+        let mut lazy_addresses = self.lazy_addresses.write().unwrap();
         for address in new_lazy_addresses {
             lazy_addresses.insert(address);
         }
+    }
+
+    pub(crate) fn remove_lazy_address(&self, address: &Address) {
+        let mut lazy_addresses = self.lazy_addresses.write().unwrap();
+        lazy_addresses.remove(address);
+    }
+
+    pub(crate) fn is_lazy(&self, address: &Address) -> bool {
+        self.lazy_addresses.read().unwrap().contains(address)
     }
 
     // Apply a new pair of read & write sets to the multi-version data structure.
@@ -187,6 +196,6 @@ impl MvMemory {
     }
 
     pub(crate) fn consume_lazy_addresses(&self) -> impl IntoIterator<Item = Address> {
-        std::mem::take(&mut *self.lazy_addresses.lock().unwrap()).into_iter()
+        std::mem::take(&mut *self.lazy_addresses.write().unwrap()).into_iter()
     }
 }
