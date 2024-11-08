@@ -1,20 +1,20 @@
 #![allow(unused_crate_dependencies)]
 
-use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types::{BlockId, BlockTransactionsKind};
-use reqwest::Url;
-
-use pevm::chain::{PevmChain, PevmEthereum};
+use pevm::chain::PevmEthereum;
 
 pub mod common;
 
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "rpc-storage")]
 async fn mainnet_blocks_from_rpc() {
+    use alloy_provider::{Provider, ProviderBuilder};
+    use alloy_rpc_types::{BlockId, BlockTransactionsKind};
+    use pevm::chain::PevmChain;
+
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
-        _ => Url::parse("https://eth.public-rpc.com").unwrap(),
+        _ => reqwest::Url::parse("https://eth.public-rpc.com").unwrap(),
     };
 
     // First block under 50 transactions of each EVM-spec-changing fork
