@@ -11,10 +11,16 @@ use pevm::{
     chain::PevmChain, BlockHashes, BuildSuffixHasher, Bytecodes, EvmAccount, InMemoryStorage,
 };
 
+/// runner module
 pub mod runner;
+
+/// runner module imports
 pub use runner::{mock_account, test_execute_alloy, test_execute_revm};
+
+/// storage module
 pub mod storage;
 
+/// A mock block header used for testing or simulation purposes.
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     // Minimal requirements for execution
     number: 1,
@@ -43,6 +49,7 @@ pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
     requests_hash: None,
 };
 
+/// A mock signature used for testing or simulation purposes.
 const MOCK_SIGNATURE: Signature = Signature {
     r: uint!(1_U256),
     s: uint!(1_U256),
@@ -50,9 +57,11 @@ const MOCK_SIGNATURE: Signature = Signature {
     y_parity: None,
 };
 
+/// The gas limit for a basic transfer transaction.
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
+/// Iterates over blocks stored on disk and processes each block using the provided handler.
 pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'_>)) {
     let data_dir = std::path::PathBuf::from("../../data");
 
@@ -92,7 +101,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'
     }
 }
 
-// Test a chain with [block_size] independent raw transactions that transfer to itself
+/// Test a chain with [`block_size`] independent raw transactions that transfer to itself
 pub fn test_independent_raw_transfers<C>(chain: &C, block_size: usize)
 where
     C: PevmChain + Send + Sync + PartialEq,

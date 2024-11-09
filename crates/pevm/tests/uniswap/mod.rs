@@ -1,3 +1,4 @@
+/// contract module
 pub mod contract;
 
 use crate::erc20::contract::ERC20Token;
@@ -5,9 +6,13 @@ use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
 use pevm::{Bytecodes, ChainState, EvmAccount};
 use revm::primitives::{fixed_bytes, uint, Address, Bytes, TransactTo, TxEnv, B256, U256};
 
+/// The maximum amount of gas that can be used for a transaction in this configuration.
 pub const GAS_LIMIT: u64 = 200_000;
+
+/// An estimated amount of gas that is expected to be consumed by typical transactions.
 pub const ESTIMATED_GAS_USED: u64 = 155_934;
 
+/// Generates a simulated transaction cluster for testing.
 pub fn generate_cluster(
     num_people: usize,
     num_swaps_per_person: usize,

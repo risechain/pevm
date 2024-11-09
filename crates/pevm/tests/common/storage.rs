@@ -4,18 +4,22 @@ use revm::primitives::{
 };
 use rustc_hash::FxBuildHasher;
 
+/// A builder for constructing storage mappings, using `U256` keys and values.
 #[derive(Debug, Default)]
 pub struct StorageBuilder {
     dict: HashMap<U256, U256, FxBuildHasher>,
 }
 
 impl StorageBuilder {
+
+    /// Creates a new, empty `StorageBuilder` instance.
     pub fn new() -> Self {
         Self {
             dict: HashMap::default(),
         }
     }
 
+    /// Inserts a key-value pair into the storage builder's dictionary.
     pub fn set<K, V>(&mut self, slot: K, value: V)
     where
         U256: UintTryFrom<K> + UintTryFrom<V>,
@@ -23,6 +27,8 @@ impl StorageBuilder {
         self.dict.insert(U256::from(slot), U256::from(value));
     }
 
+
+    /// Inserts multiple key-value pairs into the storage builder's dictionary.
     pub fn set_many<K: Copy, const L: usize>(&mut self, starting_slot: K, value: &[U256; L])
     where
         U256: UintTryFrom<K> + UintTryFrom<usize>,
@@ -33,6 +39,7 @@ impl StorageBuilder {
         }
     }
 
+    /// Sets a value in the storage builder's dictionary at a specified offset within an existing entry.
     pub fn set_with_offset<K: Copy, V>(&mut self, key: K, offset: usize, length: usize, value: V)
     where
         U256: UintTryFrom<K> + UintTryFrom<V>,
@@ -45,16 +52,19 @@ impl StorageBuilder {
         *entry = buffer.into();
     }
 
+    /// Returns the constructed `HashMap` from the storage builder.
     pub fn build(self) -> HashMap<U256, U256, FxBuildHasher> {
         self.dict
     }
 }
 
+/// Converts an `Address` (20-byte Ethereum address) into a `U256` value.
 pub fn from_address(address: Address) -> U256 {
     let encoded_as_u160: U160 = address.into();
     U256::from(encoded_as_u160)
 }
 
+/// Converts a short string into a `U256` value, encoding its contents with specific padding logic.
 pub fn from_short_string(text: &str) -> U256 {
     assert!(text.len() < 32);
     let encoded_as_b256 = B256::bit_or(
@@ -64,6 +74,7 @@ pub fn from_short_string(text: &str) -> U256 {
     encoded_as_b256.into()
 }
 
+/// Generates a unique `U256` hash based on a slot and a sequence of indices.
 pub fn from_indices<K, V: Copy>(slot: K, indices: &[V]) -> U256
 where
     U256: UintTryFrom<K> + UintTryFrom<V>,
@@ -76,6 +87,7 @@ where
     result.into()
 }
 
+/// Converts a tick value represented as a signed 32-bit integer (`i32`) to an unsigned 256-bit integer (`U256`).
 pub fn from_tick(tick: i32) -> U256 {
     let encoded_as_i256 = I256::try_from(tick).unwrap();
     encoded_as_i256.into_raw()

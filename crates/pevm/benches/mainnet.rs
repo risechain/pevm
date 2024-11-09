@@ -7,6 +7,8 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{chain::PevmEthereum, Pevm};
 
 // Better project structure
+
+/// common module
 #[path = "../tests/common/mod.rs"]
 pub mod common;
 
@@ -20,6 +22,7 @@ static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 #[global_allocator]
 static GLOBAL: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 
+/// Benchmark for the Ethereum Mainnet Simulation using `PevmEthereum`.
 pub fn criterion_benchmark(c: &mut Criterion) {
     let chain = PevmEthereum::mainnet();
     let concurrency_level = thread::available_parallelism()
