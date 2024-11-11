@@ -42,7 +42,7 @@ alloy-primitives = { version = "0.8.10", features = [
 ] }
 alloy-provider = "0.5.4"
 alloy-rlp = "0.3.9"
-alloy-rpc-types = "0.5.4"
+alloy-rpc-types-eth = "0.5.4"
 alloy-transport = "0.5.4"
 alloy-transport-http = "0.5.4"
 alloy-trie = "0.7.2"

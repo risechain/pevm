@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fmt::Debug};
 use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{B256, U256};
 use alloy_provider::network::eip2718::Encodable2718;
-use alloy_rpc_types::{BlockTransactions, Header};
+use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
 use revm::{
     primitives::{AuthorizationList, BlockEnv, SpecId, TxEnv},
@@ -52,7 +52,7 @@ pub enum EthereumTransactionParsingError {
 }
 
 fn get_ethereum_gas_price(
-    tx: &alloy_rpc_types::Transaction,
+    tx: &alloy_rpc_types_eth::Transaction,
 ) -> Result<U256, EthereumTransactionParsingError> {
     let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
     let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
@@ -72,7 +72,7 @@ fn get_ethereum_gas_price(
 }
 
 impl PevmChain for PevmEthereum {
-    type Transaction = alloy_rpc_types::Transaction;
+    type Transaction = alloy_rpc_types_eth::Transaction;
     type BlockSpecError = EthereumBlockSpecError;
     type TransactionParsingError = EthereumTransactionParsingError;
 
@@ -80,7 +80,7 @@ impl PevmChain for PevmEthereum {
         self.id
     }
 
-    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types::Transaction) -> Self::Transaction {
+    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types_eth::Transaction) -> Self::Transaction {
         tx
     }
 

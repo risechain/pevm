@@ -10,7 +10,7 @@ use std::{
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types::{BlockId, BlockTransactionsKind};
+use alloy_rpc_types_eth::{BlockId, BlockTransactionsKind};
 use clap::Parser;
 use flate2::{bufread::GzDecoder, write::GzEncoder, Compression};
 use pevm::{

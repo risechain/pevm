@@ -10,7 +10,7 @@ use alloy_provider::{
     network::{BlockResponse, HeaderResponse},
     Network, Provider, RootProvider,
 };
-use alloy_rpc_types::{BlockId, BlockNumberOrTag};
+use alloy_rpc_types_eth::{BlockId, BlockNumberOrTag};
 use alloy_transport::TransportError;
 use alloy_transport_http::Http;
 use hashbrown::HashMap;

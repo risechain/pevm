@@ -4,7 +4,7 @@ use std::{
 };
 
 use alloy_primitives::{uint, Address, Bloom, Bytes, B256, U256};
-use alloy_rpc_types::{Block, BlockTransactions, Header, Signature};
+use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Signature};
 use flate2::bufread::GzDecoder;
 use hashbrown::HashMap;
 use pevm::{
@@ -105,7 +105,7 @@ where
             accounts
                 .iter()
                 .map(|(address, account)| {
-                    chain.build_tx_from_alloy_tx(alloy_rpc_types::Transaction {
+                    chain.build_tx_from_alloy_tx(alloy_rpc_types_eth::Transaction {
                         chain_id: Some(chain.id()),
                         transaction_type: Some(2),
                         from: *address,
@@ -116,7 +116,7 @@ where
                         max_priority_fee_per_gas: Some(0),
                         nonce: account.nonce,
                         signature: Some(MOCK_SIGNATURE),
-                        ..alloy_rpc_types::Transaction::default()
+                        ..alloy_rpc_types_eth::Transaction::default()
                     })
                 })
                 .collect(),

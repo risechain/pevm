@@ -29,7 +29,7 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-rlp.workspace = true
-alloy-rpc-types.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-trie.workspace = true
 
 bitflags.workspace = true

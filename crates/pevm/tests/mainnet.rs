@@ -8,7 +8,7 @@ pub mod common;
 #[cfg(feature = "rpc-storage")]
 async fn mainnet_blocks_from_rpc() {
     use alloy_provider::{Provider, ProviderBuilder};
-    use alloy_rpc_types::{BlockId, BlockTransactionsKind};
+    use alloy_rpc_types_eth::{BlockId, BlockTransactionsKind};
     use pevm::chain::PevmChain;
 
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {

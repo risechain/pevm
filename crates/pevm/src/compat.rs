@@ -1,7 +1,7 @@
 // TODO: Support custom chains like OP & RISE
 // Ideally REVM & Alloy would provide all these.
 
-use alloy_rpc_types::Header;
+use alloy_rpc_types_eth::Header;
 use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, U256};
 
 /// Get the REVM block env of an Alloy block.
