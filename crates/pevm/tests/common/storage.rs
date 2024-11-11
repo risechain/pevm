@@ -11,7 +11,6 @@ pub struct StorageBuilder {
 }
 
 impl StorageBuilder {
-
     /// Creates a new, empty `StorageBuilder` instance.
     pub fn new() -> Self {
         Self {
@@ -26,7 +25,6 @@ impl StorageBuilder {
     {
         self.dict.insert(U256::from(slot), U256::from(value));
     }
-
 
     /// Inserts multiple key-value pairs into the storage builder's dictionary.
     pub fn set_many<K: Copy, const L: usize>(&mut self, starting_slot: K, value: &[U256; L])

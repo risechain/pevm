@@ -29,7 +29,6 @@ fn keccak256_all(chunks: &[&[u8]]) -> B256 {
 pub struct WETH9 {}
 
 impl WETH9 {
-
     /// Creates a new instance of `WETH9`.
     pub const fn new() -> Self {
         Self {}
@@ -71,7 +70,6 @@ pub struct UniswapV3Factory {
 }
 
 impl UniswapV3Factory {
-
     /// Creates a new `UniswapV3Factory` instance.
     pub fn new(owner: Address) -> Self {
         Self {
@@ -156,7 +154,6 @@ pub struct UniswapV3Pool {
 }
 
 impl UniswapV3Pool {
-
     /// Creates a new `UniswapV3Pool` instance.
     pub fn new(token_0: Address, token_1: Address, factory: Address) -> Self {
         Self {
@@ -293,7 +290,6 @@ pub struct SwapRouter {
 }
 
 impl SwapRouter {
-
     /// Creates a new instance of the `SwapRouter` with the specified WETH9 address,
     /// factory address, and pool initialization code hash.
     pub const fn new(weth9: Address, factory: Address, pool_init_code_hash: B256) -> Self {
@@ -353,7 +349,6 @@ pub struct SingleSwap {
 }
 
 impl SingleSwap {
-
     /// Creates a new instance of `SingleSwap` with the specified addresses for the swap router
     /// and the two tokens involved in the swap.
     pub const fn new(swap_router: Address, token_0: Address, token_1: Address) -> Self {
