@@ -140,5 +140,11 @@ pub fn benchmark_gigagas(c: &mut Criterion) {
     bench_uniswap(c);
 }
 
-criterion_group!(benches, benchmark_gigagas);
-criterion_main!(benches);
+// HACK: we can't document public items inside of the macro
+#[allow(missing_docs)]
+mod benches {
+    use super::*;
+    criterion_group!(benches, benchmark_gigagas);
+}
+
+criterion_main!(benches::benches);

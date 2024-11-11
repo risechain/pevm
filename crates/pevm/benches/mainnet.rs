@@ -75,5 +75,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);
+// HACK: we can't document public items inside of the macro
+#[allow(missing_docs)]
+mod benches {
+    use super::*;
+    criterion_group!(benches, criterion_benchmark);
+}
+
+criterion_main!(benches::benches);
