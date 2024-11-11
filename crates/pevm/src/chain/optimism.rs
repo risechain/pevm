@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use alloy_consensus::{Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy};
 use alloy_primitives::{Bytes, ChainId, B256, U256};
-use alloy_rpc_types::{BlockTransactions, Header};
+use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
 use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType, TxDeposit};
 use op_alloy_network::eip2718::Encodable2718;
@@ -131,7 +131,7 @@ impl PevmChain for PevmOptimism {
     }
 
     // TODO: allow to construct deposit transactions
-    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types::Transaction) -> Self::Transaction {
+    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types_eth::Transaction) -> Self::Transaction {
         Self::Transaction {
             inner: tx,
             mint: None,

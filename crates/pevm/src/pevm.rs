@@ -6,7 +6,7 @@ use std::{
 };
 
 use alloy_primitives::{TxNonce, U256};
-use alloy_rpc_types::{Block, BlockTransactions};
+use alloy_rpc_types_eth::{Block, BlockTransactions};
 use hashbrown::HashMap;
 use revm::{
     db::CacheDB,

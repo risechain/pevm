@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 
 use alloy_primitives::B256;
-use alloy_rpc_types::{BlockTransactions, Header};
+use alloy_rpc_types_eth::{BlockTransactions, Header};
 use revm::{
     primitives::{BlockEnv, SpecId, TxEnv},
     Handler,
@@ -54,7 +54,7 @@ pub trait PevmChain: Debug {
     fn id(&self) -> u64;
 
     /// Build `Self::Transaction` type from Alloy's transaction
-    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types::Transaction) -> Self::Transaction;
+    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types_eth::Transaction) -> Self::Transaction;
 
     /// Get block's [`SpecId`]
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError>;

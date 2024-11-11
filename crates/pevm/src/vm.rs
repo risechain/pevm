@@ -1,5 +1,5 @@
 use alloy_primitives::TxKind;
-use alloy_rpc_types::Receipt;
+use alloy_rpc_types_eth::Receipt;
 use hashbrown::HashMap;
 use revm::{
     primitives::{

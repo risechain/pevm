@@ -1,5 +1,5 @@
 use alloy_primitives::Bloom;
-use alloy_rpc_types::Block;
+use alloy_rpc_types_eth::Block;
 use pevm::{
     chain::{CalculateReceiptRootError, PevmChain, PevmEthereum},
     EvmAccount, Pevm, Storage,

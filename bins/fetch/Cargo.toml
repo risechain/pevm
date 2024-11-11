@@ -7,7 +7,7 @@ edition = "2021"
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
-alloy-rpc-types.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 bincode.workspace = true
 clap.workspace = true
