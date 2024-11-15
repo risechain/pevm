@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use revm::{
     db::CacheDB,
     primitives::{BlockEnv, SpecId, TxEnv},
-    DatabaseCommit,
+    DatabaseCommit, Evm,
 };
 
 use crate::{
@@ -22,7 +22,8 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{
-        build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult,
+        build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmDb, VmExecutionError,
+        VmExecutionResult,
     },
     EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxIdx, TxVersion,
 };
@@ -173,11 +174,13 @@ impl Pevm {
         thread::scope(|scope| {
             for _ in 0..concurrency_level.into() {
                 scope.spawn(|| {
+                    let mut evm =
+                        build_evm(VmDb::default(), chain, spec_id, &block_env, None, false);
                     let mut task = scheduler.next_task();
                     while task.is_some() {
                         task = match task.unwrap() {
                             Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
+                                self.try_execute(&vm, &mut evm, &scheduler, tx_version)
                             }
                             Task::Validation(tx_version) => {
                                 try_validate(&mv_memory, &scheduler, &tx_version)
@@ -349,14 +352,15 @@ impl Pevm {
         Ok(fully_evaluated_results)
     }
 
-    fn try_execute<S: Storage, C: PevmChain>(
+    fn try_execute<'a, S: Storage, C: PevmChain>(
         &self,
-        vm: &Vm<'_, S, C>,
+        vm: &'a Vm<'a, S, C>,
+        evm: &mut Evm<'a, (), VmDb<'a, S, C>>,
         scheduler: &Scheduler,
         tx_version: TxVersion,
     ) -> Option<Task> {
         loop {
-            return match vm.execute(&tx_version) {
+            return match vm.execute(evm, &tx_version) {
                 Err(VmExecutionError::Retry) => {
                     if self.abort_reason.get().is_none() {
                         continue;
@@ -422,7 +426,7 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
     txs: Vec<TxEnv>,
 ) -> PevmResult<C> {
     let mut db = CacheDB::new(StorageWrapper(storage));
-    let mut evm = build_evm(&mut db, chain, spec_id, block_env, None, true);
+    let mut evm = build_evm(&mut db, chain, spec_id, &block_env, None, true);
     let mut results = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u128 = 0;
     for tx in txs {

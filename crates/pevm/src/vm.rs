@@ -121,10 +121,10 @@ pub(crate) struct VmExecutionResult {
 // A database interface that intercepts reads while executing a specific
 // transaction with Revm. It provides values from the multi-version data
 // structure & storage, and tracks the read set of the current execution.
-struct VmDb<'a, S: Storage, C: PevmChain> {
-    vm: &'a Vm<'a, S, C>,
+pub(crate) struct VmDb<'a, S: Storage, C: PevmChain> {
+    vm: Option<&'a Vm<'a, S, C>>,
     tx_idx: TxIdx,
-    tx: &'a TxEnv,
+    tx: Option<&'a TxEnv>,
     from_hash: MemoryLocationHash,
     to_hash: Option<MemoryLocationHash>,
     to_code_hash: Option<B256>,
@@ -137,6 +137,20 @@ struct VmDb<'a, S: Storage, C: PevmChain> {
 }
 
 impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
+    pub(crate) fn default() -> Self {
+        Self {
+            vm: None,
+            tx_idx: 0,
+            tx: None,
+            from_hash: 0,
+            to_hash: None,
+            to_code_hash: None,
+            is_lazy: false,
+            read_set: Default::default(),
+            read_accounts: Default::default(),
+        }
+    }
+
     fn new(
         vm: &'a Vm<'a, S, C>,
         tx_idx: TxIdx,
@@ -145,9 +159,9 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         to_hash: Option<MemoryLocationHash>,
     ) -> Result<Self, ReadError> {
         let mut db = Self {
-            vm,
+            vm: Some(vm),
             tx_idx,
-            tx,
+            tx: Some(tx),
             from_hash,
             to_hash,
             to_code_hash: None,
@@ -173,10 +187,11 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
     }
 
     fn hash_basic(&self, address: &Address) -> MemoryLocationHash {
-        if address == &self.tx.caller {
+        let tx = self.tx.unwrap();
+        if address == &tx.caller {
             return self.from_hash;
         }
-        if let TxKind::Call(to) = &self.tx.transact_to {
+        if let TxKind::Call(to) = &tx.transact_to {
             if to == address {
                 return self.to_hash.unwrap();
             }
@@ -204,7 +219,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // Try to read the latest code hash in [MvMemory]
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
-        if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
+        if let Some(written_transactions) = self.vm.unwrap().mv_memory.data.get(&location_hash) {
             if let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
                 written_transactions.range(..self.tx_idx).next_back()
             {
@@ -230,6 +245,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // Fallback to storage
         Self::push_origin(read_origins, ReadOrigin::Storage)?;
         self.vm
+            .unwrap()
             .storage
             .code_hash(&address)
             .map_err(|err| ReadError::StorageError(err.to_string()))
@@ -242,12 +258,15 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let location_hash = self.hash_basic(&address);
 
+        let vm = self.vm.unwrap();
+        let tx = self.tx.unwrap();
+
         // We return a mock for non-contract addresses (for lazy updates) to avoid
         // unnecessarily evaluating its balance here.
         if self.is_lazy {
             if location_hash == self.from_hash {
                 return Ok(Some(AccountInfo {
-                    nonce: self.tx.nonce.unwrap_or(1),
+                    nonce: tx.nonce.unwrap_or(1),
                     balance: U256::MAX,
                     code: None,
                     code_hash: KECCAK_EMPTY,
@@ -272,7 +291,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // Try reading from multi-version data
         if self.tx_idx > 0 {
-            if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
+            if let Some(written_transactions) = vm.mv_memory.data.get(&location_hash) {
                 let mut iter = written_transactions.range(..self.tx_idx);
 
                 // Fully evaluate lazy updates
@@ -351,7 +370,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             {
                 return Err(ReadError::InconsistentRead);
             }
-            final_account = match self.vm.storage.basic(&address) {
+            final_account = match vm.storage.basic(&address) {
                 Ok(Some(basic)) => Some(basic),
                 Ok(None) => (balance_addition > U256::ZERO).then(AccountBasic::default),
                 Err(err) => return Err(ReadError::StorageError(err.to_string())),
@@ -368,7 +387,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             // Check sender nonce
             account.nonce += nonce_addition;
             if location_hash == self.from_hash
-                && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
+                && tx.nonce.is_some_and(|nonce| nonce != account.nonce)
             {
                 return if self.tx_idx > 0 {
                     // TODO: Better retry strategy -- immediately, to the
@@ -393,10 +412,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                 self.get_code_hash(address)?
             };
             let code = if let Some(code_hash) = &code_hash {
-                if let Some(code) = self.vm.mv_memory.new_bytecodes.get(code_hash) {
+                if let Some(code) = vm.mv_memory.new_bytecodes.get(code_hash) {
                     Some(code.clone())
                 } else {
-                    match self.vm.storage.code_by_hash(code_hash) {
+                    match vm.storage.code_by_hash(code_hash) {
                         Ok(code) => code
                             .map(Bytecode::try_from)
                             .transpose()
@@ -424,6 +443,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         match self
             .vm
+            .unwrap()
             .storage
             .code_by_hash(&code_hash)
             .map_err(|err| ReadError::StorageError(err.to_string()))?
@@ -435,6 +455,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
         self.vm
+            .unwrap()
             .storage
             .has_storage(&address)
             .map_err(|err| ReadError::StorageError(err.to_string()))
@@ -447,7 +468,8 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
         // Try reading from multi-version data
         if self.tx_idx > 0 {
-            if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
+            if let Some(written_transactions) = self.vm.unwrap().mv_memory.data.get(&location_hash)
+            {
                 if let Some((closest_idx, entry)) =
                     written_transactions.range(..self.tx_idx).next_back()
                 {
@@ -472,6 +494,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
         // Fall back to storage
         Self::push_origin(read_origins, ReadOrigin::Storage)?;
         self.vm
+            .unwrap()
             .storage
             .storage(&address, &index)
             .map_err(|err| ReadError::StorageError(err.to_string()))
@@ -479,6 +502,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         self.vm
+            .unwrap()
             .storage
             .block_hash(&number)
             .map_err(|err| ReadError::StorageError(err.to_string()))
@@ -536,7 +560,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
     pub(crate) fn execute(
-        &self,
+        &'a self,
+        evm: &mut Evm<'a, (), VmDb<'a, S, C>>,
         tx_version: &TxVersion,
     ) -> Result<VmExecutionResult, VmExecutionError> {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
@@ -547,19 +572,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             .to()
             .map(|to| hash_determinisitic(MemoryLocation::Basic(*to)));
 
-        // Execute
-        let mut db = VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash)
+        *evm.tx_mut() = tx.clone();
+        *evm.db_mut() = VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash)
             .map_err(VmExecutionError::from)?;
-        // TODO: Share as much [Evm], [Context], [Handler], etc. among threads as possible
-        // as creating them is very expensive.
-        let mut evm = build_evm(
-            &mut db,
-            self.chain,
-            self.spec_id,
-            self.block_env.clone(),
-            Some(tx.clone()),
-            false,
-        );
+
         match evm.transact() {
             Ok(result_and_state) => {
                 // There are at least three locations most of the time: the sender,
@@ -658,20 +674,22 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     &evm.context.evm,
                 )?;
 
-                drop(evm); // release db
-
-                if db.is_lazy {
+                if evm.db().is_lazy {
                     self.mv_memory
                         .add_lazy_addresses([tx.caller, *tx.transact_to.to().unwrap()]);
                 }
 
-                let mut flags = if tx_version.tx_idx > 0 && !db.is_lazy {
+                let mut flags = if tx_version.tx_idx > 0 && !evm.db().is_lazy {
                     FinishExecFlags::NeedValidation
                 } else {
                     FinishExecFlags::empty()
                 };
 
-                if self.mv_memory.record(tx_version, db.read_set, write_set) {
+                if self.mv_memory.record(
+                    tx_version,
+                    std::mem::take(&mut evm.db_mut().read_set),
+                    write_set,
+                ) {
                     flags |= FinishExecFlags::WroteNewLocation;
                 }
 
@@ -800,7 +818,7 @@ pub(crate) fn build_evm<'a, DB: Database, C: PevmChain>(
     db: DB,
     chain: &C,
     spec_id: SpecId,
-    block_env: BlockEnv,
+    block_env: &BlockEnv,
     tx_env: Option<TxEnv>,
     with_reward_beneficiary: bool,
 ) -> Evm<'a, (), DB> {
@@ -810,7 +828,7 @@ pub(crate) fn build_evm<'a, DB: Database, C: PevmChain>(
             db,
             Env::boxed(
                 CfgEnv::default().with_chain_id(chain.id()),
-                block_env,
+                block_env.clone(),
                 tx_env.unwrap_or_default(),
             ),
         ),
