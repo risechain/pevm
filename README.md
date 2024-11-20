@@ -36,9 +36,6 @@ While others embed their parallel executor directly into their nodes, we built t
 
 ## Development
 
-> :warning: **Warning**
-> pevm is performing poorly in recent Linux kernel versions. We noticed huge performance degradation after updating a machine to Ubuntu 24.04 with Linux kernel 6.8. The current suspect is the new EEVDF scheduler, which does not go well with pevm's scheduler & thread management. Until we fully fix the issue, it is advised to **build and run pevm on Linux kernel 6.5**.
-
 - Install [cmake](https://cmake.org) to build `snmalloc` (a highly performant memory allocator).
 
 ```sh

@@ -5,7 +5,9 @@ We use [criterion.rs](https://github.com/bheisler/criterion.rs) to benchmark 100
 For simplicity, we load the chain state into memory before execution. **In practice**, programs load chain states from disk with some in-memory cache, which **increases speedup for parallel execution** as disk I/O only blocks the reading thread, while other threads still execute and validate with in-memory data. On the other hand, sequential execution is completely blocked every time it reads new data from the disk.
 
 > :warning: **Warning**
-> pevm is performing poorly in recent Linux kernel versions. We noticed huge performance degradation after updating a machine to Ubuntu 24.04 with Linux kernel 6.8. The current suspect is the new EEVDF scheduler which doesn't go well with pevm's scheduler & thread management. Until we fully fix the issue, it is advised to **build and run pevm on Linux kernel 6.5**.
+> Micro-benchmarking multithreaded programs is rather nuanced. For maximal accuracy, ensure no heavy processes are running in the background and the benchmark machine is run in high-performance (as opposed to power-saving) mode. If the benchmark machine has more performance cores than the concurrency level (typically 8-12 for Ethereum mainnet blocks), it is best to benchmark with only performance cores like with:
+> `$ taskset -c -a 0-15 cargo bench --features global-alloc --bench mainnet`
+> Mixing efficient cores can degrade speedup by over 25%.
 
 The tables below were produced on a `c7g.8xlarge` EC2 instance with Graviton3 (32 vCPUs @2.6 GHz).
 
