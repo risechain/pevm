@@ -24,6 +24,12 @@ jobs:
             ./target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install Taplo
+        run: cargo install taplo-cli
+
+      - name: Format TOML
+        run: taplo fmt --option reorder_keys=true --check
+      
       - uses: bnjbvr/cargo-machete@main
 
       - name: Lint
