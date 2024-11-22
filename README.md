@@ -4,7 +4,7 @@
 
 :warning: This repository is a **work in progress** and is **not production ready** :construction:
 
-![Banner](./assets/banner.jpg)
+![Banner](./doc/images/banner.jpg)
 
 ## Problem
 
