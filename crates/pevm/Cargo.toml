@@ -1,7 +1,7 @@
 [package]
+edition = "2021"
 name = "pevm"
 version = "0.1.0"
-edition = "2021"
 
 [features]
 defaults = []
@@ -74,9 +74,9 @@ walkdir.workspace = true
 workspace = true
 
 [[bench]]
-name = "mainnet"
 harness = false
+name = "mainnet"
 
 [[bench]]
-name = "gigagas"
 harness = false
+name = "gigagas"
