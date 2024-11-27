@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Execute the block and track the pre-state in the RPC storage.
     Pevm::default()
-        .execute(&storage, &chain, block.clone(), NonZeroUsize::MIN, true)
+        .execute(&storage, &chain, &block, NonZeroUsize::MIN, true)
         .map_err(|err| format!("Failed to execute block: {:?}", err))?;
 
     let block_dir = format!("data/blocks/{}", block.header.number);

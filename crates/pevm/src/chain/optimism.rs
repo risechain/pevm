@@ -1,11 +1,13 @@
 //! Optimism
 use std::collections::BTreeMap;
 
-use alloy_consensus::{Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy};
-use alloy_primitives::{Bytes, ChainId, B256, U256};
+use alloy_consensus::Transaction;
+use alloy_primitives::{Address, Bytes, ChainId, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
-use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType, TxDeposit};
+use op_alloy_consensus::{
+    DepositTransaction, OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType,
+};
 use op_alloy_network::eip2718::Encodable2718;
 use revm::{
     primitives::{AuthorizationList, BlockEnv, OptimismFields, SpecId, TxEnv},
@@ -39,90 +41,50 @@ impl PevmOptimism {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OptimismBlockSpecError {
-    MissingBlockNumber,
     UnsupportedSpec,
 }
 
 /// Represents errors that can occur when parsing transactions
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OptimismTransactionParsingError {
-    ConversionError(String),
-    InvalidType(u8),
     MissingGasPrice,
-    MissingMaxFeePerGas,
     MissingSourceHash,
-    SerdeError(String),
 }
 
-fn get_optimism_gas_price(
-    tx: &op_alloy_rpc_types::Transaction,
-) -> Result<U256, OptimismTransactionParsingError> {
-    let tx_type_raw = tx.inner.transaction_type.unwrap_or_default();
-    let Ok(tx_type) = OpTxType::try_from(tx_type_raw) else {
-        return Err(OptimismTransactionParsingError::InvalidType(tx_type_raw));
-    };
-
-    match tx_type {
+fn get_optimism_gas_price(tx: &OpTxEnvelope) -> Result<U256, OptimismTransactionParsingError> {
+    match tx.tx_type() {
         OpTxType::Legacy | OpTxType::Eip2930 => tx
-            .inner
-            .gas_price
+            .gas_price()
             .map(U256::from)
             .ok_or(OptimismTransactionParsingError::MissingGasPrice),
-        OpTxType::Eip1559 | OpTxType::Eip7702 => tx
-            .inner
-            .max_fee_per_gas
-            .map(U256::from)
-            .ok_or(OptimismTransactionParsingError::MissingMaxFeePerGas),
+        OpTxType::Eip1559 | OpTxType::Eip7702 => Ok(U256::from(tx.max_fee_per_gas())),
         OpTxType::Deposit => Ok(U256::ZERO),
     }
 }
 
-/// Convert [Transaction] to [`OptimismFields`]
-/// <https://github.com/paradigmxyz/reth/blob/fc4c037e60b623b81b296fe9242fa905ff36b89a/crates/primitives/src/transaction/compat.rs#L99>
-pub(crate) fn get_optimism_fields(
-    tx: &op_alloy_rpc_types::Transaction,
+/// Extract [`OptimismFields`] from [`OpTxEnvelope`]
+fn get_optimism_fields(
+    tx: &OpTxEnvelope,
 ) -> Result<OptimismFields, OptimismTransactionParsingError> {
-    let tx_type = tx.inner.transaction_type.unwrap_or_default();
-    let op_tx_type = OpTxType::try_from(tx_type)
-        .map_err(|_err| OptimismTransactionParsingError::InvalidType(tx_type))?;
-
-    let inner = tx.inner.clone();
-    let tx_envelope = match op_tx_type {
-        OpTxType::Legacy => Signed::<TxLegacy>::try_from(inner).map(OpTxEnvelope::from),
-        OpTxType::Eip2930 => Signed::<TxEip2930>::try_from(inner).map(OpTxEnvelope::from),
-        OpTxType::Eip1559 => Signed::<TxEip1559>::try_from(inner).map(OpTxEnvelope::from),
-        OpTxType::Eip7702 => Signed::<TxEip7702>::try_from(inner).map(OpTxEnvelope::from),
-        OpTxType::Deposit => {
-            let tx_deposit = TxDeposit {
-                source_hash: tx
-                    .source_hash
-                    .ok_or(OptimismTransactionParsingError::MissingSourceHash)?,
-                from: tx.inner.from,
-                to: tx.inner.to.into(),
-                mint: tx.mint,
-                value: tx.inner.value,
-                gas_limit: tx.inner.gas,
-                is_system_transaction: tx.is_system_tx.unwrap_or_default(),
-                input: tx.inner.input.clone(),
-            };
-            Ok(OpTxEnvelope::from(tx_deposit))
-        }
-    }
-    .map_err(|err| OptimismTransactionParsingError::ConversionError(err.to_string()))?;
-
     let mut envelope_buf = Vec::<u8>::new();
-    tx_envelope.encode_2718(&mut envelope_buf);
+    tx.encode_2718(&mut envelope_buf);
+
+    let (source_hash, mint) = match &tx {
+        OpTxEnvelope::Deposit(deposit) => (deposit.inner().source_hash(), deposit.inner().mint()),
+        _ => (None, None),
+    };
 
     Ok(OptimismFields {
-        source_hash: tx.source_hash,
-        mint: tx.mint,
-        is_system_transaction: tx.is_system_tx,
+        source_hash,
+        mint,
+        is_system_transaction: Some(tx.is_system_transaction()),
         enveloped_tx: Some(Bytes::from(envelope_buf)),
     })
 }
 
 impl PevmChain for PevmOptimism {
     type Transaction = op_alloy_rpc_types::Transaction;
+    type Envelope = OpTxEnvelope;
     type BlockSpecError = OptimismBlockSpecError;
     type TransactionParsingError = OptimismTransactionParsingError;
 
@@ -131,12 +93,10 @@ impl PevmChain for PevmOptimism {
     }
 
     // TODO: allow to construct deposit transactions
-    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types_eth::Transaction) -> Self::Transaction {
+    fn mock_tx(&self, envelope: Self::Envelope, from: Address) -> Self::Transaction {
         Self::Transaction {
-            inner: tx,
-            mint: None,
-            source_hash: None,
-            is_system_tx: None,
+            inner: Self::mock_rpc_tx(envelope, from),
+            deposit_nonce: None,
             deposit_receipt_version: None,
         }
     }
@@ -234,19 +194,15 @@ impl PevmChain for PevmOptimism {
             Iterator::zip(txs.txns(), tx_results.iter())
                 .map(|(tx, tx_result)| {
                     let receipt = tx_result.receipt.clone();
-                    let byte = tx.inner.transaction_type.unwrap_or_default();
-                    let tx_type = OpTxType::try_from(byte)
-                        .map_err(|_| CalculateReceiptRootError::InvalidTxType(byte))?;
-                    Ok(match tx_type {
+                    Ok(match tx.inner.inner.tx_type() {
                         OpTxType::Legacy => OpReceiptEnvelope::Legacy(receipt.with_bloom()),
                         OpTxType::Eip2930 => OpReceiptEnvelope::Eip2930(receipt.with_bloom()),
                         OpTxType::Eip1559 => OpReceiptEnvelope::Eip1559(receipt.with_bloom()),
                         OpTxType::Eip7702 => OpReceiptEnvelope::Eip7702(receipt.with_bloom()),
                         OpTxType::Deposit => {
-                            let account_maybe = tx_result
-                                .state
-                                .get(&tx.inner.from)
-                                .expect("Sender not found");
+                            // TODO: Return proper errors instead of panic-ing.
+                            let account_maybe =
+                                tx_result.state.get(&tx.from).expect("Sender not found");
                             let account = account_maybe.as_ref().expect("Sender not changed");
                             let receipt = OpDepositReceipt {
                                 inner: receipt,
@@ -280,22 +236,24 @@ impl PevmChain for PevmOptimism {
         Ok(hash_builder.root())
     }
 
-    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, OptimismTransactionParsingError> {
+    fn get_tx_env(&self, tx: &Self::Transaction) -> Result<TxEnv, OptimismTransactionParsingError> {
         Ok(TxEnv {
-            optimism: get_optimism_fields(&tx)?,
-            caller: tx.inner.from,
-            gas_limit: tx.inner.gas,
-            gas_price: get_optimism_gas_price(&tx)?,
-            gas_priority_fee: tx.inner.max_priority_fee_per_gas.map(U256::from),
-            transact_to: tx.inner.to.into(),
-            value: tx.inner.value,
-            data: tx.inner.input,
-            nonce: Some(tx.inner.nonce),
-            chain_id: tx.inner.chain_id,
-            access_list: tx.inner.access_list.unwrap_or_default().into(),
-            blob_hashes: tx.inner.blob_versioned_hashes.unwrap_or_default(),
-            max_fee_per_blob_gas: tx.inner.max_fee_per_blob_gas.map(U256::from),
-            authorization_list: tx.inner.authorization_list.map(AuthorizationList::Signed),
+            optimism: get_optimism_fields(&tx.inner.inner)?,
+            caller: tx.from,
+            gas_limit: tx.gas_limit(),
+            gas_price: get_optimism_gas_price(&tx.inner.inner)?,
+            gas_priority_fee: tx.max_priority_fee_per_gas().map(U256::from),
+            transact_to: tx.kind(),
+            value: tx.value(),
+            data: tx.input().clone(),
+            nonce: Some(tx.nonce()),
+            chain_id: tx.chain_id(),
+            access_list: tx.access_list().cloned().unwrap_or_default().to_vec(),
+            blob_hashes: tx.blob_versioned_hashes().unwrap_or_default().to_vec(),
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas().map(U256::from),
+            authorization_list: tx
+                .authorization_list()
+                .map(|auths| AuthorizationList::Signed(auths.to_vec())),
         })
     }
 

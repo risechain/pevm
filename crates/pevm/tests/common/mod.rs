@@ -3,8 +3,9 @@ use std::{
     io::BufReader,
 };
 
-use alloy_primitives::{uint, Address, Bloom, Bytes, B256, U256};
-use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Signature};
+use alloy_consensus::{Signed, TxLegacy};
+use alloy_primitives::{Address, Bytes, PrimitiveSignature, TxKind, B256, U256};
+use alloy_rpc_types_eth::{Block, BlockTransactions, Header};
 use flate2::bufread::GzDecoder;
 use hashbrown::HashMap;
 use pevm::{
@@ -19,43 +20,6 @@ pub use runner::{mock_account, test_execute_alloy, test_execute_revm};
 
 /// storage module
 pub mod storage;
-
-/// A mock block header used for testing or simulation purposes.
-pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
-    // Minimal requirements for execution
-    number: 1,
-    timestamp: 1710338135,
-    mix_hash: Some(B256::ZERO),
-    excess_blob_gas: Some(0),
-    gas_limit: u64::MAX,
-    // Defaults
-    hash: B256::ZERO,
-    parent_hash: B256::ZERO,
-    uncles_hash: B256::ZERO,
-    miner: Address::ZERO,
-    state_root: B256::ZERO,
-    transactions_root: B256::ZERO,
-    receipts_root: B256::ZERO,
-    logs_bloom: Bloom::ZERO,
-    difficulty: U256::ZERO,
-    gas_used: 0,
-    total_difficulty: Some(U256::ZERO),
-    extra_data: Bytes::new(),
-    nonce: None,
-    base_fee_per_gas: None,
-    withdrawals_root: None,
-    blob_gas_used: None,
-    parent_beacon_block_root: None,
-    requests_hash: None,
-};
-
-/// A mock signature used for testing or simulation purposes.
-const MOCK_SIGNATURE: Signature = Signature {
-    r: uint!(1_U256),
-    s: uint!(1_U256),
-    v: U256::ZERO,
-    y_parity: None,
-};
 
 /// The gas limit for a basic transfer transaction.
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
@@ -105,28 +69,39 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'
 pub fn test_independent_raw_transfers<C>(chain: &C, block_size: usize)
 where
     C: PevmChain + Send + Sync + PartialEq,
-    C::Transaction: Default,
 {
     let accounts: Vec<(Address, EvmAccount)> = (0..block_size).map(mock_account).collect();
     let block: Block<C::Transaction> = Block {
-        header: MOCK_ALLOY_BLOCK_HEADER.clone(),
+        header: Header {
+            inner: alloy_consensus::Header {
+                timestamp: 1710338135,
+                excess_blob_gas: Some(0),
+                gas_limit: u64::MAX,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
         transactions: BlockTransactions::<C::Transaction>::Full(
             accounts
                 .iter()
                 .map(|(address, account)| {
-                    chain.build_tx_from_alloy_tx(alloy_rpc_types_eth::Transaction {
-                        chain_id: Some(chain.id()),
-                        transaction_type: Some(2),
-                        from: *address,
-                        to: Some(*address),
-                        value: U256::from(1),
-                        gas: RAW_TRANSFER_GAS_LIMIT,
-                        max_fee_per_gas: Some(1),
-                        max_priority_fee_per_gas: Some(0),
-                        nonce: account.nonce,
-                        signature: Some(MOCK_SIGNATURE),
-                        ..alloy_rpc_types_eth::Transaction::default()
-                    })
+                    chain.mock_tx(
+                        Signed::new_unchecked(
+                            TxLegacy {
+                                chain_id: Some(chain.id()),
+                                nonce: account.nonce,
+                                gas_price: 0,
+                                gas_limit: RAW_TRANSFER_GAS_LIMIT,
+                                to: TxKind::Call(*address),
+                                value: U256::from(1),
+                                input: Bytes::default(),
+                            },
+                            PrimitiveSignature::new(U256::ZERO, U256::ZERO, false),
+                            B256::default(),
+                        )
+                        .into(),
+                        *address,
+                    )
                 })
                 .collect(),
         ),

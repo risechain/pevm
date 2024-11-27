@@ -2,8 +2,9 @@
 
 use std::fmt::Debug;
 
-use alloy_primitives::B256;
-use alloy_rpc_types_eth::{BlockTransactions, Header};
+use alloy_consensus::{Signed, TxLegacy};
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_eth::{BlockTransactions, Header, Transaction};
 use revm::{
     primitives::{BlockEnv, SpecId, TxEnv},
     Handler,
@@ -44,6 +45,10 @@ pub trait PevmChain: Debug {
     /// The transaction type
     type Transaction: Debug + Clone + PartialEq;
 
+    /// The envelope type
+    // TODO: Support more tx conversions
+    type Envelope: Debug + From<Signed<TxLegacy>>;
+
     /// The error type for [`Self::get_block_spec`].
     type BlockSpecError: Debug + Clone + PartialEq;
 
@@ -53,14 +58,26 @@ pub trait PevmChain: Debug {
     /// Get chain id.
     fn id(&self) -> u64;
 
-    /// Build `Self::Transaction` type from Alloy's transaction
-    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types_eth::Transaction) -> Self::Transaction;
+    /// Mock RPC transaction for testing.
+    fn mock_rpc_tx(envelope: Self::Envelope, from: Address) -> Transaction<Self::Envelope> {
+        Transaction {
+            inner: envelope,
+            from,
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            effective_gas_price: None,
+        }
+    }
+
+    /// Mock `Self::Transaction` for testing.
+    fn mock_tx(&self, envelope: Self::Envelope, from: Address) -> Self::Transaction;
 
     /// Get block's [`SpecId`]
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError>;
 
     /// Get [`TxEnv`]
-    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, Self::TransactionParsingError>;
+    fn get_tx_env(&self, tx: &Self::Transaction) -> Result<TxEnv, Self::TransactionParsingError>;
 
     /// Build [`MvMemory`]
     fn build_mv_memory(&self, _block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
