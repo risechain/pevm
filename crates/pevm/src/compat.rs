@@ -11,12 +11,12 @@ use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, U256};
 pub(crate) fn get_block_env(header: &Header) -> BlockEnv {
     BlockEnv {
         number: U256::from(header.number),
-        coinbase: header.miner,
+        coinbase: header.beneficiary,
         timestamp: U256::from(header.timestamp),
         gas_limit: U256::from(header.gas_limit),
         basefee: U256::from(header.base_fee_per_gas.unwrap_or_default()),
         difficulty: header.difficulty,
-        prevrandao: header.mix_hash,
+        prevrandao: Some(header.mix_hash),
         blob_excess_gas_and_price: header.excess_blob_gas.map(BlobExcessGasAndPrice::new),
     }
 }

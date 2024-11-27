@@ -2,8 +2,8 @@
 
 use std::{collections::BTreeMap, fmt::Debug};
 
-use alloy_consensus::{ReceiptEnvelope, TxType};
-use alloy_primitives::{B256, U256};
+use alloy_consensus::{ReceiptEnvelope, Transaction, TxEnvelope, TxType};
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
@@ -43,36 +43,23 @@ pub enum EthereumBlockSpecError {
 /// Represents errors that can occur when parsing transactions
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EthereumTransactionParsingError {
-    /// [tx.type] is invalid.
-    InvalidType(u8),
     /// [`tx.gas_price`] is none.
     MissingGasPrice,
-    /// [`tx.max_fee_per_gas`] is none.
-    MissingMaxFeePerGas,
 }
 
-fn get_ethereum_gas_price(
-    tx: &alloy_rpc_types_eth::Transaction,
-) -> Result<U256, EthereumTransactionParsingError> {
-    let tx_type_raw: u8 = tx.transaction_type.unwrap_or_default();
-    let Ok(tx_type) = TxType::try_from(tx_type_raw) else {
-        return Err(EthereumTransactionParsingError::InvalidType(tx_type_raw));
-    };
-
-    match tx_type {
+fn get_ethereum_gas_price(tx: &TxEnvelope) -> Result<U256, EthereumTransactionParsingError> {
+    match tx.tx_type() {
         TxType::Legacy | TxType::Eip2930 => tx
-            .gas_price
+            .gas_price()
             .map(U256::from)
             .ok_or(EthereumTransactionParsingError::MissingGasPrice),
-        TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => tx
-            .max_fee_per_gas
-            .map(U256::from)
-            .ok_or(EthereumTransactionParsingError::MissingMaxFeePerGas),
+        TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => Ok(U256::from(tx.max_fee_per_gas())),
     }
 }
 
 impl PevmChain for PevmEthereum {
     type Transaction = alloy_rpc_types_eth::Transaction;
+    type Envelope = TxEnvelope;
     type BlockSpecError = EthereumBlockSpecError;
     type TransactionParsingError = EthereumTransactionParsingError;
 
@@ -80,8 +67,8 @@ impl PevmChain for PevmEthereum {
         self.id
     }
 
-    fn build_tx_from_alloy_tx(&self, tx: alloy_rpc_types_eth::Transaction) -> Self::Transaction {
-        tx
+    fn mock_tx(&self, envelope: Self::Envelope, from: Address) -> Self::Transaction {
+        Self::mock_rpc_tx(envelope, from)
     }
 
     /// Get the REVM spec id of an Alloy block.
@@ -127,21 +114,23 @@ impl PevmChain for PevmEthereum {
     // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
     // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
     // TODO: Properly test this.
-    fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, EthereumTransactionParsingError> {
+    fn get_tx_env(&self, tx: &Self::Transaction) -> Result<TxEnv, EthereumTransactionParsingError> {
         Ok(TxEnv {
             caller: tx.from,
-            gas_limit: tx.gas,
-            gas_price: get_ethereum_gas_price(&tx)?,
-            gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
-            transact_to: tx.to.into(),
-            value: tx.value,
-            data: tx.input,
-            nonce: Some(tx.nonce),
-            chain_id: tx.chain_id,
-            access_list: tx.access_list.unwrap_or_default().into(),
-            blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-            authorization_list: tx.authorization_list.map(AuthorizationList::Signed),
+            gas_limit: tx.gas_limit(),
+            gas_price: get_ethereum_gas_price(&tx.inner)?,
+            gas_priority_fee: tx.max_priority_fee_per_gas().map(U256::from),
+            transact_to: tx.kind(),
+            value: tx.value(),
+            data: tx.input().clone(),
+            nonce: Some(tx.nonce()),
+            chain_id: tx.chain_id(),
+            access_list: tx.access_list().cloned().unwrap_or_default().to_vec(),
+            blob_hashes: tx.blob_versioned_hashes().unwrap_or_default().to_vec(),
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas().map(U256::from),
+            authorization_list: tx
+                .authorization_list()
+                .map(|auths| AuthorizationList::Signed(auths.to_vec())),
             #[cfg(feature = "optimism")]
             optimism: revm::primitives::OptimismFields::default(),
         })
@@ -194,13 +183,7 @@ impl PevmChain for PevmEthereum {
         }
 
         // 1. Create a [Vec<TxType>]
-        let tx_types: Vec<TxType> = txs
-            .txns()
-            .map(|tx| {
-                let byte = tx.transaction_type.unwrap_or_default();
-                TxType::try_from(byte).map_err(|_| CalculateReceiptRootError::InvalidTxType(byte))
-            })
-            .collect::<Result<_, _>>()?;
+        let tx_types: Vec<TxType> = txs.txns().map(|tx| tx.inner.tx_type()).collect::<Vec<_>>();
 
         // 2. Create an iterator of [ReceiptEnvelope]
         let receipt_envelope_iter =

@@ -105,7 +105,13 @@ impl Pevm {
         &mut self,
         storage: &S,
         chain: &C,
-        block: Block<C::Transaction>,
+        // We assume the block is still needed afterwards like in most Reth cases
+        // so take in a reference and only copy values when needed. We may want
+        // to use a [`std::borrow::Cow`] to build [`BlockEnv`] and [`TxEnv`] without
+        // (much) copying when ownership can be given. Another challenge with this is
+        // the new Alloy [`Transaction`] interface that is mostly `&self`. We'd need
+        // to do some dirty destruction to get the owned fields.
+        block: &Block<C::Transaction>,
         concurrency_level: NonZeroUsize,
         force_sequential: bool,
     ) -> PevmResult<C> {
@@ -113,9 +119,9 @@ impl Pevm {
             .get_block_spec(&block.header)
             .map_err(PevmError::BlockSpecError)?;
         let block_env = get_block_env(&block.header);
-        let tx_envs = match block.transactions {
+        let tx_envs = match &block.transactions {
             BlockTransactions::Full(txs) => txs
-                .into_iter()
+                .iter()
                 .map(|tx| chain.get_tx_env(tx))
                 .collect::<Result<Vec<TxEnv>, _>>()
                 .map_err(PevmError::InvalidTransaction)?,

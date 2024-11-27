@@ -54,7 +54,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 pevm.execute(
                     black_box(&storage),
                     black_box(&chain),
-                    black_box(block.clone()),
+                    black_box(&block),
                     black_box(concurrency_level),
                     black_box(true),
                 )
@@ -65,7 +65,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 pevm.execute(
                     black_box(&storage),
                     black_box(&chain),
-                    black_box(block.clone()),
+                    black_box(&block),
                     black_box(concurrency_level),
                     black_box(false),
                 )
