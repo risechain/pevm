@@ -10,7 +10,7 @@ use alloy_rpc_types_eth::{Block, BlockTransactions};
 use hashbrown::HashMap;
 use revm::{
     db::CacheDB,
-    primitives::{BlockEnv, SpecId, TxEnv},
+    primitives::{BlockEnv, InvalidTransaction, SpecId, TxEnv},
     DatabaseCommit,
 };
 
@@ -55,9 +55,12 @@ pub enum PevmError<C: PevmChain> {
     #[error("Storage error: {0}")]
     StorageError(String),
     /// EVM execution error.
-    // TODO: More concrete types than just an arbitrary string.
-    #[error("Execution error: {0}")]
-    ExecutionError(String),
+    #[error("Execution error")]
+    ExecutionError(
+        #[source]
+        #[from]
+        ExecutionError,
+    ),
     /// Impractical errors that should be unreachable.
     /// The library has bugs if this is yielded.
     #[error("PEVM encountered a bug. Please open an issue in https://github.com/risechain/pevm/issues/new")]
@@ -232,7 +235,7 @@ impl Pevm {
                 }
                 AbortReason::ExecutionError(err) => {
                     self.dropper.drop((mv_memory, scheduler, txs));
-                    return Err(PevmError::ExecutionError(format!("{err:?}")));
+                    return Err(PevmError::ExecutionError(err));
                 }
             }
         }
@@ -307,9 +310,12 @@ impl Pevm {
                                 );
                             }
                             if balance < max_fee {
-                                return Err(PevmError::ExecutionError(
-                                    "Transaction(LackOfFundForMaxFee)".to_string(),
-                                ));
+                                Err(ExecutionError::Transaction(
+                                    InvalidTransaction::LackOfFundForMaxFee {
+                                        balance: Box::new(balance),
+                                        fee: Box::new(max_fee),
+                                    },
+                                ))?
                             }
                             balance = balance.saturating_sub(*subtraction);
                             nonce += 1;
@@ -449,21 +455,22 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
     let mut cumulative_gas_used: u64 = 0;
     for tx in txs {
         *evm.tx_mut() = tx;
-        match evm.transact() {
-            Ok(result_and_state) => {
-                evm.db_mut().commit(result_and_state.state.clone());
 
-                let mut execution_result =
-                    PevmTxExecutionResult::from_revm(chain, spec_id, result_and_state);
+        // TODO: More concrete type for `EVMError<StorageWrapperError<S>>`
+        let result_and_state = evm
+            .transact()
+            .map_err(|err| ExecutionError::Custom(err.to_string()))?;
 
-                cumulative_gas_used = cumulative_gas_used
-                    .saturating_add(execution_result.receipt.cumulative_gas_used);
-                execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
+        evm.db_mut().commit(result_and_state.state.clone());
 
-                results.push(execution_result);
-            }
-            Err(err) => return Err(PevmError::ExecutionError(err.to_string())),
-        }
+        let mut execution_result =
+            PevmTxExecutionResult::from_revm(chain, spec_id, result_and_state);
+
+        cumulative_gas_used =
+            cumulative_gas_used.saturating_add(execution_result.receipt.cumulative_gas_used);
+        execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
+
+        results.push(execution_result);
     }
     Ok(results)
 }
