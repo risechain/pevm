@@ -28,7 +28,7 @@ impl<'a> InMemoryStorage<'a> {
     }
 }
 
-impl<'a> Storage for InMemoryStorage<'a> {
+impl Storage for InMemoryStorage<'_> {
     // TODO: More proper error handling
     type Error = u8;
 

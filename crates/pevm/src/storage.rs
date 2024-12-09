@@ -209,7 +209,7 @@ pub enum StorageWrapperError<S: Storage> {
 #[derive(Debug)]
 pub struct StorageWrapper<'a, S: Storage>(pub &'a S);
 
-impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
+impl<S: Storage> DatabaseRef for StorageWrapper<'_, S> {
     type Error = StorageWrapperError<S>;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
