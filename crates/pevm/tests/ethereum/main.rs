@@ -164,24 +164,31 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 (Some("TR_TypeNotSupported"), Ok(_)) => {}
                 // Remaining tests that expect execution to fail -> match error
                 (Some(exception), Err(PevmError::ExecutionError(error))) => {
+                    use revm::primitives::InvalidTransaction as T;
+
+                    let pevm::ExecutionError::Transaction(error) = error else {
+                        panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}")
+                    };
+
                     // TODO: Cleaner code would be nice..
                     assert!(match exception {
                         "TR_TypeNotSupported" => true, // REVM is yielding arbitrary errors in these cases.
-                        "SenderNotEOA" => error == "Transaction(RejectCallerWithCode)",
-                        "TR_NoFundsX" => error == "Transaction(OverflowPaymentInTransaction)",
-                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => error == "Transaction(BlobGasPriceGreaterThanMax)",
-                        "TR_BLOBCREATE" => error == "Transaction(BlobCreateTransaction)",
-                        "TR_GasLimitReached" => error == "Transaction(CallerGasLimitMoreThanBlock)",
-                        "TR_TipGtFeeCap" => error == "Transaction(PriorityFeeGreaterThanMaxFee)",
+                        "SenderNotEOA" => error == T::RejectCallerWithCode,
+                        "TR_NoFundsX" => error == T::OverflowPaymentInTransaction,
+                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => error == T::BlobGasPriceGreaterThanMax,
+                        "TR_BLOBCREATE" => error == T::BlobCreateTransaction,
+                        "TR_GasLimitReached" => error == T::CallerGasLimitMoreThanBlock,
+                        "TR_TipGtFeeCap" => error == T::PriorityFeeGreaterThanMaxFee,
 
-                        "TR_NoFundsOrGas" | "IntrinsicGas" | "TR_IntrinsicGas" | "TransactionException.INTRINSIC_GAS_TOO_LOW" => error == "Transaction(CallGasCostMoreThanGasLimit)",
-                        "TR_FeeCapLessThanBlocks" | "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS" => error == "Transaction(GasPriceLessThanBasefee)",
-                        "TR_NoFunds" | "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" => &error[..31] == "Transaction(LackOfFundForMaxFee",
-                        "TR_EMPTYBLOB" | "TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(EmptyBlobs)",
-                        "TR_BLOBLIST_OVERSIZE" | "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => &error[..24] == "Transaction(TooManyBlobs",
-                        "TR_BLOBVERSION_INVALID" | "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == "Transaction(BlobVersionNotSupported)",
-                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" | "TransactionException.TYPE_3_TX_PRE_FORK" => error == "Transaction(BlobVersionedHashesNotSupported)",
-                        "TransactionException.INITCODE_SIZE_EXCEEDED" | "TR_InitCodeLimitExceeded" => error == "Transaction(CreateInitCodeSizeLimit)",
+                        "TR_NoFundsOrGas" | "IntrinsicGas" | "TR_IntrinsicGas" | "TransactionException.INTRINSIC_GAS_TOO_LOW" =>
+                            error == T::CallGasCostMoreThanGasLimit,
+                        "TR_FeeCapLessThanBlocks" | "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS" => error == T::GasPriceLessThanBasefee,
+                        "TR_NoFunds" | "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" => matches!(error, T::LackOfFundForMaxFee { .. }),
+                        "TR_EMPTYBLOB" | "TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == T::EmptyBlobs,
+                        "TR_BLOBLIST_OVERSIZE" | "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => matches!(error, T::TooManyBlobs { .. }),
+                        "TR_BLOBVERSION_INVALID" | "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == T::BlobVersionNotSupported,
+                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" | "TransactionException.TYPE_3_TX_PRE_FORK" => error == T::BlobVersionedHashesNotSupported,
+                        "TransactionException.INITCODE_SIZE_EXCEEDED" | "TR_InitCodeLimitExceeded" => error == T::CreateInitCodeSizeLimit,
                         _ => panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}")
                     });
                 }

@@ -79,26 +79,34 @@ pub(crate) enum VmExecutionError {
 }
 
 /// Errors when reading a memory location.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ReadError {
     /// Cannot read memory location from storage.
+    // TODO: More concreate type
+    #[error("Failed reading memory from storage: {0}")]
     StorageError(String),
     /// This memory location has been written by a lower transaction.
+    #[error("Read of memory location is blocked by tx #{0}")]
     Blocking(TxIdx),
     /// There has been an inconsistent read like reading the same
     /// location from storage in the first call but from [`VmMemory`] in
     /// the next.
+    #[error("Transactions read inconsistent storage slots")]
     InconsistentRead,
     /// Found an invalid nonce, like the first transaction of a sender
     /// not having a (+1) nonce from storage.
+    #[error("Tx #{0} has invalid nonce")]
     InvalidNonce(TxIdx),
     /// Read a self-destructed account that is very hard to handle, as
     /// there is no performant way to mark all storage slots as cleared.
+    #[error("Tried to read self-destructed account")]
     SelfDestructedAccount,
     /// The bytecode is invalid and cannot be converted.
-    InvalidBytecode(BytecodeConversionError),
+    #[error("Invalid bytecode")]
+    InvalidBytecode(#[source] BytecodeConversionError),
     /// The stored memory value type doesn't match its location type.
-    /// TODO: Handle this at the type level?
+    // TODO: Handle this at the type level?
+    #[error("Invalid type of stored memory value")]
     InvalidMemoryValueType,
 }
 
