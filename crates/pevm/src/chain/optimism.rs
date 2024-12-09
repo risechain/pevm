@@ -37,15 +37,18 @@ impl PevmOptimism {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OptimismBlockSpecError {
+    #[error("Spec is not supported")]
     UnsupportedSpec,
 }
 
 /// Represents errors that can occur when parsing transactions
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OptimismTransactionParsingError {
+    #[error("Transaction must set gas price")]
     MissingGasPrice,
+    #[error("Transaction must set source hash")]
     MissingSourceHash,
 }
 

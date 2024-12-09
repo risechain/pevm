@@ -29,15 +29,19 @@ use crate::{
 
 /// Errors when executing a block with pevm.
 // TODO: implement traits explicitly due to trait bounds on `C` instead of types of `PevmChain`
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum PevmError<C: PevmChain> {
     /// Cannot derive the chain spec from the block header.
-    BlockSpecError(C::BlockSpecError),
+    #[error("Cannot derive the chain spec from the block header")]
+    BlockSpecError(#[source] C::BlockSpecError),
     /// Transactions lack information for execution.
+    #[error("Transactions lack information for execution")]
     MissingTransactionData,
     /// Invalid input transaction.
-    InvalidTransaction(C::TransactionParsingError),
+    #[error("Invalid input transaction")]
+    InvalidTransaction(#[source] C::TransactionParsingError),
     /// Nonce too low or too high
+    #[error("Nonce mismatch for tx #{tx_idx}. Expected {executed_nonce}, got {tx_nonce}")]
     NonceMismatch {
         /// Transaction index
         tx_idx: TxIdx,
@@ -48,12 +52,15 @@ pub enum PevmError<C: PevmChain> {
     },
     /// Storage error.
     // TODO: More concrete types than just an arbitrary string.
+    #[error("Storage error: {0}")]
     StorageError(String),
     /// EVM execution error.
     // TODO: More concrete types than just an arbitrary string.
+    #[error("Execution error: {0}")]
     ExecutionError(String),
     /// Impractical errors that should be unreachable.
     /// The library has bugs if this is yielded.
+    #[error("PEVM encountered a bug. Please open an issue in https://github.com/risechain/pevm/issues/new")]
     UnreachableError,
 }
 
