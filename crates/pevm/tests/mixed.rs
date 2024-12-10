@@ -1,4 +1,4 @@
-// Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
+//! Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
 
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use rand::random;

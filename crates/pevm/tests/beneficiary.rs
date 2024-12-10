@@ -1,5 +1,5 @@
-// Tests for the beneficiary account, especially for the lazy update of its balance to avoid
-// "implicit" dependency among consecutive transactions.
+//! Tests for the beneficiary account, especially for the lazy update of its balance to avoid
+//! "implicit" dependency among consecutive transactions.
 
 use pevm::InMemoryStorage;
 use rand::random;

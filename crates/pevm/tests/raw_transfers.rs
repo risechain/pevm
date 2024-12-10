@@ -1,4 +1,4 @@
-// Test raw transfers -- only send some ETH from one account to another without extra data.
+//! Test raw transfers -- only send some ETH from one account to another without extra data.
 
 use pevm::{chain::PevmEthereum, InMemoryStorage};
 use rand::random;
