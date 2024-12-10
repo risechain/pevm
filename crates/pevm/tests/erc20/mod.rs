@@ -1,3 +1,5 @@
+//! ERC-20 testing module
+
 /// This module provides ERC-20 contract functionality.
 pub mod contract;
 

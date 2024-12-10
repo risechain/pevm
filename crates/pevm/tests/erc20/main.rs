@@ -1,6 +1,6 @@
-// Each cluster has one ERC20 contract and X families.
-// Each family has Y people.
-// Each person performs Z transfers to random people within the family.
+//! Each cluster has one ERC20 contract and X families.
+//! Each family has Y people.
+//! Each person performs Z transfers to random people within the family.
 
 #[path = "../common/mod.rs"]
 pub mod common;
