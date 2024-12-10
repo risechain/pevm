@@ -10,9 +10,7 @@ use alloy_primitives::{Address, Bytes, PrimitiveSignature, TxKind, B256, U256};
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header};
 use flate2::bufread::GzDecoder;
 use hashbrown::HashMap;
-use pevm::{
-    chain::PevmChain, BlockHashes, BuildSuffixHasher, Bytecodes, EvmAccount, InMemoryStorage,
-};
+use pevm::{chain::PevmChain, BlockHashes, BuildSuffixHasher, EvmAccount, InMemoryStorage};
 
 /// runner module
 pub mod runner;
@@ -32,19 +30,22 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'
     let data_dir = std::path::PathBuf::from("../../data");
 
     // TODO: Deduplicate logic with [bin/fetch.rs] when there is more usage
-    let bytecodes: Bytecodes = bincode::deserialize_from(GzDecoder::new(BufReader::new(
+    let bytecodes = bincode::deserialize_from(GzDecoder::new(BufReader::new(
         File::open(data_dir.join("bytecodes.bincode.gz")).unwrap(),
     )))
     .unwrap();
 
+    let block_hashes = bincode::deserialize_from::<_, BlockHashes>(BufReader::new(
+        File::open(data_dir.join("block_hashes.bincode")).unwrap(),
+    ))
+    .unwrap();
+
     for block_path in fs::read_dir(data_dir.join("blocks")).unwrap() {
         let block_path = block_path.unwrap().path();
-        let block_number = block_path.file_name().unwrap().to_str().unwrap();
-
-        let block_dir = data_dir.join("blocks").join(block_number);
+        let block_dir = data_dir.join("blocks").join(block_path);
 
         // Parse block
-        let block: Block = serde_json::from_reader(BufReader::new(
+        let block = serde_json::from_reader(BufReader::new(
             File::open(block_dir.join("block.json")).unwrap(),
         ))
         .unwrap();
@@ -55,14 +56,9 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'
         )
         .unwrap();
 
-        // Parse block hashes
-        let block_hashes: BlockHashes = File::open(block_dir.join("block_hashes.json"))
-            .map(|file| serde_json::from_reader::<_, BlockHashes>(BufReader::new(file)).unwrap())
-            .unwrap_or_default();
-
         handler(
             block,
-            InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
+            InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes.clone()),
         );
     }
 }
