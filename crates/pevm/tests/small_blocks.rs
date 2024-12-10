@@ -1,5 +1,5 @@
-// Test small blocks that we have specific handling for, like implicit fine-tuning
-// the concurrency level, falling back to sequential processing, etc.
+//! Test small blocks that we have specific handling for, like implicit fine-tuning
+//! the concurrency level, falling back to sequential processing, etc.
 
 use alloy_primitives::{Address, U256};
 use pevm::InMemoryStorage;

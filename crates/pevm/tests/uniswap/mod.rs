@@ -1,3 +1,5 @@
+//! Uniswap testing module
+
 /// contract module
 pub mod contract;
 

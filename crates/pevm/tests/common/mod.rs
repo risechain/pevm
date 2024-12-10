@@ -1,3 +1,5 @@
+//! Module common for all tests
+
 use std::{
     fs::{self, File},
     io::BufReader,
