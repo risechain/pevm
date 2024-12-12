@@ -236,7 +236,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
     }
 }
 
-impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
+impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
     type Error = ReadError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
