@@ -3,10 +3,17 @@ default-members = ["crates/pevm"]
 members = ["bins/fetch", "crates/pevm"]
 resolver = "2"
 
-[profile.release]
+[profile.profiling]
+debug = 2
+inherits = "release"
+strip = false
+
+[profile.maxperf]
 codegen-units = 1
+incremental = false
+inherits = "release"
 lto = "fat"
-panic = "abort"
+panic = "unwind"
 
 [workspace.lints]
 rust.missing_debug_implementations = "warn"
