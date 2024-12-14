@@ -3,6 +3,11 @@ default-members = ["crates/pevm"]
 members = ["bins/fetch", "crates/pevm"]
 resolver = "2"
 
+[profile.release]
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+
 [profile.profiling]
 debug = "full"
 inherits = "release"

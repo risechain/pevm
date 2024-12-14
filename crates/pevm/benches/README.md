@@ -47,11 +47,11 @@ To benchmark with profiling for development (preferably after commenting out the
 
 ```sh
 # Higher level with flamegraph
-$ CARGO_PROFILE_BENCH_DEBUG=true cargo flamegraph --bench mainnet -- --bench
+$ cargo flamegraph --profile profiling --bench mainnet -- --bench
 
 # Lower level with perf
-$ CARGO_PROFILE_BENCH_DEBUG=true cargo bench --bench mainnet
-$ perf record target/release/deps/mainnet-??? --bench
+$ cargo bench --profile profiling --bench mainnet
+$ perf record target/profiling/deps/mainnet-??? --bench
 $ perf report
 ```
 
