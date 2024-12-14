@@ -4,16 +4,20 @@ members = ["bins/fetch", "crates/pevm"]
 resolver = "2"
 
 [profile.profiling]
-debug = 2
+debug = "full"
 inherits = "release"
-strip = false
 
 [profile.maxperf]
 codegen-units = 1
-incremental = false
 inherits = "release"
 lto = "fat"
-panic = "unwind"
+panic = "abort"
+strip = true
+
+[profile.maxperf-profiling]
+debug = "full"
+inherits = "maxperf"
+strip = false
 
 [workspace.lints]
 rust.missing_debug_implementations = "warn"
