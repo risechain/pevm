@@ -7,18 +7,6 @@ resolver = "2"
 debug = "full"
 inherits = "release"
 
-[profile.maxperf]
-codegen-units = 1
-inherits = "release"
-lto = "fat"
-panic = "abort"
-strip = true
-
-[profile.maxperf-profiling]
-debug = "full"
-inherits = "maxperf"
-strip = false
-
 [workspace.lints]
 rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
