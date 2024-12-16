@@ -7,6 +7,12 @@ resolver = "2"
 codegen-units = 1
 lto = "fat"
 panic = "abort"
+strip = true
+
+[profile.profiling]
+debug = "full"
+inherits = "release"
+strip = false
 
 [workspace.lints]
 rust.missing_debug_implementations = "warn"
