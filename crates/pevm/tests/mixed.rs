@@ -1,5 +1,6 @@
 //! Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
 
+use pevm::chain::PevmEthereum;
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use rand::random;
 use revm::primitives::{env::TxEnv, Address, TransactTo, U256};
@@ -63,5 +64,6 @@ fn mixed_block() {
         // TODO: Shuffle transactions to scatter dependencies around the block.
         // Note that we'll need to guarantee that the nonces are increasing.
         final_txs,
+        &PevmEthereum::mainnet(),
     );
 }

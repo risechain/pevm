@@ -31,6 +31,7 @@ fn raw_transfers_independent() {
                 }
             })
             .collect(),
+        &PevmEthereum::mainnet(),
     );
 }
 
@@ -71,6 +72,7 @@ fn raw_transfers_same_sender_multiple_txs() {
                 }
             })
             .collect(),
+        &PevmEthereum::mainnet(),
     );
 }
 

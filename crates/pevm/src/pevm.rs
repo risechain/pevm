@@ -28,6 +28,7 @@ use crate::{
 };
 
 /// Errors when executing a block with pevm.
+// TODO: implement traits explicitly due to trait bounds on `C` instead of types of `PevmChain`
 #[derive(Debug, Clone, PartialEq)]
 pub enum PevmError<C: PevmChain> {
     /// Cannot derive the chain spec from the block header.

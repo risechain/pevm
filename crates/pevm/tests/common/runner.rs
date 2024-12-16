@@ -1,7 +1,7 @@
 use alloy_primitives::Bloom;
 use alloy_rpc_types_eth::Block;
 use pevm::{
-    chain::{CalculateReceiptRootError, PevmChain, PevmEthereum},
+    chain::{CalculateReceiptRootError, PevmChain},
     EvmAccount, Pevm, Storage,
 };
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
@@ -23,19 +23,23 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
 
 /// Execute an REVM block sequentially and parallelly with PEVM and assert that
 /// the execution results match.
-pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) {
+pub fn test_execute_revm<S, C>(storage: S, txs: Vec<TxEnv>, chain: &C)
+where
+    S: Storage + Send + Sync,
+    C: PevmChain + PartialEq + Send + Sync,
+{
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_eq!(
         pevm::execute_revm_sequential(
             &storage,
-            &PevmEthereum::mainnet(),
+            chain,
             SpecId::LATEST,
             BlockEnv::default(),
             txs.clone(),
         ),
         Pevm::default().execute_revm_parallel(
             &storage,
-            &PevmEthereum::mainnet(),
+            chain,
             SpecId::LATEST,
             BlockEnv::default(),
             txs,

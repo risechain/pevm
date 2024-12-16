@@ -2,6 +2,7 @@
 //! the concurrency level, falling back to sequential processing, etc.
 
 use alloy_primitives::{Address, U256};
+use pevm::chain::PevmEthereum;
 use pevm::InMemoryStorage;
 use revm::primitives::{TransactTo, TxEnv};
 
@@ -9,7 +10,11 @@ pub mod common;
 
 #[test]
 fn empty_revm_block() {
-    common::test_execute_revm(InMemoryStorage::default(), Vec::new());
+    common::test_execute_revm(
+        InMemoryStorage::default(),
+        Vec::new(),
+        &PevmEthereum::mainnet(),
+    );
 }
 
 #[test]
@@ -27,5 +32,6 @@ fn one_tx_revm_block() {
             gas_price: U256::from(1),
             ..TxEnv::default()
         }],
+        &PevmEthereum::mainnet(),
     );
 }
