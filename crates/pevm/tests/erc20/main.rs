@@ -10,6 +10,7 @@ pub mod erc20;
 
 use common::test_execute_revm;
 use erc20::generate_cluster;
+use pevm::chain::PevmEthereum;
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use revm::primitives::{Address, TxEnv};
 
@@ -18,7 +19,11 @@ fn erc20_independent() {
     const N: usize = 37123;
     let (mut state, bytecodes, txs) = generate_cluster(N, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
-    test_execute_revm(InMemoryStorage::new(state, Some(&bytecodes), []), txs);
+    test_execute_revm(
+        InMemoryStorage::new(state, Some(&bytecodes), []),
+        txs,
+        &PevmEthereum::mainnet(),
+    );
 }
 
 #[test]
@@ -45,5 +50,6 @@ fn erc20_clusters() {
     common::test_execute_revm(
         InMemoryStorage::new(final_state, Some(&final_bytecodes), []),
         final_txs,
+        &PevmEthereum::mainnet(),
     )
 }
