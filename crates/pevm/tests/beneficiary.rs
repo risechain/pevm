@@ -12,7 +12,11 @@ const BLOCK_SIZE: usize = 100_000;
 fn test_beneficiary(get_address: fn(usize) -> Address) {
     common::test_execute_revm(
         // Mock the beneficiary account (`Address:ZERO`) and the next `BLOCK_SIZE` user accounts.
-        InMemoryStorage::new((0..=BLOCK_SIZE).map(common::mock_account), None, []),
+        InMemoryStorage::new(
+            (0..=BLOCK_SIZE).map(common::mock_account).collect(),
+            Default::default(),
+            Default::default(),
+        ),
         // Mock `BLOCK_SIZE` transactions sending some tokens to itself.
         // Skipping `Address::ZERO` as the beneficiary account.
         (1..=BLOCK_SIZE)
