@@ -57,3 +57,44 @@ fn mainnet_blocks_from_disk() {
         }
     });
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(all(feature = "rpc-storage", feature = "optimism"))]
+async fn optimism_mainnet_blocks_from_rpc() {
+    use alloy_provider::{Provider, ProviderBuilder};
+    use alloy_rpc_types_eth::{BlockId, Block};
+    use pevm::chain::{PevmChain, PevmOptimism};
+    use op_alloy_rpc_types::Transaction as OpTransaction;
+    use std::borrow::Cow;
+    use serde_json::json;
+
+    let rpc_url = match std::env::var("OPTIMISM_RPC_URL") {
+        Ok(value) if !value.is_empty() => value.parse().unwrap(),
+        _ => reqwest::Url::parse("https://mainnet.optimism.io").unwrap(),
+    };
+
+    // First block under 50 transactions of each EVM-spec-changing fork
+    for block_number in [
+        105235063, // REGOLITH
+        105235064, // First block after REGOLITH
+        105235065, // Second block after REGOLITH
+    ] {
+        let provider = ProviderBuilder::new().on_http(rpc_url.clone());
+        
+        // Get the block with full transaction objects
+        let block: Block<OpTransaction> = provider
+            .raw_request(
+                Cow::Borrowed("eth_getBlockByNumber"),
+                [json!(format!("0x{:x}", block_number)), json!(true)]
+            )
+            .await
+            .unwrap();
+            
+        let chain = PevmOptimism::mainnet();
+        let spec_id = chain.get_block_spec(&block.header).unwrap();
+        
+        let rpc_storage =
+            pevm::RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
+        common::test_execute_alloy(&rpc_storage, &chain, block, true);
+    }
+}
