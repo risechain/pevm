@@ -45,7 +45,7 @@ pub enum EthereumBlockSpecError {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EthereumTransactionParsingError {
     /// [`tx.gas_price`] is none.
-    #[error("Transaction needs to set gas price")]
+    #[error("Missing gas price")]
     MissingGasPrice,
 }
 
