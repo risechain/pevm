@@ -41,8 +41,7 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'
     .unwrap();
 
     for block_path in fs::read_dir(data_dir.join("blocks")).unwrap() {
-        let block_path = block_path.unwrap().path();
-        let block_dir = data_dir.join("blocks").join(block_path);
+        let block_dir = block_path.unwrap().path();
 
         // Parse block
         let block = serde_json::from_reader(BufReader::new(
