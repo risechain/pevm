@@ -1,6 +1,4 @@
 //! Optimism
-use std::collections::BTreeMap;
-
 use alloy_consensus::Transaction;
 use alloy_primitives::{Address, Bytes, ChainId, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header};
@@ -189,45 +187,34 @@ impl PevmChain for PevmOptimism {
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> Result<B256, CalculateReceiptRootError> {
-        // 1. Create a list of [ReceiptEnvelope]
-        let receipt_envelopes: Vec<OpReceiptEnvelope> =
-            Iterator::zip(txs.txns(), tx_results.iter())
-                .map(|(tx, tx_result)| {
-                    let receipt = tx_result.receipt.clone();
-                    Ok(match tx.inner.inner.tx_type() {
-                        OpTxType::Legacy => OpReceiptEnvelope::Legacy(receipt.with_bloom()),
-                        OpTxType::Eip2930 => OpReceiptEnvelope::Eip2930(receipt.with_bloom()),
-                        OpTxType::Eip1559 => OpReceiptEnvelope::Eip1559(receipt.with_bloom()),
-                        OpTxType::Eip7702 => OpReceiptEnvelope::Eip7702(receipt.with_bloom()),
-                        OpTxType::Deposit => {
-                            // TODO: Return proper errors instead of panic-ing.
-                            let account_maybe =
-                                tx_result.state.get(&tx.from).expect("Sender not found");
-                            let account = account_maybe.as_ref().expect("Sender not changed");
-                            let receipt = OpDepositReceipt {
-                                inner: receipt,
-                                deposit_nonce: (spec_id >= SpecId::CANYON)
-                                    .then_some(account.nonce - 1),
-                                deposit_receipt_version: (spec_id >= SpecId::CANYON).then_some(1),
-                            };
-                            OpReceiptEnvelope::Deposit(receipt.with_bloom())
-                        }
-                    })
-                })
-                .collect::<Result<_, _>>()?;
-
-        // 2. Create a trie then calculate the root hash
-        // We use [BTreeMap] because the keys must be sorted in ascending order.
-        let trie_entries: BTreeMap<_, _> = receipt_envelopes
-            .iter()
-            .enumerate()
-            .map(|(index, receipt)| {
-                let key_buffer = alloy_rlp::encode_fixed_size(&index);
-                let mut value_buffer = Vec::new();
-                receipt.encode_2718(&mut value_buffer);
-                (key_buffer, value_buffer)
+        let mut trie_entries = txs
+            .txns()
+            .zip(tx_results.iter())
+            .map(|(tx, tx_result)| {
+                let receipt = tx_result.receipt.clone();
+                match tx.inner.inner.tx_type() {
+                    OpTxType::Legacy => OpReceiptEnvelope::Legacy(receipt.with_bloom()),
+                    OpTxType::Eip2930 => OpReceiptEnvelope::Eip2930(receipt.with_bloom()),
+                    OpTxType::Eip1559 => OpReceiptEnvelope::Eip1559(receipt.with_bloom()),
+                    OpTxType::Eip7702 => OpReceiptEnvelope::Eip7702(receipt.with_bloom()),
+                    OpTxType::Deposit => {
+                        // TODO: Return proper errors instead of panic-ing.
+                        let account_maybe =
+                            tx_result.state.get(&tx.from).expect("Sender not found");
+                        let account = account_maybe.as_ref().expect("Sender not changed");
+                        let receipt = OpDepositReceipt {
+                            inner: receipt,
+                            deposit_nonce: (spec_id >= SpecId::CANYON).then_some(account.nonce - 1),
+                            deposit_receipt_version: (spec_id >= SpecId::CANYON).then_some(1),
+                        };
+                        OpReceiptEnvelope::Deposit(receipt.with_bloom())
+                    }
+                }
             })
-            .collect();
+            .enumerate()
+            .map(|(index, receipt)| (alloy_rlp::encode_fixed_size(&index), receipt.encoded_2718()))
+            .collect::<Vec<_>>();
+        trie_entries.sort();
 
         let mut hash_builder = alloy_trie::HashBuilder::default();
         for (k, v) in trie_entries {
