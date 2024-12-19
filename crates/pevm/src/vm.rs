@@ -82,7 +82,7 @@ pub(crate) enum VmExecutionError {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ReadError {
     /// Cannot read memory location from storage.
-    // TODO: More concreate type
+    // TODO: More concrete type
     #[error("Failed reading memory from storage: {0}")]
     StorageError(String),
     /// This memory location has been written by a lower transaction.
@@ -91,7 +91,7 @@ pub enum ReadError {
     /// There has been an inconsistent read like reading the same
     /// location from storage in the first call but from [`VmMemory`] in
     /// the next.
-    #[error("Transactions read inconsistent storage slots")]
+    #[error("Inconsistent read")]
     InconsistentRead,
     /// Found an invalid nonce, like the first transaction of a sender
     /// not having a (+1) nonce from storage.

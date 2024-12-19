@@ -107,7 +107,7 @@ pub enum EvmCode {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BytecodeConversionError {
-    #[error("Failed to decoded EOF")]
+    #[error("Failed to decode EOF")]
     EofDecodingError(#[source] revm::primitives::eof::EofDecodeError),
 }
 

@@ -48,8 +48,6 @@ pub enum OptimismBlockSpecError {
 pub enum OptimismTransactionParsingError {
     #[error("Transaction must set gas price")]
     MissingGasPrice,
-    #[error("Transaction must set source hash")]
-    MissingSourceHash,
 }
 
 fn get_optimism_gas_price(tx: &OpTxEnvelope) -> Result<U256, OptimismTransactionParsingError> {
