@@ -192,16 +192,17 @@ impl PevmChain for PevmOptimism {
             .zip(tx_results.iter())
             .map(|(tx, tx_result)| {
                 let receipt = tx_result.receipt.clone();
-                match tx.inner.inner.tx_type() {
+                Ok(match tx.inner.inner.tx_type() {
                     OpTxType::Legacy => OpReceiptEnvelope::Legacy(receipt.with_bloom()),
                     OpTxType::Eip2930 => OpReceiptEnvelope::Eip2930(receipt.with_bloom()),
                     OpTxType::Eip1559 => OpReceiptEnvelope::Eip1559(receipt.with_bloom()),
                     OpTxType::Eip7702 => OpReceiptEnvelope::Eip7702(receipt.with_bloom()),
                     OpTxType::Deposit => {
-                        // TODO: Return proper errors instead of panic-ing.
-                        let account_maybe =
-                            tx_result.state.get(&tx.from).expect("Sender not found");
-                        let account = account_maybe.as_ref().expect("Sender not changed");
+                        let account = tx_result
+                            .state
+                            .get(&tx.from)
+                            .and_then(Option::as_ref)
+                            .ok_or(CalculateReceiptRootError::OpDepositMissingSender)?;
                         let receipt = OpDepositReceipt {
                             inner: receipt,
                             deposit_nonce: (spec_id >= SpecId::CANYON).then_some(account.nonce - 1),
@@ -209,11 +210,16 @@ impl PevmChain for PevmOptimism {
                         };
                         OpReceiptEnvelope::Deposit(receipt.with_bloom())
                     }
-                }
+                })
             })
             .enumerate()
-            .map(|(index, receipt)| (alloy_rlp::encode_fixed_size(&index), receipt.encoded_2718()))
-            .collect::<Vec<_>>();
+            .map(|(index, receipt)| {
+                Ok((
+                    alloy_rlp::encode_fixed_size(&index),
+                    receipt?.encoded_2718(),
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         trie_entries.sort();
 
         let mut hash_builder = alloy_trie::HashBuilder::default();
