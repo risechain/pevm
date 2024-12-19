@@ -38,6 +38,9 @@ pub enum CalculateReceiptRootError {
     InvalidTxType(u8),
     /// Arbitrary error message
     Custom(String),
+    /// Optimism deposit is missing sender
+    #[cfg(feature = "optimism")]
+    OpDepositMissingSender,
 }
 
 /// Custom behaviours for different chains & networks

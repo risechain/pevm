@@ -1,7 +1,5 @@
 //! Ethereum
 
-use std::{collections::BTreeMap, fmt::Debug};
-
 use alloy_consensus::{ReceiptEnvelope, Transaction, TxEnvelope, TxType};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::network::eip2718::Encodable2718;
@@ -182,12 +180,11 @@ impl PevmChain for PevmEthereum {
             return Err(CalculateReceiptRootError::Unsupported);
         }
 
-        // 1. Create a [Vec<TxType>]
-        let tx_types: Vec<TxType> = txs.txns().map(|tx| tx.inner.tx_type()).collect::<Vec<_>>();
-
-        // 2. Create an iterator of [ReceiptEnvelope]
-        let receipt_envelope_iter =
-            Iterator::zip(tx_types.iter(), tx_results.iter()).map(|(tx_type, tx_result)| {
+        let mut trie_entries = txs
+            .txns()
+            .map(|tx| tx.inner.tx_type())
+            .zip(tx_results)
+            .map(|(tx_type, tx_result)| {
                 let receipt = tx_result.receipt.clone().with_bloom();
                 match tx_type {
                     TxType::Legacy => ReceiptEnvelope::Legacy(receipt),
@@ -196,19 +193,11 @@ impl PevmChain for PevmEthereum {
                     TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt),
                     TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt),
                 }
-            });
-
-        // 3. Create a trie then calculate the root hash
-        // We use [BTreeMap] because the keys must be sorted in ascending order.
-        let trie_entries: BTreeMap<_, _> = receipt_envelope_iter
-            .enumerate()
-            .map(|(index, receipt)| {
-                let key_buffer = alloy_rlp::encode_fixed_size(&index);
-                let mut value_buffer = Vec::new();
-                receipt.encode_2718(&mut value_buffer);
-                (key_buffer, value_buffer)
             })
-            .collect();
+            .enumerate()
+            .map(|(index, receipt)| (alloy_rlp::encode_fixed_size(&index), receipt.encoded_2718()))
+            .collect::<Vec<_>>();
+        trie_entries.sort();
 
         let mut hash_builder = alloy_trie::HashBuilder::default();
         for (k, v) in trie_entries {
