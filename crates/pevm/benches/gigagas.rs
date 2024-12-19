@@ -2,7 +2,7 @@
 
 // TODO: More fancy benchmarks & plots.
 
-use std::{num::NonZeroUsize, thread};
+use std::{num::NonZeroUsize, sync::Arc, thread};
 
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -34,7 +34,7 @@ const GIGA_GAS: u64 = 1_000_000_000;
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 /// Runs a benchmark for executing a set of transactions on a given blockchain state.
-pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage<'_>, txs: Vec<TxEnv>) {
+pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let chain = PevmEthereum::mainnet();
     let spec_id = SpecId::LATEST;
@@ -76,9 +76,10 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
     let storage = InMemoryStorage::new(
         std::iter::once(MINER_ADDRESS)
             .chain(START_ADDRESS..START_ADDRESS + block_size)
-            .map(common::mock_account),
-        None,
-        [],
+            .map(common::mock_account)
+            .collect(),
+        Default::default(),
+        Default::default(),
     );
     bench(
         c,
@@ -108,7 +109,7 @@ pub fn bench_erc20(c: &mut Criterion) {
     bench(
         c,
         "Independent ERC20",
-        InMemoryStorage::new(state, Some(&bytecodes), []),
+        InMemoryStorage::new(state, Arc::new(bytecodes), Default::default()),
         txs,
     );
 }
@@ -128,7 +129,7 @@ pub fn bench_uniswap(c: &mut Criterion) {
     bench(
         c,
         "Independent Uniswap",
-        InMemoryStorage::new(final_state, Some(&final_bytecodes), []),
+        InMemoryStorage::new(final_state, Arc::new(final_bytecodes), Default::default()),
         final_txs,
     );
 }
