@@ -62,11 +62,8 @@ fn mainnet_blocks_from_disk() {
 #[cfg(all(feature = "rpc-storage", feature = "optimism"))]
 async fn optimism_mainnet_blocks_from_rpc() {
     use alloy_provider::{Provider, ProviderBuilder};
-    use alloy_rpc_types_eth::{BlockId, Block};
+    use alloy_rpc_types_eth::{BlockId, BlockTransactionsKind};
     use pevm::chain::{PevmChain, PevmOptimism};
-    use op_alloy_rpc_types::Transaction as OpTransaction;
-    use std::borrow::Cow;
-    use serde_json::json;
 
     let rpc_url = match std::env::var("OPTIMISM_RPC_URL") {
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
