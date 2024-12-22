@@ -81,15 +81,13 @@ async fn optimism_mainnet_blocks_from_rpc() {
                   // 122874325, // FJORD (https://specs.optimism.io/protocol/fjord/overview.html)
                   // 125874340, // GRANITE (https://specs.optimism.io/protocol/granite/overview.html)
     ] {
-        let provider = ProviderBuilder::new().on_http(rpc_url.clone());
-        
-        // Get the block with full transaction objects
-        let block: Block<OpTransaction> = provider
-            .raw_request(
-                Cow::Borrowed("eth_getBlockByNumber"),
-                [json!(format!("0x{:x}", block_number)), json!(true)]
-            )
+    let provider = ProviderBuilder::new()
+        .network::<op_alloy_network::Optimism>()
+        .on_http(rpc_url.clone());
+   let block = provider
+            .get_block(BlockId::number(block_number), BlockTransactionsKind::Full)
             .await
+            .unwrap()
             .unwrap();
             
         let chain = PevmOptimism::mainnet();
