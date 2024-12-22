@@ -218,7 +218,7 @@ pub mod chain;
 mod compat;
 mod mv_memory;
 mod pevm;
-pub use pevm::{execute_revm_sequential, Pevm, PevmError, PevmResult};
+pub use pevm::{execute_revm_sequential, Pevm, PevmError, PevmResult, PevmExecutionError};
 mod scheduler;
 mod storage;
 pub use storage::{

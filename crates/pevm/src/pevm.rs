@@ -10,7 +10,7 @@ use alloy_rpc_types_eth::{Block, BlockTransactions};
 use hashbrown::HashMap;
 use revm::{
     db::CacheDB,
-    primitives::{BlockEnv, SpecId, TxEnv},
+    primitives::{BlockEnv, SpecId, TxEnv, EVMError, InvalidTransaction},
     DatabaseCommit,
 };
 
@@ -26,6 +26,68 @@ use crate::{
     },
     EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxIdx, TxVersion,
 };
+
+/// Concrete type for [`PevmError::ExecutionError`]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PevmExecutionError {
+    /// Transaction tip greater than fee cap
+    PriorityFeeGreaterThanMaxFee,
+    /// Reject transactions from senders with deployed code
+    RejectCallerWithCode,
+    /// Overflow payment in transaction
+    OverflowPaymentInTransaction,
+    /// Insufficient max fee per blob gas
+    BlobGasPriceGreaterThanMax,
+    /// Blob transaction can't be a create transaction
+    BlobCreateTransaction,
+    /// Gas limit reached
+    CallerGasLimitMoreThanBlock,
+    /// Intrinsic gas too low
+    CallGasCostMoreThanGasLimit,
+    /// Gas price is less than basefee
+    GasPriceLessThanBasefee,
+    /// Transaction account does not have enough amount of ether
+    LackOfFundForMaxFee,
+    /// There should be at least one blob in Blob transaction
+    EmptyBlobs,
+    /// Transaction contains more blobs than the maximum allowed per block
+    TooManyBlobs,
+    /// Blob transaction contains a versioned hash with an incorrect version
+    BlobVersionNotSupported,
+    /// Blob hashes or Blob versioned hashes are not supported for blocks before hardfork
+    BlobVersionedHashesNotSupported,
+    /// Init code limit exceeded
+    CreateInitCodeSizeLimit,
+    /// Impractical errors that should be unreachable
+    UnreachableError
+}
+
+impl<E> From<EVMError<E>> for PevmExecutionError {
+    fn from(value: EVMError<E>) -> Self {
+        match value {
+            EVMError::Transaction(invalid_tx) => {
+                match invalid_tx {
+                    InvalidTransaction::PriorityFeeGreaterThanMaxFee => PevmExecutionError::PriorityFeeGreaterThanMaxFee,
+                    InvalidTransaction::GasPriceLessThanBasefee => PevmExecutionError::GasPriceLessThanBasefee,
+                    InvalidTransaction::CallerGasLimitMoreThanBlock => PevmExecutionError::CallerGasLimitMoreThanBlock,
+                    InvalidTransaction::CallGasCostMoreThanGasLimit => PevmExecutionError::CallGasCostMoreThanGasLimit,
+                    InvalidTransaction::RejectCallerWithCode => PevmExecutionError::RejectCallerWithCode,
+                    InvalidTransaction::LackOfFundForMaxFee {..} => PevmExecutionError::LackOfFundForMaxFee,
+                    InvalidTransaction::OverflowPaymentInTransaction => PevmExecutionError::OverflowPaymentInTransaction,
+                    InvalidTransaction::BlobGasPriceGreaterThanMax => PevmExecutionError::BlobGasPriceGreaterThanMax,
+                    InvalidTransaction::BlobCreateTransaction => PevmExecutionError::BlobCreateTransaction,
+                    InvalidTransaction::EmptyBlobs => PevmExecutionError::EmptyBlobs,
+                    InvalidTransaction::TooManyBlobs {..} => PevmExecutionError::TooManyBlobs,
+                    InvalidTransaction::BlobVersionNotSupported => PevmExecutionError::BlobVersionNotSupported,
+                    InvalidTransaction::BlobVersionedHashesNotSupported => PevmExecutionError::BlobVersionedHashesNotSupported,
+                    InvalidTransaction::CreateInitCodeSizeLimit => PevmExecutionError::CreateInitCodeSizeLimit,
+                    _ => PevmExecutionError::UnreachableError
+                }
+            },
+            _ => PevmExecutionError::UnreachableError
+        }
+    }
+}
 
 /// Errors when executing a block with pevm.
 #[derive(Debug, Clone, PartialEq)]
@@ -49,8 +111,7 @@ pub enum PevmError<C: PevmChain> {
     // TODO: More concrete types than just an arbitrary string.
     StorageError(String),
     /// EVM execution error.
-    // TODO: More concrete types than just an arbitrary string.
-    ExecutionError(String),
+    ExecutionError(PevmExecutionError),
     /// Impractical errors that should be unreachable.
     /// The library has bugs if this is yielded.
     UnreachableError,
@@ -216,7 +277,7 @@ impl Pevm {
                 }
                 AbortReason::ExecutionError(err) => {
                     self.dropper.drop((mv_memory, scheduler, txs));
-                    return Err(PevmError::ExecutionError(format!("{err:?}")));
+                    return Err(PevmError::ExecutionError(err.into()));
                 }
             }
         }
@@ -292,7 +353,7 @@ impl Pevm {
                             }
                             if balance < max_fee {
                                 return Err(PevmError::ExecutionError(
-                                    "Transaction(LackOfFundForMaxFee)".to_string(),
+                                    PevmExecutionError::LackOfFundForMaxFee
                                 ));
                             }
                             balance = balance.saturating_sub(*subtraction);
@@ -446,7 +507,7 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
 
                 results.push(execution_result);
             }
-            Err(err) => return Err(PevmError::ExecutionError(err.to_string())),
+            Err(err) => return Err(PevmError::ExecutionError(err.into())),
         }
     }
     Ok(results)
