@@ -70,7 +70,7 @@ async fn optimism_mainnet_blocks_from_rpc() {
 
     let rpc_url = match std::env::var("OPTIMISM_RPC_URL") {
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
-        _ => reqwest::Url::parse("https://mainnet.optimism.io").unwrap(),
+        _ => reqwest::Url::parse("https://rpc.ankr.com/optimism").unwrap(),
     };
 
     // First block under 50 transactions of each EVM-spec-changing fork
