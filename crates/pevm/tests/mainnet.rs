@@ -75,9 +75,11 @@ async fn optimism_mainnet_blocks_from_rpc() {
 
     // First block under 50 transactions of each EVM-spec-changing fork
     for block_number in [
-        105235063, // REGOLITH
-        105235064, // First block after REGOLITH
-        105235065, // Second block after REGOLITH
+        114874075, // CANYON (https://specs.optimism.io/protocol/canyon/overview.html)
+                  // TODO: doesn't pass `Err(ExecutionError("Database(InvalidNonce(0))"))`
+                  // 117874236, // ECOTONE (https://specs.optimism.io/protocol/ecotone/overview.html)
+                  // 122874325, // FJORD (https://specs.optimism.io/protocol/fjord/overview.html)
+                  // 125874340, // GRANITE (https://specs.optimism.io/protocol/granite/overview.html)
     ] {
         let provider = ProviderBuilder::new().on_http(rpc_url.clone());
         
