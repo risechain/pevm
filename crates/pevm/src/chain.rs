@@ -1,5 +1,6 @@
 //! Chain specific utils
 
+use std::error::Error as StdError;
 use std::fmt::Debug;
 
 use alloy_consensus::{Signed, TxLegacy};
@@ -53,10 +54,10 @@ pub trait PevmChain: Debug {
     type Envelope: Debug + From<Signed<TxLegacy>>;
 
     /// The error type for [`Self::get_block_spec`].
-    type BlockSpecError: Debug + Clone + PartialEq;
+    type BlockSpecError: StdError + Debug + Clone + PartialEq + 'static;
 
     /// The error type for [`Self::get_tx_env`].
-    type TransactionParsingError: Debug + Clone + PartialEq;
+    type TransactionParsingError: StdError + Debug + Clone + PartialEq + 'static;
 
     /// Get chain id.
     fn id(&self) -> u64;

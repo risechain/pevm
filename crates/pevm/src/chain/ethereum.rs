@@ -32,16 +32,18 @@ impl PevmEthereum {
 }
 
 /// Error type for [`PevmEthereum::get_block_spec`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EthereumBlockSpecError {
     /// When [`header.total_difficulty`] is none.
+    #[error("Block header is missing total difficulty")]
     MissingTotalDifficulty,
 }
 
 /// Represents errors that can occur when parsing transactions
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EthereumTransactionParsingError {
     /// [`tx.gas_price`] is none.
+    #[error("Missing gas price")]
     MissingGasPrice,
 }
 
