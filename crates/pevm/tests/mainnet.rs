@@ -78,18 +78,18 @@ async fn optimism_mainnet_blocks_from_rpc() {
                   // 122874325, // FJORD (https://specs.optimism.io/protocol/fjord/overview.html)
                   // 125874340, // GRANITE (https://specs.optimism.io/protocol/granite/overview.html)
     ] {
-    let provider = ProviderBuilder::new()
-        .network::<op_alloy_network::Optimism>()
-        .on_http(rpc_url.clone());
-   let block = provider
+        let provider = ProviderBuilder::new()
+            .network::<op_alloy_network::Optimism>()
+            .on_http(rpc_url.clone());
+        let block = provider
             .get_block(BlockId::number(block_number), BlockTransactionsKind::Full)
             .await
             .unwrap()
             .unwrap();
-            
+
         let chain = PevmOptimism::mainnet();
         let spec_id = chain.get_block_spec(&block.header).unwrap();
-        
+
         let rpc_storage =
             pevm::RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         common::test_execute_alloy(&rpc_storage, &chain, block, true);
