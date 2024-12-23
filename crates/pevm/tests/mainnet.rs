@@ -57,3 +57,41 @@ fn mainnet_blocks_from_disk() {
         }
     });
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(all(feature = "rpc-storage", feature = "optimism"))]
+async fn optimism_mainnet_blocks_from_rpc() {
+    use alloy_provider::{Provider, ProviderBuilder};
+    use alloy_rpc_types_eth::{BlockId, BlockTransactionsKind};
+    use pevm::chain::{PevmChain, PevmOptimism};
+
+    let rpc_url = match std::env::var("OPTIMISM_RPC_URL") {
+        Ok(value) if !value.is_empty() => value.parse().unwrap(),
+        _ => reqwest::Url::parse("https://rpc.ankr.com/optimism").unwrap(),
+    };
+
+    // First block under 50 transactions of each EVM-spec-changing fork
+    for block_number in [
+        114874075, // CANYON (https://specs.optimism.io/protocol/canyon/overview.html)
+                  // TODO: doesn't pass `Err(ExecutionError("Database(InvalidNonce(0))"))`
+                  // 117874236, // ECOTONE (https://specs.optimism.io/protocol/ecotone/overview.html)
+                  // 122874325, // FJORD (https://specs.optimism.io/protocol/fjord/overview.html)
+                  // 125874340, // GRANITE (https://specs.optimism.io/protocol/granite/overview.html)
+    ] {
+        let provider = ProviderBuilder::new()
+            .network::<op_alloy_network::Optimism>()
+            .on_http(rpc_url.clone());
+        let block = provider
+            .get_block(BlockId::number(block_number), BlockTransactionsKind::Full)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let chain = PevmOptimism::mainnet();
+        let spec_id = chain.get_block_spec(&block.header).unwrap();
+
+        let rpc_storage =
+            pevm::RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
+        common::test_execute_alloy(&rpc_storage, &chain, block, true);
+    }
+}
