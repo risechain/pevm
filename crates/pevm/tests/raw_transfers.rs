@@ -11,7 +11,11 @@ fn raw_transfers_independent() {
     let block_size = 100_000; // number of transactions
     common::test_execute_revm(
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
-        InMemoryStorage::new((0..=block_size).map(common::mock_account), None, []),
+        InMemoryStorage::new(
+            (0..=block_size).map(common::mock_account).collect(),
+            Default::default(),
+            Default::default(),
+        ),
         // Mock `block_size` transactions sending some tokens to itself.
         // Skipping `Address::ZERO` as the beneficiary account.
         (1..=block_size)
@@ -41,7 +45,11 @@ fn raw_transfers_same_sender_multiple_txs() {
 
     common::test_execute_revm(
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
-        InMemoryStorage::new((0..=block_size).map(common::mock_account), None, []),
+        InMemoryStorage::new(
+            (0..=block_size).map(common::mock_account).collect(),
+            Default::default(),
+            Default::default(),
+        ),
         (1..=block_size)
             .map(|i| {
                 // Insert a "parallel" transaction every ~256 transactions
