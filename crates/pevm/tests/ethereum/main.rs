@@ -12,7 +12,7 @@
 use pevm::chain::PevmEthereum;
 use pevm::{
     Bytecodes, ChainState, EvmAccount, EvmCode, InMemoryStorage, Pevm, PevmError,
-    PevmTxExecutionResult,
+    PevmExecutionError, PevmTxExecutionResult,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
@@ -167,21 +167,21 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     // TODO: Cleaner code would be nice..
                     assert!(match exception {
                         "TR_TypeNotSupported" => true, // REVM is yielding arbitrary errors in these cases.
-                        "SenderNotEOA" => error == "Transaction(RejectCallerWithCode)",
-                        "TR_NoFundsX" => error == "Transaction(OverflowPaymentInTransaction)",
-                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => error == "Transaction(BlobGasPriceGreaterThanMax)",
-                        "TR_BLOBCREATE" => error == "Transaction(BlobCreateTransaction)",
-                        "TR_GasLimitReached" => error == "Transaction(CallerGasLimitMoreThanBlock)",
-                        "TR_TipGtFeeCap" => error == "Transaction(PriorityFeeGreaterThanMaxFee)",
+                        "SenderNotEOA" => error == PevmExecutionError::RejectCallerWithCode,
+                        "TR_NoFundsX" => error == PevmExecutionError::OverflowPaymentInTransaction,
+                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => error == PevmExecutionError::BlobGasPriceGreaterThanMax,
+                        "TR_BLOBCREATE" => error == PevmExecutionError::BlobCreateTransaction,
+                        "TR_GasLimitReached" => error == PevmExecutionError::CallerGasLimitMoreThanBlock,
+                        "TR_TipGtFeeCap" => error == PevmExecutionError::PriorityFeeGreaterThanMaxFee,
 
-                        "TR_NoFundsOrGas" | "IntrinsicGas" | "TR_IntrinsicGas" | "TransactionException.INTRINSIC_GAS_TOO_LOW" => error == "Transaction(CallGasCostMoreThanGasLimit)",
-                        "TR_FeeCapLessThanBlocks" | "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS" => error == "Transaction(GasPriceLessThanBasefee)",
-                        "TR_NoFunds" | "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" => &error[..31] == "Transaction(LackOfFundForMaxFee",
-                        "TR_EMPTYBLOB" | "TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == "Transaction(EmptyBlobs)",
-                        "TR_BLOBLIST_OVERSIZE" | "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => &error[..24] == "Transaction(TooManyBlobs",
-                        "TR_BLOBVERSION_INVALID" | "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == "Transaction(BlobVersionNotSupported)",
-                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" | "TransactionException.TYPE_3_TX_PRE_FORK" => error == "Transaction(BlobVersionedHashesNotSupported)",
-                        "TransactionException.INITCODE_SIZE_EXCEEDED" | "TR_InitCodeLimitExceeded" => error == "Transaction(CreateInitCodeSizeLimit)",
+                        "TR_NoFundsOrGas" | "IntrinsicGas" | "TR_IntrinsicGas" | "TransactionException.INTRINSIC_GAS_TOO_LOW" => error == PevmExecutionError::CallGasCostMoreThanGasLimit,
+                        "TR_FeeCapLessThanBlocks" | "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS" => error == PevmExecutionError::GasPriceLessThanBasefee,
+                        "TR_NoFunds" | "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" => error == PevmExecutionError::LackOfFundForMaxFee,
+                        "TR_EMPTYBLOB" | "TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == PevmExecutionError::EmptyBlobs,
+                        "TR_BLOBLIST_OVERSIZE" | "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => error == PevmExecutionError::TooManyBlobs,
+                        "TR_BLOBVERSION_INVALID" | "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == PevmExecutionError::BlobVersionNotSupported,
+                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" | "TransactionException.TYPE_3_TX_PRE_FORK" => error == PevmExecutionError::BlobVersionedHashesNotSupported,
+                        "TransactionException.INITCODE_SIZE_EXCEEDED" | "TR_InitCodeLimitExceeded" => error == PevmExecutionError::CreateInitCodeSizeLimit,
                         _ => panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}")
                     });
                 }
