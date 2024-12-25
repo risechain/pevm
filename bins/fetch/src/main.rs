@@ -72,6 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     serde_json::to_writer(block_file, &block)
         .map_err(|err| format!("Failed to write block to file: {err}"))?;
 
+    // Populate bytecodes and state from RPC storage.
     // TODO: Deduplicate logic with [for_each_block_from_disk] when there is more usage
     let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode.gz") {
         Ok(compressed_file) => {
@@ -82,7 +83,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     bytecodes.extend(storage.get_cache_bytecodes());
 
-    // Populate bytecodes and state from RPC storage.
     let mut state = BTreeMap::<Address, EvmAccount>::new();
     for (address, mut account) in storage.get_cache_accounts() {
         if let Some(code) = account.code.take() {
@@ -110,11 +110,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // TODO: Deduplicate logic with [for_each_block_from_disk] when there is more usage
     let mut block_hashes = match File::open("data/block_hashes.bincode") {
-        Ok(compressed_file) => bincode::deserialize_from(compressed_file)
-            .map_err(|err| format!("Failed to deserialize bytecodes from file: {err}"))?,
-        Err(_) => BTreeMap::<u64, B256>::new(),
+        Ok(compressed_file) => bincode::deserialize_from::<_, BTreeMap<u64, B256>>(compressed_file)
+            .map_err(|err| format!("Failed to deserialize block hashes from file: {err}"))?,
+        Err(_) => BTreeMap::new(),
     };
-
     block_hashes.extend(storage.get_cache_block_hashes());
 
     if !block_hashes.is_empty() {
