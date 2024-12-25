@@ -52,8 +52,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Sequential", |b| {
             b.iter(|| {
                 pevm.execute(
-                    black_box(&storage),
                     black_box(&chain),
+                    black_box(&storage),
                     black_box(&block),
                     black_box(concurrency_level),
                     black_box(true),
@@ -63,8 +63,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function("Parallel", |b| {
             b.iter(|| {
                 pevm.execute(
-                    black_box(&storage),
                     black_box(&chain),
+                    black_box(&storage),
                     black_box(&block),
                     black_box(concurrency_level),
                     black_box(false),
