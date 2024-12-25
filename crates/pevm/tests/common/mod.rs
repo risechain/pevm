@@ -110,5 +110,5 @@ where
         ..Block::<C::Transaction>::default()
     };
     let storage = InMemoryStorage::new(accounts, Default::default(), Default::default());
-    test_execute_alloy(&storage, chain, block, false);
+    test_execute_alloy(chain, &storage, block, false);
 }

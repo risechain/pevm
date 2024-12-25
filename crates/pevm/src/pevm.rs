@@ -28,6 +28,7 @@ use crate::{
 };
 
 /// Errors when executing a block with pevm.
+// TODO: implement traits explicitly due to trait bounds on `C` instead of types of `PevmChain`
 #[derive(Debug, Clone, PartialEq)]
 pub enum PevmError<C: PevmChain> {
     /// Cannot derive the chain spec from the block header.
@@ -101,10 +102,10 @@ pub struct Pevm {
 impl Pevm {
     /// Execute an Alloy block, which is becoming the "standard" format in Rust.
     /// TODO: Better error handling.
-    pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
+    pub fn execute<S, C>(
         &mut self,
-        storage: &S,
         chain: &C,
+        storage: &S,
         // We assume the block is still needed afterwards like in most Reth cases
         // so take in a reference and only copy values when needed. We may want
         // to use a [`std::borrow::Cow`] to build [`BlockEnv`] and [`TxEnv`] without
@@ -114,7 +115,11 @@ impl Pevm {
         block: &Block<C::Transaction>,
         concurrency_level: NonZeroUsize,
         force_sequential: bool,
-    ) -> PevmResult<C> {
+    ) -> PevmResult<C>
+    where
+        C: PevmChain + Send + Sync,
+        S: Storage + Send + Sync,
+    {
         let spec_id = chain
             .get_block_spec(&block.header)
             .map_err(PevmError::BlockSpecError)?;
@@ -132,11 +137,11 @@ impl Pevm {
             || tx_envs.len() < concurrency_level.into()
             || block.header.gas_used < 4_000_000
         {
-            execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)
+            execute_revm_sequential(chain, storage, spec_id, block_env, tx_envs)
         } else {
             self.execute_revm_parallel(
-                storage,
                 chain,
+                storage,
                 spec_id,
                 block_env,
                 tx_envs,
@@ -148,15 +153,19 @@ impl Pevm {
     /// Execute an REVM block.
     // Ideally everyone would go through the [Alloy] interface. This one is currently
     // useful for testing, and for users that are heavily tied to Revm like Reth.
-    pub fn execute_revm_parallel<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
+    pub fn execute_revm_parallel<S, C>(
         &mut self,
-        storage: &S,
         chain: &C,
+        storage: &S,
         spec_id: SpecId,
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         concurrency_level: NonZeroUsize,
-    ) -> PevmResult<C> {
+    ) -> PevmResult<C>
+    where
+        C: PevmChain + Send + Sync,
+        S: Storage + Send + Sync,
+    {
         if txs.is_empty() {
             return Ok(Vec::new());
         }
@@ -212,7 +221,7 @@ impl Pevm {
             match abort_reason {
                 AbortReason::FallbackToSequential => {
                     self.dropper.drop((mv_memory, scheduler, Vec::new()));
-                    return execute_revm_sequential(storage, chain, spec_id, block_env, txs);
+                    return execute_revm_sequential(chain, storage, spec_id, block_env, txs);
                 }
                 AbortReason::ExecutionError(err) => {
                     self.dropper.drop((mv_memory, scheduler, txs));
@@ -421,8 +430,8 @@ fn try_validate(
 // Useful for falling back for (small) blocks with many dependencies.
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
 pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
-    storage: &S,
     chain: &C,
+    storage: &S,
     spec_id: SpecId,
     block_env: BlockEnv,
     txs: Vec<TxEnv>,

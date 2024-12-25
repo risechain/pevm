@@ -149,8 +149,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             match (
                 test.expect_exception.as_deref(),
                 Pevm::default().execute_revm_parallel(
-                    &InMemoryStorage::new(chain_state.clone(), Arc::new(bytecodes), Default::default()),
                     &PevmEthereum::mainnet(),
+                    &InMemoryStorage::new(chain_state.clone(), Arc::new(bytecodes), Default::default()),
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),
                     vec![tx_env.unwrap()],

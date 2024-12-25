@@ -43,7 +43,7 @@ async fn mainnet_blocks_from_rpc() {
         let spec_id = chain.get_block_spec(&block.header).unwrap();
         let rpc_storage =
             pevm::RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
-        common::test_execute_alloy(&rpc_storage, &chain, block, true);
+        common::test_execute_alloy(&chain, &rpc_storage, block, true);
     }
 }
 
@@ -53,7 +53,7 @@ fn mainnet_blocks_from_disk() {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(&storage, &PevmEthereum::mainnet(), block.clone(), true)
+            common::test_execute_alloy(&PevmEthereum::mainnet(), &storage, block.clone(), true)
         }
     });
 }
@@ -92,6 +92,6 @@ async fn optimism_mainnet_blocks_from_rpc() {
 
         let rpc_storage =
             pevm::RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
-        common::test_execute_alloy(&rpc_storage, &chain, block, true);
+        common::test_execute_alloy(&chain, &rpc_storage, block, true);
     }
 }
