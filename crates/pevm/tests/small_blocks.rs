@@ -15,7 +15,11 @@ fn empty_revm_block() {
 #[test]
 fn one_tx_revm_block() {
     common::test_execute_revm(
-        InMemoryStorage::new([common::mock_account(0)], None, []),
+        InMemoryStorage::new(
+            [common::mock_account(0)].into_iter().collect(),
+            Default::default(),
+            Default::default(),
+        ),
         vec![TxEnv {
             caller: Address::ZERO,
             transact_to: TransactTo::Call(Address::ZERO),

@@ -3,6 +3,7 @@
 use std::{
     fs::{self, File},
     io::BufReader,
+    sync::Arc,
 };
 
 use alloy_consensus::{Signed, TxLegacy};
@@ -11,7 +12,7 @@ use alloy_rpc_types_eth::{Block, BlockTransactions, Header};
 use flate2::bufread::GzDecoder;
 use hashbrown::HashMap;
 use pevm::{
-    chain::PevmChain, BlockHashes, BuildSuffixHasher, Bytecodes, EvmAccount, InMemoryStorage,
+    chain::PevmChain, BlockHashes, BuildSuffixHasher, ChainState, EvmAccount, InMemoryStorage,
 };
 
 /// runner module
@@ -28,23 +29,27 @@ pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
 // TODO: Put somewhere better?
 /// Iterates over blocks stored on disk and processes each block using the provided handler.
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'_>)) {
+pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
     let data_dir = std::path::PathBuf::from("../../data");
 
     // TODO: Deduplicate logic with [bin/fetch.rs] when there is more usage
-    let bytecodes: Bytecodes = bincode::deserialize_from(GzDecoder::new(BufReader::new(
+    let bytecodes = bincode::deserialize_from(GzDecoder::new(BufReader::new(
         File::open(data_dir.join("bytecodes.bincode.gz")).unwrap(),
     )))
+    .map(Arc::new)
+    .unwrap();
+
+    let block_hashes = bincode::deserialize_from::<_, BlockHashes>(BufReader::new(
+        File::open(data_dir.join("block_hashes.bincode")).unwrap(),
+    ))
+    .map(Arc::new)
     .unwrap();
 
     for block_path in fs::read_dir(data_dir.join("blocks")).unwrap() {
-        let block_path = block_path.unwrap().path();
-        let block_number = block_path.file_name().unwrap().to_str().unwrap();
-
-        let block_dir = data_dir.join("blocks").join(block_number);
+        let block_dir = block_path.unwrap().path();
 
         // Parse block
-        let block: Block = serde_json::from_reader(BufReader::new(
+        let block = serde_json::from_reader(BufReader::new(
             File::open(block_dir.join("block.json")).unwrap(),
         ))
         .unwrap();
@@ -55,14 +60,9 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage<'
         )
         .unwrap();
 
-        // Parse block hashes
-        let block_hashes: BlockHashes = File::open(block_dir.join("block_hashes.json"))
-            .map(|file| serde_json::from_reader::<_, BlockHashes>(BufReader::new(file)).unwrap())
-            .unwrap_or_default();
-
         handler(
             block,
-            InMemoryStorage::new(accounts, Some(&bytecodes), block_hashes),
+            InMemoryStorage::new(accounts, Arc::clone(&bytecodes), Arc::clone(&block_hashes)),
         );
     }
 }
@@ -72,7 +72,7 @@ pub fn test_independent_raw_transfers<C>(chain: &C, block_size: usize)
 where
     C: PevmChain + Send + Sync + PartialEq,
 {
-    let accounts: Vec<(Address, EvmAccount)> = (0..block_size).map(mock_account).collect();
+    let accounts = (0..block_size).map(mock_account).collect::<ChainState>();
     let block: Block<C::Transaction> = Block {
         header: Header {
             inner: alloy_consensus::Header {
@@ -109,6 +109,6 @@ where
         ),
         ..Block::<C::Transaction>::default()
     };
-    let storage = InMemoryStorage::new(accounts, None, []);
+    let storage = InMemoryStorage::new(accounts, Default::default(), Default::default());
     test_execute_alloy(&storage, chain, block, false);
 }

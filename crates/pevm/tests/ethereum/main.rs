@@ -30,6 +30,7 @@ use revme::cmd::statetest::{
 };
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{fs, num::NonZeroUsize};
 use walkdir::{DirEntry, WalkDir};
 
@@ -148,7 +149,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             match (
                 test.expect_exception.as_deref(),
                 Pevm::default().execute_revm_parallel(
-                    &InMemoryStorage::new(chain_state.clone(), Some(&bytecodes), []),
+                    &InMemoryStorage::new(chain_state.clone(), Arc::new(bytecodes), Default::default()),
                     &PevmEthereum::mainnet(),
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),

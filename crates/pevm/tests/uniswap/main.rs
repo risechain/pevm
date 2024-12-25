@@ -14,6 +14,7 @@ pub mod uniswap;
 use crate::uniswap::generate_cluster;
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use revm::primitives::{Address, TxEnv};
+use std::sync::Arc;
 
 #[test]
 fn uniswap_clusters() {
@@ -33,7 +34,7 @@ fn uniswap_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
-        InMemoryStorage::new(final_state, Some(&final_bytecodes), []),
+        InMemoryStorage::new(final_state, Arc::new(final_bytecodes), Default::default()),
         final_txs,
     )
 }
