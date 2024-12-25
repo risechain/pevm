@@ -10,6 +10,7 @@ pub mod common;
 fn raw_transfers_independent() {
     let block_size = 100_000; // number of transactions
     common::test_execute_revm(
+        &PevmEthereum::mainnet(),
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new(
             (0..=block_size).map(common::mock_account).collect(),
@@ -31,7 +32,6 @@ fn raw_transfers_independent() {
                 }
             })
             .collect(),
-        &PevmEthereum::mainnet(),
     );
 }
 
@@ -45,6 +45,7 @@ fn raw_transfers_same_sender_multiple_txs() {
     let mut same_sender_nonce: u64 = 0;
 
     common::test_execute_revm(
+        &PevmEthereum::mainnet(),
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new(
             (0..=block_size).map(common::mock_account).collect(),
@@ -72,7 +73,6 @@ fn raw_transfers_same_sender_multiple_txs() {
                 }
             })
             .collect(),
-        &PevmEthereum::mainnet(),
     );
 }
 

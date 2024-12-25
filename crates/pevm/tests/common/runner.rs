@@ -23,10 +23,10 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
 
 /// Execute an REVM block sequentially and parallelly with PEVM and assert that
 /// the execution results match.
-pub fn test_execute_revm<S, C>(storage: S, txs: Vec<TxEnv>, chain: &C)
+pub fn test_execute_revm<C, S>(chain: &C, storage: S, txs: Vec<TxEnv>)
 where
-    S: Storage + Send + Sync,
     C: PevmChain + PartialEq + Send + Sync,
+    S: Storage + Send + Sync,
 {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_eq!(
@@ -50,12 +50,15 @@ where
 
 /// Execute an Alloy block sequentially & with pevm and assert that
 /// the execution results match.
-pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync + PartialEq>(
-    storage: &S,
+pub fn test_execute_alloy<C, S>(
     chain: &C,
+    storage: &S,
     block: Block<C::Transaction>,
     must_match_block_header: bool,
-) {
+) where
+    C: PevmChain + PartialEq + Send + Sync,
+    S: Storage + Send + Sync,
+{
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let mut pevm = Pevm::default();
     let sequential_result = pevm.execute(storage, chain, &block, concurrency_level, true);

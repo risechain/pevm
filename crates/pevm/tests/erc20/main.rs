@@ -24,7 +24,6 @@ fn erc20_independent() {
         &PevmEthereum::mainnet(),
         InMemoryStorage::new(state, Arc::new(bytecodes), Default::default()),
         txs,
->>>>>>> 7634a2f (Allow specifying chain in for `text_execute_revm`)
     );
 }
 
@@ -50,8 +49,8 @@ fn erc20_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
+        &PevmEthereum::mainnet(),
         InMemoryStorage::new(final_state, Arc::new(final_bytecodes), Default::default()),
         final_txs,
-        &PevmEthereum::mainnet(),
     )
 }

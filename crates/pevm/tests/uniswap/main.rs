@@ -35,8 +35,8 @@ fn uniswap_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
+        &PevmEthereum::mainnet(),
         InMemoryStorage::new(final_state, Arc::new(final_bytecodes), Default::default()),
         final_txs,
-        &PevmEthereum::mainnet(),
     )
 }

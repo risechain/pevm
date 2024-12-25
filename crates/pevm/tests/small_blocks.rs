@@ -11,15 +11,16 @@ pub mod common;
 #[test]
 fn empty_revm_block() {
     common::test_execute_revm(
+        &PevmEthereum::mainnet(),
         InMemoryStorage::default(),
         Vec::new(),
-        &PevmEthereum::mainnet(),
     );
 }
 
 #[test]
 fn one_tx_revm_block() {
     common::test_execute_revm(
+        &PevmEthereum::mainnet(),
         InMemoryStorage::new(
             [common::mock_account(0)].into_iter().collect(),
             Default::default(),
@@ -32,6 +33,5 @@ fn one_tx_revm_block() {
             gas_price: U256::from(1),
             ..TxEnv::default()
         }],
-        &PevmEthereum::mainnet(),
     );
 }
