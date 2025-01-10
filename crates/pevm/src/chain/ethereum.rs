@@ -31,13 +31,6 @@ impl PevmEthereum {
     // TODO: support Ethereum Sepolia and other testnets
 }
 
-/// Error type for [`PevmEthereum::get_block_spec`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EthereumBlockSpecError {
-    /// When [`header.total_difficulty`] is none.
-    MissingTotalDifficulty,
-}
-
 /// Represents errors that can occur when parsing transactions
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EthereumTransactionParsingError {
@@ -58,7 +51,7 @@ fn get_ethereum_gas_price(tx: &TxEnvelope) -> Result<U256, EthereumTransactionPa
 impl PevmChain for PevmEthereum {
     type Transaction = alloy_rpc_types_eth::Transaction;
     type Envelope = TxEnvelope;
-    type BlockSpecError = EthereumBlockSpecError;
+    type BlockSpecError = ();
     type TransactionParsingError = EthereumTransactionParsingError;
 
     fn id(&self) -> u64 {
@@ -80,12 +73,9 @@ impl PevmChain for PevmEthereum {
             SpecId::CANCUN
         } else if header.timestamp >= 1681338455 {
             SpecId::SHANGHAI
-        } else if (header
-            .total_difficulty
-            .ok_or(EthereumBlockSpecError::MissingTotalDifficulty)?)
-        .saturating_sub(header.difficulty)
-            >= U256::from(58_750_000_000_000_000_000_000_u128)
-        {
+        }
+        // Checking for total difficulty is more precise but many RPC providers stopped returning it...
+        else if header.number >= 15537394 {
             SpecId::MERGE
         } else if header.number >= 12965000 {
             SpecId::LONDON

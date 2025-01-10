@@ -51,7 +51,7 @@ impl PevmTxExecutionResult {
         Self {
             receipt: Receipt {
                 status: result.is_success().into(),
-                cumulative_gas_used: result.gas_used() as u128,
+                cumulative_gas_used: result.gas_used(),
                 logs: result.into_logs(),
             },
             state: state
@@ -655,7 +655,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     tx,
                     U256::from(result_and_state.result.gas_used()),
                     #[cfg(feature = "optimism")]
-                    &evm.context.evm,
+                    &mut evm.context.evm,
                 )?;
 
                 drop(evm); // release db
@@ -715,7 +715,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         write_set: &mut WriteSet,
         tx: &TxEnv,
         gas_used: U256,
-        #[cfg(feature = "optimism")] evm_context: &EvmContext<DB>,
+        #[cfg(feature = "optimism")] evm_context: &mut EvmContext<DB>,
     ) -> Result<(), VmExecutionError> {
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
             std::cmp::min(
@@ -750,7 +750,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     let Some(enveloped_tx) = &tx.optimism.enveloped_tx else {
                         panic!("[OPTIMISM] Failed to load enveloped transaction.");
                     };
-                    let Some(l1_block_info) = &evm_context.l1_block_info else {
+                    let Some(l1_block_info) = &mut evm_context.l1_block_info else {
                         panic!("[OPTIMISM] Missing l1_block_info.");
                     };
                     let l1_cost = l1_block_info.calculate_tx_l1_cost(enveloped_tx, self.spec_id);

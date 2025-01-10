@@ -18,12 +18,10 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use revm::db::PlainAccount;
 use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, AuthorizationList, BlobExcessGasAndPrice, BlockEnv,
-    Bytecode, TransactTo, TxEnv, KECCAK_EMPTY, U256,
+    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, SpecId,
+    TransactTo, TxEnv, KECCAK_EMPTY, U256,
 };
-use revme::cmd::statetest::models::{
-    Env, SpecName, TestSuite, TestUnit, TransactionParts, TxPartIndices,
-};
+use revme::cmd::statetest::models::{Env, SpecName, Test, TestSuite, TestUnit, TransactionParts};
 use revme::cmd::statetest::{
     merkle_trie::{log_rlp_hash, state_merkle_trie_root},
     utils::recover_address,
@@ -37,7 +35,7 @@ use walkdir::{DirEntry, WalkDir};
 #[path = "../common/mod.rs"]
 pub mod common;
 
-fn build_block_env(env: &Env) -> BlockEnv {
+fn build_block_env(env: &Env, spec_id: SpecId) -> BlockEnv {
     BlockEnv {
         number: env.current_number,
         coinbase: env.current_coinbase,
@@ -49,25 +47,31 @@ fn build_block_env(env: &Env) -> BlockEnv {
         blob_excess_gas_and_price: if let Some(current_excess_blob_gas) =
             env.current_excess_blob_gas
         {
-            Some(BlobExcessGasAndPrice::new(current_excess_blob_gas.to()))
+            Some(BlobExcessGasAndPrice::new(
+                current_excess_blob_gas.to(),
+                spec_id.is_enabled_in(SpecId::PRAGUE),
+            ))
         } else if let (Some(parent_blob_gas_used), Some(parent_excess_blob_gas)) =
             (env.parent_blob_gas_used, env.parent_excess_blob_gas)
         {
-            Some(BlobExcessGasAndPrice::new(calc_excess_blob_gas(
-                parent_blob_gas_used.to(),
-                parent_excess_blob_gas.to(),
-            )))
+            Some(BlobExcessGasAndPrice::new(
+                calc_excess_blob_gas(
+                    parent_blob_gas_used.to(),
+                    parent_excess_blob_gas.to(),
+                    env.parent_target_blobs_per_block
+                        .map(|i| i.to())
+                        // https://github.com/bluealloy/revm/blob/a2451cdb30bd9d9aaca95f13bd50e2eafb619d8f/crates/specification/src/eip4844.rs#L23
+                        .unwrap_or(3 * (1 << 17)),
+                ),
+                spec_id.is_enabled_in(SpecId::PRAGUE),
+            ))
         } else {
             None
         },
     }
 }
 
-fn build_tx_env(
-    path: &Path,
-    tx: &TransactionParts,
-    indexes: &TxPartIndices,
-) -> Result<TxEnv, ParseError> {
+fn build_tx_env(path: &Path, tx: &TransactionParts, test: &Test) -> Result<TxEnv, ParseError> {
     Ok(TxEnv {
         caller: if let Some(address) = tx.sender {
             address
@@ -76,33 +80,26 @@ fn build_tx_env(
         } else {
             panic!("Failed to parse caller for {path:?}");
         },
-        gas_limit: tx.gas_limit[indexes.gas].saturating_to(),
+        gas_limit: tx.gas_limit[test.indexes.gas].saturating_to(),
         gas_price: tx.gas_price.or(tx.max_fee_per_gas).unwrap_or_default(),
         transact_to: match tx.to {
             Some(address) => TransactTo::Call(address),
             None => TransactTo::Create,
         },
-        value: U256::from_str(&tx.value[indexes.value])?,
-        data: tx.data[indexes.data].clone(),
+        value: U256::from_str(&tx.value[test.indexes.value])?,
+        data: tx.data[test.indexes.data].clone(),
         nonce: Some(tx.nonce.saturating_to()),
         chain_id: Some(1), // Ethereum mainnet
         access_list: tx
             .access_lists
-            .get(indexes.data)
+            .get(test.indexes.data)
             .and_then(Option::as_deref)
             .cloned()
             .unwrap_or_default(),
         gas_priority_fee: tx.max_priority_fee_per_gas,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-        authorization_list: tx.authorization_list.as_ref().map(|auth_list| {
-            AuthorizationList::Recovered(
-                auth_list
-                    .iter()
-                    .map(|auth| auth.clone().into_recovered())
-                    .collect(),
-            )
-        }),
+        authorization_list: test.eip7702_authorization_list().unwrap(),
         #[cfg(feature = "optimism")]
         optimism: revm::primitives::OptimismFields::default(),
     })
@@ -118,7 +115,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
         }
 
         tests.into_par_iter().for_each(|test| {
-            let tx_env = build_tx_env(path, &unit.transaction, &test.indexes);
+            let tx_env = build_tx_env(path, &unit.transaction, &test);
             if test.expect_exception.as_deref() == Some("TR_RLP_WRONGVALUE") && tx_env.is_err() {
                 return;
             }
@@ -146,13 +143,15 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                 );
             }
 
+            let spec_id = spec_name.to_spec_id();
+
             match (
                 test.expect_exception.as_deref(),
                 Pevm::default().execute_revm_parallel(
                     &PevmEthereum::mainnet(),
                     &InMemoryStorage::new(chain_state.clone(), Arc::new(bytecodes), Default::default()),
-                    spec_name.to_spec_id(),
-                    build_block_env(&unit.env),
+                    spec_id,
+                    build_block_env(&unit.env, spec_id),
                     vec![tx_env.unwrap()],
                     NonZeroUsize::MIN,
                 ),
