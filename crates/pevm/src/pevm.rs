@@ -123,7 +123,7 @@ impl Pevm {
         let spec_id = chain
             .get_block_spec(&block.header)
             .map_err(PevmError::BlockSpecError)?;
-        let block_env = get_block_env(&block.header);
+        let block_env = get_block_env(&block.header, spec_id);
         let tx_envs = match &block.transactions {
             BlockTransactions::Full(txs) => txs
                 .iter()
@@ -231,7 +231,7 @@ impl Pevm {
         }
 
         let mut fully_evaluated_results = Vec::with_capacity(block_size);
-        let mut cumulative_gas_used: u128 = 0;
+        let mut cumulative_gas_used: u64 = 0;
         for i in 0..block_size {
             let mut execution_result = index_mutex!(self.execution_results, i).take().unwrap();
             cumulative_gas_used =
@@ -439,7 +439,7 @@ pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
     let mut db = CacheDB::new(StorageWrapper(storage));
     let mut evm = build_evm(&mut db, chain, spec_id, block_env, None, true);
     let mut results = Vec::with_capacity(txs.len());
-    let mut cumulative_gas_used: u128 = 0;
+    let mut cumulative_gas_used: u64 = 0;
     for tx in txs {
         *evm.tx_mut() = tx;
         match evm.transact() {

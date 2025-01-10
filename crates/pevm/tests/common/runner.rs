@@ -85,7 +85,7 @@ pub fn test_execute_alloy<C, S>(
         );
 
         assert_eq!(
-            block.header.gas_used as u128,
+            block.header.gas_used,
             tx_results
                 .iter()
                 .last()
