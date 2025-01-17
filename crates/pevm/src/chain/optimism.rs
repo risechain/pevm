@@ -111,7 +111,7 @@ impl PevmChain for PevmOptimism {
         } else if header.number >= 105235063 {
             // On Optimism Mainnet, Bedrock and Regolith are activated at the same time.
             // Therefore, this function never returns SpecId::BEDROCK.
-            // The statement above might not be true for other network, e.g. Optimism Goerli.
+            // The statement above might not be true for other networks, e.g. Optimism Goerli.
             Ok(SpecId::REGOLITH)
         } else {
             // TODO: revm does not support pre-Bedrock blocks.
