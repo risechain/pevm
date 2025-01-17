@@ -22,7 +22,7 @@ pub enum RewardPolicy {
     /// Optimism
     #[cfg(feature = "optimism")]
     Optimism {
-        /// L1 Fee Receipient
+        /// L1 Fee Recipient
         l1_fee_recipient_location_hash: crate::MemoryLocationHash,
         /// Base Fee Vault
         base_fee_vault_location_hash: crate::MemoryLocationHash,
