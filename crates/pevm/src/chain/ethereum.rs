@@ -32,9 +32,10 @@ impl PevmEthereum {
 }
 
 /// Represents errors that can occur when parsing transactions
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EthereumTransactionParsingError {
     /// [`tx.gas_price`] is none.
+    #[error("Missing gas price")]
     MissingGasPrice,
 }
 
@@ -51,7 +52,7 @@ fn get_ethereum_gas_price(tx: &TxEnvelope) -> Result<U256, EthereumTransactionPa
 impl PevmChain for PevmEthereum {
     type Transaction = alloy_rpc_types_eth::Transaction;
     type Envelope = TxEnvelope;
-    type BlockSpecError = ();
+    type BlockSpecError = std::convert::Infallible;
     type TransactionParsingError = EthereumTransactionParsingError;
 
     fn id(&self) -> u64 {
