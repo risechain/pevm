@@ -41,7 +41,7 @@ pub struct PevmTxExecutionResult {
 
 impl PevmTxExecutionResult {
     /// Construct a Pevm execution result from a raw Revm result.
-    /// Note that [`cumulative_gas_used`] is preset to the gas used of this transaction.
+    /// Note that [`cumulative_gas_used`] is preset to the gas used in this transaction.
     /// It should be post-processed with the remaining transactions in the block.
     pub fn from_revm<C: PevmChain>(
         chain: &C,
