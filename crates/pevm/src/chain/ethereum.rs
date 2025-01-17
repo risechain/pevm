@@ -63,7 +63,7 @@ impl PevmChain for PevmEthereum {
     }
 
     /// Get the REVM spec id of an Alloy block.
-    // Currently hardcoding Ethereum hardforks from these reference:
+    // Currently hardcoding Ethereum hardforks from these references:
     // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/revm/config.rs#L33-L78
     // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/chain/spec.rs#L44-L68
     // TODO: Better error handling & properly test this.
