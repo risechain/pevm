@@ -13,7 +13,7 @@ use revm::{
 };
 
 use crate::{
-    hash_determinisitic, mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation,
+    hash_deterministic, mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation,
     PevmTxExecutionResult,
 };
 
@@ -122,9 +122,9 @@ impl PevmChain for PevmOptimism {
 
     fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
         let beneficiary_location_hash =
-            hash_determinisitic(MemoryLocation::Basic(block_env.coinbase));
-        let l1_fee_recipient_location_hash = hash_determinisitic(revm::L1_FEE_RECIPIENT);
-        let base_fee_recipient_location_hash = hash_determinisitic(revm::BASE_FEE_RECIPIENT);
+            hash_deterministic(MemoryLocation::Basic(block_env.coinbase));
+        let l1_fee_recipient_location_hash = hash_deterministic(revm::L1_FEE_RECIPIENT);
+        let base_fee_recipient_location_hash = hash_deterministic(revm::BASE_FEE_RECIPIENT);
 
         // TODO: Estimate more locations based on sender, to, etc.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
@@ -169,10 +169,10 @@ impl PevmChain for PevmOptimism {
 
     fn get_reward_policy(&self) -> RewardPolicy {
         RewardPolicy::Optimism {
-            l1_fee_recipient_location_hash: hash_determinisitic(MemoryLocation::Basic(
+            l1_fee_recipient_location_hash: hash_deterministic(MemoryLocation::Basic(
                 revm::optimism::L1_FEE_RECIPIENT,
             )),
-            base_fee_vault_location_hash: hash_determinisitic(MemoryLocation::Basic(
+            base_fee_vault_location_hash: hash_deterministic(MemoryLocation::Basic(
                 revm::optimism::BASE_FEE_RECIPIENT,
             )),
         }
