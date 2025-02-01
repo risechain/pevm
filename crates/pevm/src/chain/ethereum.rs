@@ -12,7 +12,7 @@ use revm::{
 
 use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};
 use crate::{
-    hash_determinisitic, mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation,
+    hash_deterministic, mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation,
     PevmTxExecutionResult, TxIdx,
 };
 
@@ -127,7 +127,7 @@ impl PevmChain for PevmEthereum {
     fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
         let block_size = txs.len();
         let beneficiary_location_hash =
-            hash_determinisitic(MemoryLocation::Basic(block_env.coinbase));
+            hash_deterministic(MemoryLocation::Basic(block_env.coinbase));
 
         // TODO: Estimate more locations based on sender, to, etc.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());

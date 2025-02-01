@@ -17,7 +17,7 @@ use revm::{
 use crate::{
     chain::PevmChain,
     compat::get_block_env,
-    hash_determinisitic,
+    hash_deterministic,
     mv_memory::MvMemory,
     scheduler::Scheduler,
     storage::StorageWrapper,
@@ -243,7 +243,7 @@ impl Pevm {
         // We fully evaluate (the balance and nonce of) the beneficiary account
         // and raw transfer recipients that may have been atomically updated.
         for address in mv_memory.consume_lazy_addresses() {
-            let location_hash = hash_determinisitic(MemoryLocation::Basic(address));
+            let location_hash = hash_deterministic(MemoryLocation::Basic(address));
             if let Some(write_history) = mv_memory.data.get(&location_hash) {
                 let mut balance = U256::ZERO;
                 let mut nonce = 0;

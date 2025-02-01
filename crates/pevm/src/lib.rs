@@ -68,7 +68,7 @@ pub type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 // TODO: Ensure it's not easy to hand-craft transactions and storage slots
 // that can cause a lot of collisions that destroys pevm's performance.
 #[inline(always)]
-fn hash_determinisitic<T: Hash>(x: T) -> u64 {
+fn hash_deterministic<T: Hash>(x: T) -> u64 {
     FxBuildHasher.hash_one(x)
 }
 
