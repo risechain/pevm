@@ -422,15 +422,24 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        match self
-            .vm
-            .storage
-            .code_by_hash(&code_hash)
-            .map_err(|err| ReadError::StorageError(err.to_string()))?
-        {
-            Some(evm_code) => Bytecode::try_from(evm_code).map_err(ReadError::InvalidBytecode),
-            None => Ok(Bytecode::default()),
-        }
+        self.vm
+            .mv_memory
+            .new_bytecodes
+            .get(&code_hash)
+            .map(|code| Ok(code.clone()))
+            .unwrap_or(
+                match self
+                    .vm
+                    .storage
+                    .code_by_hash(&code_hash)
+                    .map_err(|err| ReadError::StorageError(err.to_string()))?
+                {
+                    Some(evm_code) => {
+                        Bytecode::try_from(evm_code).map_err(ReadError::InvalidBytecode)
+                    }
+                    None => Ok(Bytecode::default()),
+                },
+            )
     }
 
     fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
