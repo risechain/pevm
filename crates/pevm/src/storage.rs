@@ -105,9 +105,10 @@ pub enum EvmCode {
     Eof(Bytes),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BytecodeConversionError {
-    EofDecodingError,
+    #[error("Failed to decode EOF")]
+    EofDecodingError(#[source] revm::primitives::eof::EofDecodeError),
 }
 
 impl TryFrom<EvmCode> for Bytecode {
@@ -132,10 +133,10 @@ impl TryFrom<EvmCode> for Bytecode {
                     raw: raw.into(),
                 }))
             }
-            // TODO: Forward the specific errors from revm
             EvmCode::Eof(code) => Eof::decode(code)
-                .map(|eof| Self::Eof(Arc::new(eof)))
-                .map_err(|_| BytecodeConversionError::EofDecodingError),
+                .map(Arc::new)
+                .map(Self::Eof)
+                .map_err(Self::Error::EofDecodingError),
         }
     }
 }
@@ -287,6 +288,7 @@ pub use rpc::RpcStorage;
 mod tests {
     use alloy_primitives::{bytes, Bytes};
     use revm::primitives::eip7702::EIP7702_VERSION;
+    use revm::primitives::eof::EofDecodeError;
 
     use super::*;
 
@@ -370,14 +372,18 @@ mod tests {
     fn eof_bytecodes_error() {
         assert_eq!(
             Bytecode::try_from(EvmCode::Eof(Bytes::new())),
-            Err(BytecodeConversionError::EofDecodingError)
+            Err(BytecodeConversionError::EofDecodingError(
+                EofDecodeError::MissingInput
+            ))
         );
 
         let mut eof_dangling = EOF_BYTECODE.to_vec();
         eof_dangling.extend(bytes!("010203"));
         assert_eq!(
             Bytecode::try_from(EvmCode::Eof(eof_dangling.into())),
-            Err(BytecodeConversionError::EofDecodingError)
+            Err(BytecodeConversionError::EofDecodingError(
+                EofDecodeError::DanglingData
+            ))
         );
     }
 }
