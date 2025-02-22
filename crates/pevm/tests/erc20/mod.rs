@@ -55,7 +55,7 @@ pub fn generate_cluster(
     for nonce in 0..num_transfers_per_person {
         for family in &families {
             for person in family {
-                let recipient = family[(rand::random::<usize>()) % (family.len())];
+                let recipient = family[(rand::random::<u64>() as usize) % (family.len())];
                 let calldata = ERC20Token::transfer(recipient, U256::from(rand::random::<u8>()));
 
                 txs.push(TxEnv {
