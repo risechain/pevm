@@ -3493,8 +3493,8 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "19.2.0"
-source = "git+https://github.com/risechain/revm?rev=ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c#ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c"
+version = "19.4.0"
+source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -3511,8 +3511,8 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "15.0.0"
-source = "git+https://github.com/risechain/revm?rev=ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c#ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c"
+version = "15.1.0"
+source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -3521,7 +3521,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "16.0.0"
-source = "git+https://github.com/risechain/revm?rev=ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c#ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c"
+source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -3540,7 +3540,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "15.1.0"
-source = "git+https://github.com/risechain/revm?rev=ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c#ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c"
+source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -3558,8 +3558,8 @@ dependencies = [
 
 [[package]]
 name = "revme"
-version = "2.2.0"
-source = "git+https://github.com/risechain/revm?rev=ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c#ac75f1ef59ecae15238f5a2e94e71c3bcc01d45c"
+version = "2.4.0"
+source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
 dependencies = [
  "alloy-rlp",
  "hash-db",
