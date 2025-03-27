@@ -76,7 +76,8 @@ async fn optimism_mainnet_blocks_from_rpc() {
                   // TODO: doesn't pass `Err(ExecutionError("Database(InvalidNonce(0))"))`
                   // 117874236, // ECOTONE (https://specs.optimism.io/protocol/ecotone/overview.html)
                   // 122874325, // FJORD (https://specs.optimism.io/protocol/fjord/overview.html)
-                  // 125874340, // GRANITE (https://specs.optimism.io/protocol/granite/overview.html)
+                  125874340, // GRANITE (https://specs.optimism.io/protocol/granite/overview.html)
+                  // TODO: Add test for HOLOCENE (to be activated on Jan 9 2025 - timestamp 1736445601)
     ] {
         let provider = ProviderBuilder::new()
             .network::<op_alloy_network::Optimism>()
