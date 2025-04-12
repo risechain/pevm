@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
     // Define provider.
     let provider = ProviderBuilder::new().on_http(rpc_url);
 
-    // Retrive block from provider.
+    // Retrieve block from provider.
     let block = provider
         .get_block(block_id, BlockTransactionsKind::Full)
         .await
