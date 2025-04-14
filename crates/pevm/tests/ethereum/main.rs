@@ -191,7 +191,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                         _ => panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}")
                     });
                 }
-                // Tests that exepect execution to succeed -> match post state root
+                // Tests that expect execution to succeed -> match post state root
                 (None, Ok(exec_results)) => {
                     assert!(exec_results.len() == 1);
                     let PevmTxExecutionResult {receipt, state} = exec_results[0].clone();
