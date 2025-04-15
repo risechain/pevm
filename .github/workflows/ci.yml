@@ -32,6 +32,7 @@ jobs:
       - name: Test
         env:
           ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_RPC_URL }}
+          OPTIMISM_RPC_URL: ${{ secrets.OPTIMISM_RPC_URL }}
         # Running our heavy tests in parallel would congest resources.
         # Each test still executes parallelly anyway.
         run: |
