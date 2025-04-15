@@ -14,7 +14,7 @@ async fn mainnet_blocks_from_rpc() {
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
-        _ => reqwest::Url::parse("https://eth.public-rpc.com").unwrap(),
+        _ => reqwest::Url::parse("https://eth-mainnet.public.blastapi.io").unwrap(),
     };
 
     // First block under 50 transactions of each EVM-spec-changing fork
@@ -67,7 +67,7 @@ async fn optimism_mainnet_blocks_from_rpc() {
 
     let rpc_url = match std::env::var("OPTIMISM_RPC_URL") {
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
-        _ => reqwest::Url::parse("https://rpc.ankr.com/optimism").unwrap(),
+        _ => reqwest::Url::parse("https://mainnet.optimism.io").unwrap(),
     };
 
     // First block under 50 transactions of each EVM-spec-changing fork
