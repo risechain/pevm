@@ -592,7 +592,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
                         let has_code = !account.info.is_empty_code_hash();
                         let is_new_code = has_code
-                            && read_account.map_or(true, |(_, code_hash)| code_hash.is_none());
+                            && read_account.is_none_or(|(_, code_hash)| code_hash.is_none());
 
                         // Write new account changes
                         if is_new_code
