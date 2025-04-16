@@ -14,7 +14,7 @@ async fn snapshotted_mainnet_block_hashes() {
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
         Ok(value) if !value.is_empty() => value.parse().unwrap(),
-        _ => reqwest::Url::parse("https://eth.public-rpc.com").unwrap(),
+        _ => reqwest::Url::parse("https://eth-mainnet.public.blastapi.io").unwrap(),
     };
 
     let provider = ProviderBuilder::new().on_http(rpc_url);
