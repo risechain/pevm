@@ -103,7 +103,11 @@ impl PevmChain for PevmOptimism {
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError> {
         // TODO: The implementation below is only true for Optimism Mainnet.
         // When supporting other networks (e.g. Optimism Sepolia), remember to adjust the code here.
-        if header.timestamp >= 1720627201 {
+        if header.timestamp >= 1736445601 {
+            Ok(SpecId::HOLOCENE)
+        } else if header.timestamp >= 1726070401 {
+            Ok(SpecId::GRANITE)
+        } else if header.timestamp >= 1720627201 {
             Ok(SpecId::FJORD)
         } else if header.timestamp >= 1710374401 {
             Ok(SpecId::ECOTONE)
