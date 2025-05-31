@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
 
     // Execute the block and track the pre-state in the RPC storage.
     Pevm::default()
-        .execute(&chain, &storage, &block, NonZeroUsize::MIN, true)
+        .execute(&chain, &storage, &block, NonZeroUsize::new(1).unwrap()
         .context("Failed to execute block")?;
 
     let block_dir = format!("data/blocks/{}", block.header.number);
