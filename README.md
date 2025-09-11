@@ -1,6 +1,6 @@
 # RISE Parallel EVM
 
-![CI](https://github.com/risechain/pevm/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/risechain/pevm/actions/workflows/ci.yml/badge.svg)](https://github.com/risechain/pevm/actions/workflows/ci.yml)
 
 :warning: This repository is a **work in progress** and is **not production ready** :construction:
 
