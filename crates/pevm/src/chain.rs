@@ -7,11 +7,11 @@ use alloy_consensus::{Signed, TxLegacy};
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_eth::{BlockTransactions, Header, Transaction};
 use revm::{
-    primitives::{BlockEnv, SpecId, TxEnv},
     Handler,
+    primitives::{BlockEnv, SpecId, TxEnv},
 };
 
-use crate::{mv_memory::MvMemory, PevmTxExecutionResult};
+use crate::{PevmTxExecutionResult, mv_memory::MvMemory};
 
 /// Different chains may have varying reward policies.
 /// This enum specifies which policy to follow, with optional

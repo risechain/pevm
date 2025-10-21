@@ -3,8 +3,8 @@
 // TODO: More fancy benchmarks & plots.
 use std::{num::NonZeroUsize, thread};
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::{chain::PevmEthereum, Pevm};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use pevm::{Pevm, chain::PevmEthereum};
 
 // Better project structure
 

@@ -1,6 +1,6 @@
 //! Optimism
 use alloy_consensus::Transaction;
-use alloy_primitives::{Address, Bytes, ChainId, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, ChainId, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
 use op_alloy_consensus::{
@@ -8,13 +8,13 @@ use op_alloy_consensus::{
 };
 use op_alloy_network::eip2718::Encodable2718;
 use revm::{
-    primitives::{AuthorizationList, BlockEnv, OptimismFields, SpecId, TxEnv},
     Handler,
+    primitives::{AuthorizationList, BlockEnv, OptimismFields, SpecId, TxEnv},
 };
 
 use crate::{
-    hash_deterministic, mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation,
-    PevmTxExecutionResult,
+    BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, hash_deterministic,
+    mv_memory::MvMemory,
 };
 
 use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};

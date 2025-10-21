@@ -1,15 +1,15 @@
 use std::{fmt::Display, sync::Arc};
 
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use bitvec::vec::BitVec;
 use hashbrown::HashMap;
 use revm::{
+    DatabaseRef,
     interpreter::analysis::to_analysed,
     primitives::{
-        Account, AccountInfo, Bytecode, Eip7702Bytecode, Eof, JumpTable, EIP7702_MAGIC_BYTES,
+        Account, AccountInfo, Bytecode, EIP7702_MAGIC_BYTES, Eip7702Bytecode, Eof, JumpTable,
         KECCAK_EMPTY,
     },
-    DatabaseRef,
 };
 use rustc_hash::FxBuildHasher;
 use serde::{Deserialize, Serialize};
@@ -286,7 +286,7 @@ pub use rpc::RpcStorage;
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{bytes, Bytes};
+    use alloy_primitives::{Bytes, bytes};
     use revm::primitives::eip7702::EIP7702_VERSION;
     use revm::primitives::eof::EofDecodeError;
 
@@ -294,7 +294,9 @@ mod tests {
 
     // Bytecode from Forge's default Counter.sol contract, compiled with solc 0.8.13.
     // https://github.com/foundry-rs/foundry/blob/nightly-fe2acca4e379793539db80e032d76ffe0110298b/testdata/multi-version/Counter.sol
-    const BYTECODE: Bytes = bytes!("608060405234801561001057600080fd5b5060f78061001f6000396000f3fe6080604052348015600f57600080fd5b5060043610603c5760003560e01c80633fb5c1cb1460415780638381f58a146053578063d09de08a14606d575b600080fd5b6051604c3660046083565b600055565b005b605b60005481565b60405190815260200160405180910390f35b6051600080549080607c83609b565b9190505550565b600060208284031215609457600080fd5b5035919050565b60006001820160ba57634e487b7160e01b600052601160045260246000fd5b506001019056fea264697066735822122012c25f3d90606133b37330bf079a425dbc650fd21060dee49f715d37d97cb58f64736f6c634300080d0033");
+    const BYTECODE: Bytes = bytes!(
+        "608060405234801561001057600080fd5b5060f78061001f6000396000f3fe6080604052348015600f57600080fd5b5060043610603c5760003560e01c80633fb5c1cb1460415780638381f58a146053578063d09de08a14606d575b600080fd5b6051604c3660046083565b600055565b005b605b60005481565b60405190815260200160405180910390f35b6051600080549080607c83609b565b9190505550565b600060208284031215609457600080fd5b5035919050565b60006001820160ba57634e487b7160e01b600052601160045260246000fd5b506001019056fea264697066735822122012c25f3d90606133b37330bf079a425dbc650fd21060dee49f715d37d97cb58f64736f6c634300080d0033"
+    );
 
     // Bytecode from revm test code.
     // https://github.com/bluealloy/revm/blob/925c042ad748695bc45e516dfd2457e7b44cd3a8/crates/bytecode/src/eof.rs#L210

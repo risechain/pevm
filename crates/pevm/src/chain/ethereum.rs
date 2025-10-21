@@ -6,14 +6,14 @@ use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
 use revm::{
-    primitives::{AuthorizationList, BlockEnv, SpecId, TxEnv},
     Handler,
+    primitives::{AuthorizationList, BlockEnv, SpecId, TxEnv},
 };
 
 use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};
 use crate::{
-    hash_deterministic, mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation,
-    PevmTxExecutionResult, TxIdx,
+    BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx, hash_deterministic,
+    mv_memory::MvMemory,
 };
 
 /// Implementation of [`PevmChain`] for Ethereum

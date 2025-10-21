@@ -2,22 +2,22 @@ use alloy_primitives::TxKind;
 use alloy_rpc_types_eth::Receipt;
 use hashbrown::HashMap;
 use revm::{
-    primitives::{
-        AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
-        ResultAndState, SpecId, TxEnv, B256, KECCAK_EMPTY, U256,
-    },
     Context, Database, Evm, EvmContext,
+    primitives::{
+        AccountInfo, Address, B256, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
+        KECCAK_EMPTY, ResultAndState, SpecId, TxEnv, U256,
+    },
 };
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 use crate::{
+    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
+    MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
+    TxIdx, TxVersion, WriteSet,
     chain::{PevmChain, RewardPolicy},
     hash_deterministic,
     mv_memory::MvMemory,
     storage::BytecodeConversionError,
-    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
-    MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
-    TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -184,10 +184,10 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         if address == &self.tx.caller {
             return self.from_hash;
         }
-        if let TxKind::Call(to) = &self.tx.transact_to {
-            if to == address {
-                return self.to_hash.unwrap();
-            }
+        if let TxKind::Call(to) = &self.tx.transact_to
+            && to == address
+        {
+            return self.to_hash.unwrap();
         }
         hash_deterministic(MemoryLocation::Basic(*address))
     }
@@ -212,26 +212,25 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // Try to read the latest code hash in [MvMemory]
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
-        if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
-            if let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
+        if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash)
+            && let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
                 written_transactions.range(..self.tx_idx).next_back()
-            {
-                match value {
-                    MemoryValue::SelfDestructed => {
-                        return Err(ReadError::SelfDestructedAccount);
-                    }
-                    MemoryValue::CodeHash(code_hash) => {
-                        Self::push_origin(
-                            read_origins,
-                            ReadOrigin::MvMemory(TxVersion {
-                                tx_idx: *tx_idx,
-                                tx_incarnation: *tx_incarnation,
-                            }),
-                        )?;
-                        return Ok(Some(*code_hash));
-                    }
-                    _ => {}
+        {
+            match value {
+                MemoryValue::SelfDestructed => {
+                    return Err(ReadError::SelfDestructedAccount);
                 }
+                MemoryValue::CodeHash(code_hash) => {
+                    Self::push_origin(
+                        read_origins,
+                        ReadOrigin::MvMemory(TxVersion {
+                            tx_idx: *tx_idx,
+                            tx_incarnation: *tx_incarnation,
+                        }),
+                    )?;
+                    return Ok(Some(*code_hash));
+                }
+                _ => {}
             }
         };
 
@@ -279,68 +278,66 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
         let mut nonce_addition = 0;
 
         // Try reading from multi-version data
-        if self.tx_idx > 0 {
-            if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
-                let mut iter = written_transactions.range(..self.tx_idx);
+        if self.tx_idx > 0
+            && let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash)
+        {
+            let mut iter = written_transactions.range(..self.tx_idx);
 
-                // Fully evaluate lazy updates
-                loop {
-                    match iter.next_back() {
-                        Some((blocking_idx, MemoryEntry::Estimate)) => {
-                            return Err(ReadError::Blocking(*blocking_idx))
+            // Fully evaluate lazy updates
+            loop {
+                match iter.next_back() {
+                    Some((blocking_idx, MemoryEntry::Estimate)) => {
+                        return Err(ReadError::Blocking(*blocking_idx));
+                    }
+                    Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                        // About to push a new origin
+                        // Inconsistent: new origin will be longer than the previous!
+                        if has_prev_origins && read_origins.len() == new_origins.len() {
+                            return Err(ReadError::InconsistentRead);
                         }
-                        Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
-                            // About to push a new origin
-                            // Inconsistent: new origin will be longer than the previous!
-                            if has_prev_origins && read_origins.len() == new_origins.len() {
-                                return Err(ReadError::InconsistentRead);
-                            }
-                            let origin = ReadOrigin::MvMemory(TxVersion {
-                                tx_idx: *closest_idx,
-                                tx_incarnation: *tx_incarnation,
-                            });
-                            // Inconsistent: new origin is different from the previous!
-                            if has_prev_origins
-                                && unsafe { read_origins.get_unchecked(new_origins.len()) }
-                                    != &origin
-                            {
-                                return Err(ReadError::InconsistentRead);
-                            }
-                            new_origins.push(origin);
-                            match value {
-                                MemoryValue::Basic(basic) => {
-                                    // TODO: Return [SelfDestructedAccount] if [basic] is
-                                    // [SelfDestructed]?
-                                    // For now we are betting on [code_hash] triggering the
-                                    // sequential fallback when we read a self-destructed contract.
-                                    final_account = Some(basic.clone());
-                                    break;
-                                }
-                                MemoryValue::LazyRecipient(addition) => {
-                                    if positive_addition {
-                                        balance_addition =
-                                            balance_addition.saturating_add(*addition);
-                                    } else {
-                                        positive_addition = *addition >= balance_addition;
-                                        balance_addition = balance_addition.abs_diff(*addition);
-                                    }
-                                }
-                                MemoryValue::LazySender(subtraction) => {
-                                    if positive_addition {
-                                        positive_addition = balance_addition >= *subtraction;
-                                        balance_addition = balance_addition.abs_diff(*subtraction);
-                                    } else {
-                                        balance_addition =
-                                            balance_addition.saturating_add(*subtraction);
-                                    }
-                                    nonce_addition += 1;
-                                }
-                                _ => return Err(ReadError::InvalidMemoryValueType),
-                            }
+                        let origin = ReadOrigin::MvMemory(TxVersion {
+                            tx_idx: *closest_idx,
+                            tx_incarnation: *tx_incarnation,
+                        });
+                        // Inconsistent: new origin is different from the previous!
+                        if has_prev_origins
+                            && unsafe { read_origins.get_unchecked(new_origins.len()) } != &origin
+                        {
+                            return Err(ReadError::InconsistentRead);
                         }
-                        None => {
-                            break;
+                        new_origins.push(origin);
+                        match value {
+                            MemoryValue::Basic(basic) => {
+                                // TODO: Return [SelfDestructedAccount] if [basic] is
+                                // [SelfDestructed]?
+                                // For now we are betting on [code_hash] triggering the
+                                // sequential fallback when we read a self-destructed contract.
+                                final_account = Some(basic.clone());
+                                break;
+                            }
+                            MemoryValue::LazyRecipient(addition) => {
+                                if positive_addition {
+                                    balance_addition = balance_addition.saturating_add(*addition);
+                                } else {
+                                    positive_addition = *addition >= balance_addition;
+                                    balance_addition = balance_addition.abs_diff(*addition);
+                                }
+                            }
+                            MemoryValue::LazySender(subtraction) => {
+                                if positive_addition {
+                                    positive_addition = balance_addition >= *subtraction;
+                                    balance_addition = balance_addition.abs_diff(*subtraction);
+                                } else {
+                                    balance_addition =
+                                        balance_addition.saturating_add(*subtraction);
+                                }
+                                nonce_addition += 1;
+                            }
+                            _ => return Err(ReadError::InvalidMemoryValueType),
                         }
+                    }
+                    None => {
+                        break;
                     }
                 }
             }
@@ -454,26 +451,24 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
         let read_origins = self.read_set.entry(location_hash).or_default();
 
         // Try reading from multi-version data
-        if self.tx_idx > 0 {
-            if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
-                if let Some((closest_idx, entry)) =
-                    written_transactions.range(..self.tx_idx).next_back()
-                {
-                    match entry {
-                        MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
-                            Self::push_origin(
-                                read_origins,
-                                ReadOrigin::MvMemory(TxVersion {
-                                    tx_idx: *closest_idx,
-                                    tx_incarnation: *tx_incarnation,
-                                }),
-                            )?;
-                            return Ok(*value);
-                        }
-                        MemoryEntry::Estimate => return Err(ReadError::Blocking(*closest_idx)),
-                        _ => return Err(ReadError::InvalidMemoryValueType),
-                    }
+        if self.tx_idx > 0
+            && let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash)
+            && let Some((closest_idx, entry)) =
+                written_transactions.range(..self.tx_idx).next_back()
+        {
+            match entry {
+                MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
+                    Self::push_origin(
+                        read_origins,
+                        ReadOrigin::MvMemory(TxVersion {
+                            tx_idx: *closest_idx,
+                            tx_incarnation: *tx_incarnation,
+                        }),
+                    )?;
+                    return Ok(*value);
                 }
+                MemoryEntry::Estimate => return Err(ReadError::Blocking(*closest_idx)),
+                _ => return Err(ReadError::InvalidMemoryValueType),
             }
         }
 

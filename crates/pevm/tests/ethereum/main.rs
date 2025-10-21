@@ -16,11 +16,11 @@ use pevm::{
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::db::PlainAccount;
-use revm::primitives::ruint::ParseError;
 use revm::primitives::InvalidTransaction;
+use revm::primitives::ruint::ParseError;
 use revm::primitives::{
-    calc_excess_blob_gas, AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, SpecId,
-    TransactTo, TxEnv, KECCAK_EMPTY, U256,
+    AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, KECCAK_EMPTY, SpecId, TransactTo,
+    TxEnv, U256, calc_excess_blob_gas,
 };
 use revme::cmd::statetest::models::{Env, SpecName, Test, TestSuite, TestUnit, TransactionParts};
 use revme::cmd::statetest::{

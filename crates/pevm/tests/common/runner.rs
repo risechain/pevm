@@ -1,10 +1,10 @@
 use alloy_primitives::Bloom;
 use alloy_rpc_types_eth::Block;
 use pevm::{
-    chain::{CalculateReceiptRootError, PevmChain},
     EvmAccount, Pevm, Storage,
+    chain::{CalculateReceiptRootError, PevmChain},
 };
-use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
+use revm::primitives::{Address, BlockEnv, SpecId, TxEnv, U256, alloy_primitives::U160};
 use std::{num::NonZeroUsize, thread};
 
 /// Mock an account from an integer index that is used as the address.

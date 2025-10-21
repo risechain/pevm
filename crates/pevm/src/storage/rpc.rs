@@ -6,7 +6,7 @@ use std::{
 };
 
 use alloy_primitives::{Address, B256, U256};
-use alloy_provider::{network::BlockResponse, Network, Provider, RootProvider};
+use alloy_provider::{Network, Provider, RootProvider, network::BlockResponse};
 use alloy_rpc_types_eth::{BlockId, BlockNumberOrTag, BlockTransactionsKind};
 use alloy_transport::TransportError;
 use alloy_transport_http::Http;
@@ -200,10 +200,10 @@ impl<N: Network> Storage for RpcStorage<N> {
     }
 
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
-        if let Some(account) = self.cache_accounts.lock().unwrap().get(address) {
-            if let Some(value) = account.storage.get(index) {
-                return Ok(*value);
-            }
+        if let Some(account) = self.cache_accounts.lock().unwrap().get(address)
+            && let Some(value) = account.storage.get(index)
+        {
+            return Ok(*value);
         }
         let value = self.block_on(self.fetch(|| {
             self.provider

@@ -1,8 +1,8 @@
 //! Test raw transfers -- only send some ETH from one account to another without extra data.
 
-use pevm::{chain::PevmEthereum, InMemoryStorage};
+use pevm::{InMemoryStorage, chain::PevmEthereum};
 use rand::random;
-use revm::primitives::{alloy_primitives::U160, env::TxEnv, Address, TransactTo, U256};
+use revm::primitives::{Address, TransactTo, U256, alloy_primitives::U160, env::TxEnv};
 
 pub mod common;
 
