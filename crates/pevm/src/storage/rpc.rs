@@ -102,7 +102,7 @@ impl<N: Network> RpcStorage<N> {
         }
     }
 
-    /// Consumes the cache and returns its owned data: `(ChainState, Bytecodes, BlockHashes`)`.
+    /// Consumes the cache and returns its owned data: `(ChainState, Bytecodes, BlockHashes)`.
     pub fn into_snapshot(self) -> (ChainState, Bytecodes, BlockHashes) {
         (
             self.cache_accounts.into_inner().unwrap(),
