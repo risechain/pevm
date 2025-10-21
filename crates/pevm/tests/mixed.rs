@@ -3,7 +3,7 @@
 use pevm::chain::PevmEthereum;
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use rand::random;
-use revm::primitives::{env::TxEnv, Address, TransactTo, U256};
+use revm::primitives::{Address, TransactTo, U256, env::TxEnv};
 use std::sync::Arc;
 
 pub mod common;

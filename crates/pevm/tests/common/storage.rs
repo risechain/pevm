@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
 use revm::primitives::{
-    alloy_primitives::U160, keccak256, ruint::UintTryFrom, Address, B256, I256, U256,
+    Address, B256, I256, U256, alloy_primitives::U160, keccak256, ruint::UintTryFrom,
 };
 use rustc_hash::FxBuildHasher;
 

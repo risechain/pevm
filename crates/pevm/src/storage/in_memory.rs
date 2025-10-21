@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, keccak256};
 
 use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
 use crate::{AccountBasic, Storage};

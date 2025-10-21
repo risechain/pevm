@@ -1,12 +1,12 @@
 use crate::common::storage::{
-    from_address, from_indices, from_short_string, from_tick, StorageBuilder,
+    StorageBuilder, from_address, from_indices, from_short_string, from_tick,
 };
 use hashbrown::HashMap;
 use pevm::EvmAccount;
 use revm::primitives::{
-    fixed_bytes,
+    Address, B256, Bytecode, Bytes, FixedBytes, U256, fixed_bytes,
     hex::{FromHex, ToHexExt},
-    keccak256, uint, Address, Bytecode, Bytes, FixedBytes, B256, U256,
+    keccak256, uint,
 };
 use rustc_hash::FxBuildHasher;
 

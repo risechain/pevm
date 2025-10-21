@@ -11,11 +11,11 @@ use alloy_primitives::{Address, B256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{BlockId, BlockTransactionsKind};
 use clap::Parser;
-use color_eyre::eyre::{eyre, Result, WrapErr};
-use flate2::{bufread::GzDecoder, write::GzEncoder, Compression};
+use color_eyre::eyre::{Result, WrapErr, eyre};
+use flate2::{Compression, bufread::GzDecoder, write::GzEncoder};
 use pevm::{
-    chain::{PevmChain, PevmEthereum},
     EvmAccount, EvmCode, Pevm, RpcStorage,
+    chain::{PevmChain, PevmEthereum},
 };
 use reqwest::Url;
 

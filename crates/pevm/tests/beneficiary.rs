@@ -1,10 +1,10 @@
 //! Tests for the beneficiary account, especially for the lazy update of its balance to avoid
 //! "implicit" dependency among consecutive transactions.
 
-use pevm::chain::PevmEthereum;
 use pevm::InMemoryStorage;
+use pevm::chain::PevmEthereum;
 use rand::random;
-use revm::primitives::{alloy_primitives::U160, env::TxEnv, Address, TransactTo, U256};
+use revm::primitives::{Address, TransactTo, U256, alloy_primitives::U160, env::TxEnv};
 
 pub mod common;
 

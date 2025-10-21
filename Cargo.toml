@@ -3,6 +3,9 @@ default-members = ["crates/pevm"]
 members = ["bins/fetch", "crates/pevm"]
 resolver = "2"
 
+[workspace.package]
+edition = "2024"
+
 [profile.release]
 codegen-units = 1
 lto = "fat"

@@ -2,8 +2,8 @@
 //! the concurrency level, falling back to sequential processing, etc.
 
 use alloy_primitives::{Address, U256};
-use pevm::chain::PevmEthereum;
 use pevm::InMemoryStorage;
+use pevm::chain::PevmEthereum;
 use revm::primitives::{TransactTo, TxEnv};
 
 pub mod common;

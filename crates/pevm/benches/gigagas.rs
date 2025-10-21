@@ -5,10 +5,10 @@
 use std::{num::NonZeroUsize, sync::Arc, thread};
 
 use alloy_primitives::{Address, U160, U256};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use pevm::{
-    chain::PevmEthereum, execute_revm_sequential, Bytecodes, ChainState, EvmAccount,
-    InMemoryStorage, Pevm,
+    Bytecodes, ChainState, EvmAccount, InMemoryStorage, Pevm, chain::PevmEthereum,
+    execute_revm_sequential,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
 
