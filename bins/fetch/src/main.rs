@@ -78,10 +78,11 @@ async fn main() -> Result<()> {
         }
         Err(_) => BTreeMap::new(),
     };
-    bytecodes.extend(storage.get_cache_bytecodes());
+    let (chainstate, cached_bytecodes, cached_block_hashes) = storage.into_snapshot();
+    bytecodes.extend(cached_bytecodes);
 
     let mut state = BTreeMap::<Address, EvmAccount>::new();
-    for (address, mut account) in storage.get_cache_accounts() {
+    for (address, mut account) in chainstate {
         if let Some(code) = account.code.take() {
             let code_hash = account
                 .code_hash
@@ -110,7 +111,7 @@ async fn main() -> Result<()> {
             .context("Failed to deserialize block hashes from file")?,
         Err(_) => BTreeMap::new(),
     };
-    block_hashes.extend(storage.get_cache_block_hashes());
+    block_hashes.extend(cached_block_hashes);
 
     if !block_hashes.is_empty() {
         // Write compressed block hashes to disk
