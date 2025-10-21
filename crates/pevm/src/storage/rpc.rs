@@ -102,19 +102,13 @@ impl<N: Network> RpcStorage<N> {
         }
     }
 
-    /// Get a snapshot of accounts
-    pub fn get_cache_accounts(&self) -> ChainState {
-        self.cache_accounts.lock().unwrap().clone()
-    }
-
-    /// Get a snapshot of bytecodes
-    pub fn get_cache_bytecodes(&self) -> Bytecodes {
-        self.cache_bytecodes.lock().unwrap().clone()
-    }
-
-    /// Get a snapshot of block hashes
-    pub fn get_cache_block_hashes(&self) -> BlockHashes {
-        self.cache_block_hashes.lock().unwrap().clone()
+    /// Consumes the cache and returns its owned data: `(ChainState, Bytecodes, BlockHashes)`.
+    pub fn into_snapshot(self) -> (ChainState, Bytecodes, BlockHashes) {
+        (
+            self.cache_accounts.into_inner().unwrap(),
+            self.cache_bytecodes.into_inner().unwrap(),
+            self.cache_block_hashes.into_inner().unwrap(),
+        )
     }
 }
 
