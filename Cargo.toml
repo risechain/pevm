@@ -42,7 +42,6 @@ use_self = "warn"
 pevm = { path = "crates/pevm", features = ["full"] }
 
 # alloy
-alloy-chains = "0.1.54"
 alloy-consensus = "0.9.2"
 alloy-primitives = { version = "0.8.18", features = [
   "asm-keccak",
