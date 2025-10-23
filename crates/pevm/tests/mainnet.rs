@@ -2,26 +2,10 @@
 
 use pevm::chain::PevmEthereum;
 
-#[cfg(feature = "rpc-storage")]
-use alloy_provider::ProviderBuilder;
-
 pub mod common;
 
 #[cfg(feature = "rpc-storage")]
-enum Chain {
-    Ethereum,
-    #[cfg(feature = "optimism")]
-    Optimism,
-}
-
-#[cfg(feature = "rpc-storage")]
-fn get_rpc_url(chain: &Chain) -> reqwest::Url {
-    let (env_var, default_url) = match chain {
-        Chain::Ethereum => ("ETHEREUM_RPC_URL", "https://eth-mainnet.public.blastapi.io"),
-        #[cfg(feature = "optimism")]
-        Chain::Optimism => ("OPTIMISM_RPC_URL", "https://mainnet.optimism.io"),
-    };
-
+fn get_rpc_url(env_var: &str, default_url: &str) -> reqwest::Url {
     std::env::var(env_var)
         .ok()
         .filter(|v| !v.is_empty())
@@ -56,34 +40,19 @@ async fn run_block_tests<N, C>(
     }
 }
 
-#[cfg(feature = "rpc-storage")]
-async fn test_blocks_from_rpc(chain: Chain, block_numbers: &[u64]) {
-    let rpc_url = get_rpc_url(&chain);
-
-    match chain {
-        Chain::Ethereum => {
-            let provider = ProviderBuilder::new().on_http(rpc_url);
-            let chain = PevmEthereum::mainnet();
-            run_block_tests(provider, &chain, block_numbers).await;
-        }
-        #[cfg(feature = "optimism")]
-        Chain::Optimism => {
-            use pevm::chain::PevmOptimism;
-            let provider = ProviderBuilder::new()
-                .network::<op_alloy_network::Optimism>()
-                .on_http(rpc_url);
-            let chain = PevmOptimism::mainnet();
-            run_block_tests(provider, &chain, block_numbers).await;
-        }
-    }
-}
-
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "rpc-storage")]
 async fn mainnet_blocks_from_rpc() {
+    use alloy_provider::ProviderBuilder;
+
+    let rpc_url = get_rpc_url("ETHEREUM_RPC_URL", "https://eth-mainnet.public.blastapi.io");
+    let provider = ProviderBuilder::new().on_http(rpc_url);
+    let chain = PevmEthereum::mainnet();
+
     // First block under 50 transactions of each EVM-spec-changing fork
-    test_blocks_from_rpc(
-        Chain::Ethereum,
+    run_block_tests(
+        provider,
+        &chain,
         &[
             46147, // FRONTIER
             1150000, // HOMESTEAD
@@ -117,9 +86,19 @@ fn mainnet_blocks_from_disk() {
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(all(feature = "rpc-storage", feature = "optimism"))]
 async fn optimism_mainnet_blocks_from_rpc() {
+    use alloy_provider::ProviderBuilder;
+    use pevm::chain::PevmOptimism;
+
+    let rpc_url = get_rpc_url("OPTIMISM_RPC_URL", "https://mainnet.optimism.io");
+    let provider = ProviderBuilder::new()
+        .network::<op_alloy_network::Optimism>()
+        .on_http(rpc_url);
+    let chain = PevmOptimism::mainnet();
+
     // First block under 50 transactions of each EVM-spec-changing fork
-    test_blocks_from_rpc(
-        Chain::Optimism,
+    run_block_tests(
+        provider,
+        &chain,
         &[
             114874075, // CANYON (https://specs.optimism.io/protocol/canyon/overview.html)
                       // TODO: doesn't pass `Err(ExecutionError("Database(InvalidNonce(0))"))`
