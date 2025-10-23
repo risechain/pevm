@@ -50,11 +50,11 @@ fn get_ethereum_gas_price(tx: &TxEnvelope) -> Result<U256, EthereumTransactionPa
 }
 
 impl PevmChain for PevmEthereum {
+    type Network = alloy_provider::network::Ethereum;
     type Transaction = alloy_rpc_types_eth::Transaction;
     type Envelope = TxEnvelope;
     type BlockSpecError = std::convert::Infallible;
     type TransactionParsingError = EthereumTransactionParsingError;
-    type Network = alloy_provider::network::Ethereum;
 
     fn id(&self) -> u64 {
         self.id

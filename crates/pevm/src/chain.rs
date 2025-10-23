@@ -46,6 +46,9 @@ pub enum CalculateReceiptRootError {
 
 /// Custom behaviours for different chains & networks
 pub trait PevmChain: Debug {
+    /// The network type
+    type Network: alloy_provider::Network<BlockResponse: Into<alloy_rpc_types_eth::Block<Self::Transaction>>>;
+
     /// The transaction type
     type Transaction: Debug + Clone + PartialEq;
 
@@ -58,9 +61,6 @@ pub trait PevmChain: Debug {
 
     /// The error type for [`Self::get_tx_env`].
     type TransactionParsingError: StdError + Debug + Clone + PartialEq + 'static;
-
-    /// The network type
-    type Network: alloy_provider::Network;
 
     /// Get chain id.
     fn id(&self) -> u64;

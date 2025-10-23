@@ -82,11 +82,11 @@ fn get_optimism_fields(
 }
 
 impl PevmChain for PevmOptimism {
+    type Network = op_alloy_network::Optimism;
     type Transaction = op_alloy_rpc_types::Transaction;
     type Envelope = OpTxEnvelope;
     type BlockSpecError = OptimismBlockSpecError;
     type TransactionParsingError = OptimismTransactionParsingError;
-    type Network = op_alloy_network::Optimism;
 
     fn id(&self) -> ChainId {
         self.id
