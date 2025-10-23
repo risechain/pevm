@@ -59,6 +59,9 @@ pub trait PevmChain: Debug {
     /// The error type for [`Self::get_tx_env`].
     type TransactionParsingError: StdError + Debug + Clone + PartialEq + 'static;
 
+    /// The network type
+    type Network: alloy_provider::Network;
+
     /// Get chain id.
     fn id(&self) -> u64;
 

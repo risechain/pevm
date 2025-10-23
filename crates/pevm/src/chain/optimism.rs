@@ -86,6 +86,7 @@ impl PevmChain for PevmOptimism {
     type Envelope = OpTxEnvelope;
     type BlockSpecError = OptimismBlockSpecError;
     type TransactionParsingError = OptimismTransactionParsingError;
+    type Network = op_alloy_network::Optimism;
 
     fn id(&self) -> ChainId {
         self.id

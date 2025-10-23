@@ -54,6 +54,7 @@ impl PevmChain for PevmEthereum {
     type Envelope = TxEnvelope;
     type BlockSpecError = std::convert::Infallible;
     type TransactionParsingError = EthereumTransactionParsingError;
+    type Network = alloy_provider::network::Ethereum;
 
     fn id(&self) -> u64 {
         self.id
