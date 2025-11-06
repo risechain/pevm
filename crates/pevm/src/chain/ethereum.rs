@@ -106,7 +106,7 @@ impl PevmChain for PevmEthereum {
     // TODO: Properly test this.
     fn get_tx_env(&self, tx: &Self::Transaction) -> Result<TxEnv, EthereumTransactionParsingError> {
         Ok(TxEnv {
-            caller: tx.from,
+            caller: tx.inner.signer(),
             gas_limit: tx.gas_limit(),
             gas_price: get_ethereum_gas_price(&tx.inner)?,
             gas_priority_fee: tx.max_priority_fee_per_gas().map(U256::from),

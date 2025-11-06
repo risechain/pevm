@@ -2,7 +2,7 @@
 
 use alloy_primitives::B256;
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types_eth::{BlockNumberOrTag, BlockTransactionsKind};
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use std::collections::BTreeMap;
 use std::fs::File;
 
@@ -21,10 +21,7 @@ async fn snapshotted_mainnet_block_hashes() {
 
     for (block_number, snapshotted_hash) in block_hashes {
         let block = provider
-            .get_block_by_number(
-                BlockNumberOrTag::Number(block_number),
-                BlockTransactionsKind::Hashes,
-            )
+            .get_block_by_number(BlockNumberOrTag::Number(block_number))
             .await
             .unwrap()
             .unwrap();

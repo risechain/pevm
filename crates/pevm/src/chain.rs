@@ -3,7 +3,7 @@
 use std::error::Error as StdError;
 use std::fmt::Debug;
 
-use alloy_consensus::{Signed, TxLegacy};
+use alloy_consensus::{Signed, TxLegacy, transaction::Recovered};
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_eth::{BlockTransactions, Header, Transaction};
 use revm::{
@@ -68,8 +68,7 @@ pub trait PevmChain: Debug {
     /// Mock RPC transaction for testing.
     fn mock_rpc_tx(envelope: Self::Envelope, from: Address) -> Transaction<Self::Envelope> {
         Transaction {
-            inner: envelope,
-            from,
+            inner: Recovered::new_unchecked(envelope, from),
             block_hash: None,
             block_number: None,
             transaction_index: None,

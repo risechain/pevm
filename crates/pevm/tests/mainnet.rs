@@ -19,13 +19,14 @@ where
     C: pevm::chain::PevmChain + PartialEq + Send + Sync,
 {
     use alloy_provider::{Provider, ProviderBuilder};
-    use alloy_rpc_types_eth::{BlockId, BlockTransactionsKind};
+    use alloy_rpc_types_eth::BlockId;
 
-    let provider = ProviderBuilder::new().network::<C::Network>().on_http(url);
+    let provider = ProviderBuilder::<_, _, C::Network>::default().on_http(url);
 
     for &block_number in block_numbers {
         let block = provider
-            .get_block(BlockId::number(block_number), BlockTransactionsKind::Full)
+            .get_block(BlockId::number(block_number))
+            .full()
             .await
             .unwrap()
             .unwrap()

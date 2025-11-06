@@ -1,9 +1,9 @@
 //! Benchmark mainnet blocks with needed state loaded in memory.
 
 // TODO: More fancy benchmarks & plots.
-use std::{num::NonZeroUsize, thread};
+use std::{hint::black_box, num::NonZeroUsize, thread};
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use pevm::{Pevm, chain::PevmEthereum};
 
 // Better project structure
