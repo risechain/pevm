@@ -202,7 +202,7 @@ impl PevmChain for PevmOptimism {
                     OpTxType::Deposit => {
                         let account = tx_result
                             .state
-                            .get(&tx.from)
+                            .get(tx.inner.inner.signer_ref())
                             .and_then(Option::as_ref)
                             .ok_or(CalculateReceiptRootError::OpDepositMissingSender)?;
                         let receipt = OpDepositReceipt {
@@ -234,7 +234,7 @@ impl PevmChain for PevmOptimism {
     fn get_tx_env(&self, tx: &Self::Transaction) -> Result<TxEnv, OptimismTransactionParsingError> {
         Ok(TxEnv {
             optimism: get_optimism_fields(&tx.inner.inner)?,
-            caller: tx.from,
+            caller: tx.inner.inner.signer(),
             gas_limit: tx.gas_limit(),
             gas_price: get_optimism_gas_price(&tx.inner.inner)?,
             gas_priority_fee: tx.max_priority_fee_per_gas().map(U256::from),

@@ -2,10 +2,10 @@
 
 // TODO: More fancy benchmarks & plots.
 
-use std::{num::NonZeroUsize, sync::Arc, thread};
+use std::{hint::black_box, num::NonZeroUsize, sync::Arc, thread};
 
 use alloy_primitives::{Address, U160, U256};
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use pevm::{
     Bytecodes, ChainState, EvmAccount, InMemoryStorage, Pevm, chain::PevmEthereum,
     execute_revm_sequential,

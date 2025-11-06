@@ -7,12 +7,10 @@ use std::{
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Network, Provider, RootProvider, network::BlockResponse};
-use alloy_rpc_types_eth::{BlockId, BlockNumberOrTag, BlockTransactionsKind};
+use alloy_rpc_types_eth::{BlockId, BlockNumberOrTag};
 use alloy_transport::TransportError;
-use alloy_transport_http::Http;
 use hashbrown::HashMap;
 use op_alloy_network::primitives::HeaderResponse;
-use reqwest::Client;
 use revm::{
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{Bytecode, SpecId},
@@ -26,12 +24,10 @@ use crate::{AccountBasic, EvmAccount, Storage};
 
 use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
 
-type RpcProvider<N> = RootProvider<Http<Client>, N>;
-
 /// A storage that fetches state data via RPC for execution.
 #[derive(Debug)]
 pub struct RpcStorage<N: Network> {
-    provider: RpcProvider<N>,
+    provider: RootProvider<N>,
     block_id: BlockId,
     precompiles: &'static Precompiles,
     /// `OnceLock` is used to lazy-initialize a Tokio multi-threaded runtime if no
@@ -53,7 +49,7 @@ pub struct RpcStorage<N: Network> {
 
 impl<N: Network> RpcStorage<N> {
     /// Create a new RPC Storage
-    pub fn new(provider: RpcProvider<N>, spec_id: SpecId, block_id: BlockId) -> Self {
+    pub fn new(provider: RootProvider<N>, spec_id: SpecId, block_id: BlockId) -> Self {
         Self {
             provider,
             precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)),
@@ -229,10 +225,8 @@ impl<N: Network> Storage for RpcStorage<N> {
 
         let block_hash = self
             .block_on(self.fetch(|| {
-                self.provider.get_block_by_number(
-                    BlockNumberOrTag::Number(*number),
-                    BlockTransactionsKind::Hashes,
-                )
+                self.provider
+                    .get_block_by_number(BlockNumberOrTag::Number(*number))
             }))
             .map(|block| block.unwrap().header().hash())?;
 

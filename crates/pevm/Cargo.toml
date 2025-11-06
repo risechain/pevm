@@ -15,12 +15,7 @@ optimism = [
   "dep:op-alloy-rpc-types",
 ]
 
-rpc-storage = [
-  "dep:alloy-transport",
-  "dep:alloy-transport-http",
-  "dep:reqwest",
-  "dep:tokio",
-]
+rpc-storage = ["dep:alloy-transport", "dep:reqwest", "dep:tokio"]
 
 global-alloc = ["dep:rpmalloc", "dep:snmalloc-rs", "dep:tikv-jemallocator"]
 
@@ -50,7 +45,6 @@ op-alloy-rpc-types = { workspace = true, optional = true }
 
 # Storage RPC feature dependencies
 alloy-transport = { workspace = true, optional = true }
-alloy-transport-http = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
