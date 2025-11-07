@@ -146,7 +146,11 @@ impl PevmChain for PevmEthereum {
         spec_id: SpecId,
         with_reward_beneficiary: bool,
     ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB> {
-        Handler::mainnet_with_spec(spec_id, with_reward_beneficiary)
+        let mut handler = Handler::mainnet_with_spec(spec_id);
+        if !with_reward_beneficiary {
+            handler.post_execution.reward_beneficiary = std::sync::Arc::new(|_, _| Ok(()));
+        }
+        handler
     }
 
     fn get_reward_policy(&self) -> RewardPolicy {
