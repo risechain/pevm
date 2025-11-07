@@ -3537,9 +3537,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quote"
-version = "1.0.41"
+version = "1.0.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce25767e7b499d1b604768e7cde645d14cc8584231ea6b295e9c9eb22c02e1d1"
+checksum = "a338cc41d27e6cc6dce6cefc13a0729dfbb81c262b1f519331575dd80ef3067f"
 dependencies = [
  "proc-macro2",
 ]
@@ -3786,8 +3786,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "19.4.0"
-source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
+version = "19.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c175ecec83bba464aa8406502fe5bf670491c2ace81a153264891d43bc7fa332"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -3804,8 +3805,9 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "15.1.0"
-source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
+version = "15.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dcab7ef2064057acfc84731205f4bc77f4ec1b35630800b26ff6a185731c5ab"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -3813,8 +3815,9 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "16.0.0"
-source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
+version = "16.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99743c3a2cac341084cc15ac74286c4bf34a0941ebf60aa420cfdb9f81f72f9f"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -3832,8 +3835,9 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "15.1.0"
-source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
+version = "15.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0f987564210317706def498421dfba2ae1af64a8edce82c6102758b48133fcb"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -3851,8 +3855,9 @@ dependencies = [
 
 [[package]]
 name = "revme"
-version = "2.4.0"
-source = "git+https://github.com/risechain/revm?rev=a79e833be41199a140dc85a222141c4bdf0b9aa5#a79e833be41199a140dc85a222141c4bdf0b9aa5"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e1609d0692a4c7a71e5db3797e91fafabfa38a80fea7402b5dbc96babf9802d"
 dependencies = [
  "alloy-rlp",
  "hash-db",

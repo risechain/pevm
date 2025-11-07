@@ -147,9 +147,11 @@ impl From<Bytecode> for EvmCode {
             // This arm will recursively fallback to LegacyAnalyzed.
             Bytecode::LegacyRaw(_) => to_analysed(code).into(),
             Bytecode::LegacyAnalyzed(code) => Self::Legacy(LegacyCode {
-                bytecode: code.bytecode,
-                original_len: code.original_len,
-                jump_table: code.jump_table.0,
+                // We should be able to consume these instead of cloning if the
+                // fields are `pub`. Won't be relevant as we rewrite `revm` anyway.
+                bytecode: code.bytecode().clone(),
+                original_len: code.original_len(),
+                jump_table: code.jump_table().0.clone(),
             }),
             Bytecode::Eip7702(code) => Self::Eip7702(Eip7702Code {
                 delegated_address: code.delegated_address,
@@ -258,12 +260,6 @@ impl<S: Storage> DatabaseRef for StorageWrapper<'_, S> {
             })
     }
 
-    fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
-        self.0
-            .has_storage(&address)
-            .map_err(StorageWrapperError::StorageError)
-    }
-
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         self.0
             .storage(&address, &index)
@@ -305,9 +301,9 @@ mod tests {
     fn eq_bytecodes(revm_code: &Bytecode, pevm_code: &EvmCode) -> bool {
         match (revm_code, pevm_code) {
             (Bytecode::LegacyAnalyzed(revm), EvmCode::Legacy(pevm)) => {
-                revm.bytecode == pevm.bytecode
-                    && revm.original_len == pevm.original_len
-                    && revm.jump_table.0 == pevm.jump_table
+                revm.bytecode() == &pevm.bytecode
+                    && revm.original_len() == pevm.original_len
+                    && revm.jump_table().0 == pevm.jump_table
             }
             (Bytecode::Eip7702(revm), EvmCode::Eip7702(pevm)) => {
                 revm.delegated_address == pevm.delegated_address && revm.version == pevm.version

@@ -54,10 +54,8 @@ alloy-transport = "0.12.6"
 alloy-trie = "0.7.9"
 
 # Will remove [revm] with https://github.com/risechain/pevm/issues/382.
-revm = { git = "https://github.com/risechain/revm", rev = "a79e833be41199a140dc85a222141c4bdf0b9aa5", features = [
-  "serde",
-] }
-revme = { git = "https://github.com/risechain/revm", rev = "a79e833be41199a140dc85a222141c4bdf0b9aa5" }
+revm = { version = "19.4.0", features = ["serde"] }
+revme = "2.4.0"
 
 # OP
 op-alloy-consensus = "0.11.3"
