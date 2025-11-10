@@ -32,8 +32,11 @@ where
             .unwrap()
             .into();
         let spec_id = chain.get_block_spec(&block.header).unwrap();
-        let rpc_storage =
-            pevm::RpcStorage::new(provider.clone(), spec_id, BlockId::number(block_number - 1));
+        let rpc_storage = pevm::RpcStorage::new(
+            provider.clone(),
+            spec_id.into(),
+            BlockId::number(block_number - 1),
+        );
         common::test_execute_alloy(&chain, &rpc_storage, block, true);
     }
 }
@@ -64,7 +67,7 @@ async fn mainnet_blocks_from_rpc() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(all(feature = "rpc-storage", feature = "optimism"))]
+#[cfg(feature = "rpc-storage")]
 async fn optimism_mainnet_blocks_from_rpc() {
     test_blocks_from_rpc(
         pevm::chain::PevmOptimism::mainnet(),

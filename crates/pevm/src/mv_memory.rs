@@ -5,7 +5,7 @@ use std::{
 
 use alloy_primitives::{Address, B256};
 use dashmap::DashMap;
-use revm::primitives::Bytecode;
+use revm::state::Bytecode;
 
 use crate::{
     BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocationHash, ReadOrigin, ReadSet,

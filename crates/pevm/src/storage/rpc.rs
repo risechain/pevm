@@ -6,14 +6,17 @@ use std::{
 };
 
 use alloy_primitives::{Address, B256, U256};
-use alloy_provider::{Network, Provider, RootProvider, network::BlockResponse};
+use alloy_provider::{
+    Network, Provider, RootProvider,
+    network::{BlockResponse, primitives::HeaderResponse},
+};
 use alloy_rpc_types_eth::{BlockId, BlockNumberOrTag};
 use alloy_transport::TransportError;
 use hashbrown::HashMap;
-use op_alloy_network::primitives::HeaderResponse;
 use revm::{
     precompile::{PrecompileSpecId, Precompiles},
-    primitives::{Bytecode, SpecId},
+    primitives::hardfork::SpecId,
+    state::Bytecode,
 };
 use tokio::{
     runtime::{Handle, Runtime},
