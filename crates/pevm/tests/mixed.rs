@@ -3,7 +3,9 @@
 use pevm::chain::PevmEthereum;
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use rand::random;
-use revm::primitives::{Address, TransactTo, U256, env::TxEnv};
+use revm::context::{TransactTo, TxEnv};
+use revm::primitives::{Address, U256};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod common;
@@ -20,6 +22,8 @@ fn mixed_block() {
     final_state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
     let mut final_bytecodes = Bytecodes::default();
     let mut final_txs = Vec::new();
+    let mut nonces = HashMap::new();
+
     // 1 to 10
     let small_random = || (random::<u8>() % 10 + 1) as usize;
     while block_size < target_block_size {
@@ -29,13 +33,16 @@ fn mixed_block() {
                 let no_txs = random::<u16>();
                 for _ in 0..no_txs {
                     let (address, account) = common::mock_account(small_random());
+                    let nonce = nonces.entry(address).or_insert(0);
+                    *nonce = *nonce + 1;
                     final_state.insert(address, account);
                     final_txs.push(TxEnv {
                         caller: address,
-                        transact_to: TransactTo::Call(address), // TODO: Randomize for tighter test
+                        nonce: *nonce,
+                        kind: TransactTo::Call(address), // TODO: Randomize for tighter test
                         value: U256::from(1),
                         gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
-                        gas_price: U256::from(1),
+                        gas_price: 1,
                         ..TxEnv::default()
                     });
                 }

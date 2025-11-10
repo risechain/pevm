@@ -1,14 +1,21 @@
 //! Test raw transfers -- only send some ETH from one account to another without extra data.
 
+use std::collections::HashMap;
+
 use pevm::{InMemoryStorage, chain::PevmEthereum};
 use rand::random;
-use revm::primitives::{Address, TransactTo, U256, alloy_primitives::U160, env::TxEnv};
+use revm::{
+    context::{TransactTo, TxEnv},
+    primitives::{Address, U256, alloy_primitives::U160},
+};
 
 pub mod common;
 
 #[test]
 fn raw_transfers_independent() {
     let block_size = 100_000; // number of transactions
+    let mut nonces = HashMap::new();
+
     common::test_execute_revm(
         &PevmEthereum::mainnet(),
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
@@ -22,12 +29,15 @@ fn raw_transfers_independent() {
         (1..=block_size)
             .map(|i| {
                 let address = Address::from(U160::from(i));
+                let nonce = nonces.entry(address).or_insert(0);
+                *nonce = *nonce + 1;
                 TxEnv {
                     caller: address,
-                    transact_to: TransactTo::Call(address),
+                    nonce: *nonce,
+                    kind: TransactTo::Call(address),
                     value: U256::from(1),
                     gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
-                    gas_price: U256::from(1),
+                    gas_price: 1,
                     ..TxEnv::default()
                 }
             })
@@ -64,11 +74,11 @@ fn raw_transfers_same_sender_multiple_txs() {
                 };
                 TxEnv {
                     caller: address,
-                    transact_to: TransactTo::Call(address),
+                    kind: TransactTo::Call(address),
                     value: U256::from(1),
                     gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
-                    gas_price: U256::from(1),
-                    nonce: Some(nonce),
+                    gas_price: 1,
+                    nonce,
                     ..TxEnv::default()
                 }
             })
@@ -91,21 +101,18 @@ fn ethereum_independent_raw_transfers() {
     common::test_independent_raw_transfers(&PevmEthereum::mainnet(), 100_000);
 }
 
-#[cfg(feature = "optimism")]
 #[test]
 fn optimism_empty_alloy_block() {
     use pevm::chain::PevmOptimism;
     common::test_independent_raw_transfers(&PevmOptimism::mainnet(), 0);
 }
 
-#[cfg(feature = "optimism")]
 #[test]
 fn optimism_one_tx_alloy_block() {
     use pevm::chain::PevmOptimism;
     common::test_independent_raw_transfers(&PevmOptimism::mainnet(), 1);
 }
 
-#[cfg(feature = "optimism")]
 #[test]
 fn optimism_independent_raw_transfers() {
     use pevm::chain::PevmOptimism;

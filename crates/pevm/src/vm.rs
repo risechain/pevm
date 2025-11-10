@@ -1,22 +1,22 @@
-use alloy_primitives::TxKind;
+use alloy_primitives::{Address, B256, TxKind, U256};
 use alloy_rpc_types_eth::Receipt;
 use hashbrown::HashMap;
 use revm::{
-    Context, Database, Evm, EvmContext,
-    primitives::{
-        AccountInfo, Address, B256, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
-        KECCAK_EMPTY, ResultAndState, SpecId, TxEnv, U256,
+    Database,
+    context::{
+        BlockEnv, ContextTr, DBErrorMarker, TxEnv,
+        result::{EVMError, InvalidTransaction, ResultAndState},
     },
+    handler::{EthFrame, EvmTr, FrameResult, Handler, instructions::InstructionProvider},
+    primitives::KECCAK_EMPTY,
+    state::{AccountInfo, Bytecode},
 };
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 
 use crate::{
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
     MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
-    TxIdx, TxVersion, WriteSet,
-    chain::{PevmChain, RewardPolicy},
-    hash_deterministic,
-    mv_memory::MvMemory,
+    TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
     storage::BytecodeConversionError,
 };
 
@@ -45,8 +45,8 @@ impl PevmTxExecutionResult {
     /// It should be post-processed with the remaining transactions in the block.
     pub fn from_revm<C: PevmChain>(
         chain: &C,
-        spec_id: SpecId,
-        ResultAndState { result, state }: ResultAndState,
+        spec_id: C::EvmSpecId,
+        ResultAndState { result, state }: ResultAndState<C::EvmHaltReason>,
     ) -> Self {
         Self {
             receipt: Receipt {
@@ -110,6 +110,8 @@ pub enum ReadError {
     InvalidMemoryValueType,
 }
 
+impl DBErrorMarker for ReadError {}
+
 impl From<ReadError> for VmExecutionError {
     fn from(err: ReadError) -> Self {
         match err {
@@ -171,7 +173,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // evaluating it concurrently.
         // TODO: Only lazy update in block syncing mode, not for block
         // building.
-        if let TxKind::Call(to) = tx.transact_to {
+        if let TxKind::Call(to) = tx.kind {
             db.to_code_hash = db.get_code_hash(to)?;
             db.is_lazy = db.to_code_hash.is_none()
                 && (vm.mv_memory.data.contains_key(&from_hash)
@@ -184,7 +186,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         if address == &self.tx.caller {
             return self.from_hash;
         }
-        if let TxKind::Call(to) = &self.tx.transact_to
+        if let TxKind::Call(to) = &self.tx.kind
             && to == address
         {
             return self.to_hash.unwrap();
@@ -254,7 +256,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
         if self.is_lazy {
             if location_hash == self.from_hash {
                 return Ok(Some(AccountInfo {
-                    nonce: self.tx.nonce.unwrap_or(1),
+                    nonce: self.tx.nonce,
                     balance: U256::MAX,
                     code: None,
                     code_hash: KECCAK_EMPTY,
@@ -372,9 +374,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
         if let Some(mut account) = final_account {
             // Check sender nonce
             account.nonce += nonce_addition;
-            if location_hash == self.from_hash
-                && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
-            {
+            if location_hash == self.from_hash && self.tx.nonce != account.nonce {
                 return if self.tx_idx > 0 {
                     // TODO: Better retry strategy -- immediately, to the
                     // closest sender tx, to the missing sender tx, etc.
@@ -486,10 +486,9 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     mv_memory: &'a MvMemory,
     chain: &'a C,
     block_env: &'a BlockEnv,
-    txs: &'a [TxEnv],
-    spec_id: SpecId,
+    txs: &'a [C::EvmTx],
+    spec_id: C::EvmSpecId,
     beneficiary_location_hash: MemoryLocationHash,
-    reward_policy: RewardPolicy,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
@@ -498,8 +497,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         mv_memory: &'a MvMemory,
         chain: &'a C,
         block_env: &'a BlockEnv,
-        txs: &'a [TxEnv],
-        spec_id: SpecId,
+        txs: &'a [C::EvmTx],
+        spec_id: C::EvmSpecId,
     ) -> Self {
         Self {
             storage,
@@ -509,9 +508,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             txs,
             spec_id,
             beneficiary_location_hash: hash_deterministic(MemoryLocation::Basic(
-                block_env.coinbase,
+                block_env.beneficiary,
             )),
-            reward_policy: chain.get_reward_policy(),
         }
     }
 
@@ -536,27 +534,24 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         tx_version: &TxVersion,
     ) -> Result<VmExecutionResult, VmExecutionError> {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
-        let tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
+        let full_tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
+        let tx = self.chain.into_tx_env(full_tx.clone());
+
         let from_hash = hash_deterministic(MemoryLocation::Basic(tx.caller));
         let to_hash = tx
-            .transact_to
+            .kind
             .to()
             .map(|to| hash_deterministic(MemoryLocation::Basic(*to)));
 
         // Execute
-        let mut db = VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash)
+        let db = VmDb::new(self, tx_version.tx_idx, &tx, from_hash, to_hash)
             .map_err(VmExecutionError::from)?;
-        // TODO: Share as much [Evm], [Context], [Handler], etc. among threads as possible
-        // as creating them is very expensive.
-        let mut evm = build_evm(
-            &mut db,
-            self.chain,
-            self.spec_id,
-            self.block_env.clone(),
-            Some(tx.clone()),
-            false,
-        );
-        match evm.transact() {
+
+        let mut evm = self
+            .chain
+            .build_evm(self.spec_id, self.block_env.clone(), db);
+
+        match NoBeneficiaryHandler::<C, _>::default().run(&mut evm) {
             Ok(result_and_state) => {
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
@@ -576,7 +571,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     if account.is_touched() {
                         let account_location_hash =
                             hash_deterministic(MemoryLocation::Basic(*address));
-                        let read_account = evm.db().read_accounts.get(&account_location_hash);
+                        let read_account = evm.ctx().db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
                         let is_new_code = has_code
@@ -590,7 +585,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                     || basic.balance != account.info.balance
                             })
                         {
-                            if evm.db().is_lazy {
+                            if evm.ctx().db().is_lazy {
                                 if account_location_hash == from_hash {
                                     write_set.push((
                                         account_location_hash,
@@ -646,28 +641,66 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     }
                 }
 
-                self.apply_rewards(
-                    &mut write_set,
-                    tx,
+                // Rewards
+                let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
+                    std::cmp::min(
+                        tx.gas_price,
+                        priority_fee.saturating_add(self.block_env.basefee as u128),
+                    )
+                } else {
+                    tx.gas_price
+                };
+                if self.chain.is_eip_1559_enabled(self.spec_id) {
+                    gas_price = gas_price.saturating_sub(self.block_env.basefee as u128);
+                }
+                let rewards = self.chain.get_rewards(
+                    self.beneficiary_location_hash,
                     U256::from(result_and_state.result.gas_used()),
-                    #[cfg(feature = "optimism")]
-                    &mut evm.context.evm,
-                )?;
-
-                drop(evm); // release db
-
-                if db.is_lazy {
-                    self.mv_memory
-                        .add_lazy_addresses([tx.caller, *tx.transact_to.to().unwrap()]);
+                    U256::from(gas_price),
+                    &mut evm,
+                    full_tx,
+                );
+                for (recipient, amount) in rewards {
+                    if let Some((_, value)) = write_set
+                        .iter_mut()
+                        .find(|(location, _)| location == &recipient)
+                    {
+                        match value {
+                            MemoryValue::Basic(basic) => {
+                                basic.balance = basic.balance.saturating_add(amount)
+                            }
+                            MemoryValue::LazySender(subtraction) => {
+                                *subtraction = subtraction.saturating_sub(amount)
+                            }
+                            MemoryValue::LazyRecipient(addition) => {
+                                *addition = addition.saturating_add(amount)
+                            }
+                            _ => return Err(ReadError::InvalidMemoryValueType.into()),
+                        }
+                    } else {
+                        write_set.push((recipient, MemoryValue::LazyRecipient(amount)));
+                    }
                 }
 
-                let mut flags = if tx_version.tx_idx > 0 && !db.is_lazy {
+                // TODO: Drop `evm` to take back the owned DB
+                let is_lazy = evm.ctx().db().is_lazy;
+
+                if is_lazy {
+                    self.mv_memory
+                        .add_lazy_addresses([tx.caller, *tx.kind.to().unwrap()]);
+                }
+
+                let mut flags = if tx_version.tx_idx > 0 && !is_lazy {
                     FinishExecFlags::NeedValidation
                 } else {
                     FinishExecFlags::empty()
                 };
 
-                if self.mv_memory.record(tx_version, db.read_set, write_set) {
+                if self
+                    .mv_memory
+                    // TODO: Do not clone!
+                    .record(tx_version, evm.ctx().db().read_set.clone(), write_set)
+                {
                     flags |= FinishExecFlags::WroteNewLocation;
                 }
 
@@ -680,7 +713,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     flags,
                 })
             }
-            Err(EVMError::Database(read_error)) => Err(read_error.into()),
+            Err(EVMError::Database(read_error)) => Err(VmExecutionError::from(read_error)),
             Err(err) => {
                 // Optimistically retry in case some previous internal transactions send
                 // more fund to the sender but hasn't been executed yet.
@@ -704,115 +737,35 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             }
         }
     }
+}
 
-    // Apply rewards (balance increments) to beneficiary accounts, etc.
-    fn apply_rewards<#[cfg(feature = "optimism")] DB: Database>(
-        &self,
-        write_set: &mut WriteSet,
-        tx: &TxEnv,
-        gas_used: U256,
-        #[cfg(feature = "optimism")] evm_context: &mut EvmContext<DB>,
-    ) -> Result<(), VmExecutionError> {
-        let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
-            std::cmp::min(
-                tx.gas_price,
-                priority_fee.saturating_add(self.block_env.basefee),
-            )
-        } else {
-            tx.gas_price
-        };
-        if self.chain.is_eip_1559_enabled(self.spec_id) {
-            gas_price = gas_price.saturating_sub(self.block_env.basefee);
+struct NoBeneficiaryHandler<C, DB> {
+    pub _phantom: core::marker::PhantomData<(C, DB)>,
+}
+
+impl<C, DB> Default for NoBeneficiaryHandler<C, DB> {
+    fn default() -> Self {
+        Self {
+            _phantom: core::marker::PhantomData,
         }
-
-        let rewards: SmallVec<[(MemoryLocationHash, U256); 1]> = match self.reward_policy {
-            RewardPolicy::Ethereum => {
-                smallvec![(
-                    self.beneficiary_location_hash,
-                    gas_price.saturating_mul(gas_used)
-                )]
-            }
-            #[cfg(feature = "optimism")]
-            RewardPolicy::Optimism {
-                l1_fee_recipient_location_hash,
-                base_fee_vault_location_hash,
-            } => {
-                let is_deposit = tx.optimism.source_hash.is_some();
-                if is_deposit {
-                    SmallVec::new()
-                } else {
-                    // TODO: Better error handling
-                    // https://github.com/bluealloy/revm/blob/16e1ecb9a71544d9f205a51a22d81e2658202fde/crates/revm/src/optimism/handler_register.rs#L267
-                    let Some(enveloped_tx) = &tx.optimism.enveloped_tx else {
-                        panic!("[OPTIMISM] Failed to load enveloped transaction.");
-                    };
-                    let Some(l1_block_info) = &mut evm_context.l1_block_info else {
-                        panic!("[OPTIMISM] Missing l1_block_info.");
-                    };
-                    let l1_cost = l1_block_info.calculate_tx_l1_cost(enveloped_tx, self.spec_id);
-
-                    smallvec![
-                        (
-                            self.beneficiary_location_hash,
-                            gas_price.saturating_mul(gas_used)
-                        ),
-                        (l1_fee_recipient_location_hash, l1_cost),
-                        (
-                            base_fee_vault_location_hash,
-                            self.block_env.basefee.saturating_mul(gas_used),
-                        ),
-                    ]
-                }
-            }
-        };
-
-        for (recipient, amount) in rewards {
-            if let Some((_, value)) = write_set
-                .iter_mut()
-                .find(|(location, _)| location == &recipient)
-            {
-                match value {
-                    MemoryValue::Basic(basic) => {
-                        basic.balance = basic.balance.saturating_add(amount)
-                    }
-                    MemoryValue::LazySender(subtraction) => {
-                        *subtraction = subtraction.saturating_sub(amount)
-                    }
-                    MemoryValue::LazyRecipient(addition) => {
-                        *addition = addition.saturating_add(amount)
-                    }
-                    _ => return Err(ReadError::InvalidMemoryValueType.into()),
-                }
-            } else {
-                write_set.push((recipient, MemoryValue::LazyRecipient(amount)));
-            }
-        }
-
-        Ok(())
     }
 }
 
-pub(crate) fn build_evm<'a, DB: Database, C: PevmChain>(
-    db: DB,
-    chain: &C,
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    tx_env: Option<TxEnv>,
-    with_reward_beneficiary: bool,
-) -> Evm<'a, (), DB> {
-    // This is much uglier than the builder interface but can be up to 50% faster!!
-    let context = Context {
-        evm: EvmContext::new_with_env(
-            db,
-            Env::boxed(
-                CfgEnv::default().with_chain_id(chain.id()),
-                block_env,
-                tx_env.unwrap_or_default(),
-            ),
-        ),
-        external: (),
-    };
+impl<C: PevmChain, DB: Database> Handler for NoBeneficiaryHandler<C, DB> {
+    type Evm = C::Evm<DB>;
+    type Error = EVMError<DB::Error, InvalidTransaction>;
+    type Frame = EthFrame<
+        Self::Evm,
+        EVMError<DB::Error, InvalidTransaction>,
+        <<Self::Evm as EvmTr>::Instructions as InstructionProvider>::InterpreterTypes,
+    >;
+    type HaltReason = C::EvmHaltReason;
 
-    let handler = chain.get_handler(spec_id, with_reward_beneficiary);
-    Evm::new(context, handler)
+    fn reward_beneficiary(
+        &self,
+        _: &mut Self::Evm,
+        _: &mut FrameResult,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }

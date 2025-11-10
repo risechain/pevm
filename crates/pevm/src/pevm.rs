@@ -9,9 +9,10 @@ use alloy_primitives::{TxNonce, U256};
 use alloy_rpc_types_eth::{Block, BlockTransactions};
 use hashbrown::HashMap;
 use revm::{
-    DatabaseCommit,
-    db::CacheDB,
-    primitives::{BlockEnv, InvalidTransaction, SpecId, TxEnv},
+    DatabaseCommit, ExecuteEvm,
+    context::{BlockEnv, ContextTr, Transaction, result::InvalidTransaction},
+    database::CacheDB,
+    handler::EvmTr,
 };
 
 use crate::{
@@ -22,9 +23,7 @@ use crate::{
     mv_memory::MvMemory,
     scheduler::Scheduler,
     storage::StorageWrapper,
-    vm::{
-        ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult, build_evm,
-    },
+    vm::{ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult},
 };
 
 /// Errors when executing a block with pevm.
@@ -97,8 +96,7 @@ impl<T: Send + 'static> Default for AsyncDropper<T> {
 
 impl<T> AsyncDropper<T> {
     fn drop(&self, t: T) {
-        // TODO: Better error handling
-        self.sender.send(t).unwrap();
+        let _ = self.sender.send(t);
     }
 }
 
@@ -108,7 +106,7 @@ impl<T> AsyncDropper<T> {
 pub struct Pevm {
     execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
     abort_reason: OnceLock<AbortReason>,
-    dropper: AsyncDropper<(MvMemory, Scheduler, Vec<TxEnv>)>,
+    dropper: AsyncDropper<(MvMemory, Scheduler)>,
 }
 
 impl Pevm {
@@ -130,7 +128,7 @@ impl Pevm {
     ) -> PevmResult<C>
     where
         C: PevmChain + Send + Sync,
-        S: Storage + Send + Sync,
+        S: Storage + Send + Sync + Debug,
     {
         let spec_id = chain
             .get_block_spec(&block.header)
@@ -140,7 +138,7 @@ impl Pevm {
             BlockTransactions::Full(txs) => txs
                 .iter()
                 .map(|tx| chain.get_tx_env(tx))
-                .collect::<Result<Vec<TxEnv>, _>>()
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(PevmError::InvalidTransaction)?,
             _ => return Err(PevmError::MissingTransactionData),
         };
@@ -169,14 +167,14 @@ impl Pevm {
         &mut self,
         chain: &C,
         storage: &S,
-        spec_id: SpecId,
+        spec_id: C::EvmSpecId,
         block_env: BlockEnv,
-        txs: Vec<TxEnv>,
+        txs: Vec<C::EvmTx>,
         concurrency_level: NonZeroUsize,
     ) -> PevmResult<C>
     where
         C: PevmChain + Send + Sync,
-        S: Storage + Send + Sync,
+        S: Storage + Send + Sync + Debug,
     {
         if txs.is_empty() {
             return Ok(Vec::new());
@@ -232,11 +230,11 @@ impl Pevm {
         if let Some(abort_reason) = self.abort_reason.take() {
             match abort_reason {
                 AbortReason::FallbackToSequential => {
-                    self.dropper.drop((mv_memory, scheduler, Vec::new()));
+                    self.dropper.drop((mv_memory, scheduler));
                     return execute_revm_sequential(chain, storage, spec_id, block_env, txs);
                 }
                 AbortReason::ExecutionError(err) => {
-                    self.dropper.drop((mv_memory, scheduler, txs));
+                    self.dropper.drop((mv_memory, scheduler));
                     return Err(PevmError::ExecutionError(err));
                 }
             }
@@ -284,6 +282,7 @@ impl Pevm {
 
                 for (tx_idx, memory_entry) in write_history.iter() {
                     let tx = unsafe { txs.get_unchecked(*tx_idx) };
+                    let tx = chain.into_tx_env(tx.clone());
                     match memory_entry {
                         MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
                             // We fall back to sequential execution when reading a self-destructed account,
@@ -302,14 +301,12 @@ impl Pevm {
                             // Ideally we would share these calculations with revm
                             // (using their utility functions).
                             let mut max_fee = U256::from(tx.gas_limit)
-                                .saturating_mul(tx.gas_price)
+                                .saturating_mul(U256::from(tx.gas_price))
                                 .saturating_add(tx.value);
-                            if let Some(blob_fee) = tx.max_fee_per_blob_gas {
-                                max_fee = max_fee.saturating_add(
-                                    U256::from(tx.get_total_blob_gas())
-                                        .saturating_mul(U256::from(blob_fee)),
-                                );
-                            }
+                            max_fee = max_fee.saturating_add(
+                                U256::from(tx.total_blob_gas())
+                                    .saturating_mul(U256::from(tx.max_fee_per_blob_gas)),
+                            );
                             if balance < max_fee {
                                 Err(ExecutionError::Transaction(
                                     InvalidTransaction::LackOfFundForMaxFee {
@@ -325,19 +322,17 @@ impl Pevm {
                         _ => unreachable!(),
                     }
                     // Assert that evaluated nonce is correct when address is caller.
-                    if tx.caller == address
-                        && let Some(tx_nonce) = tx.nonce
-                    {
+                    if tx.caller == address {
                         let executed_nonce = if nonce == 0 {
                             return Err(PevmError::UnreachableError);
                         } else {
                             nonce - 1
                         };
-                        if tx_nonce != executed_nonce {
+                        if tx.nonce != executed_nonce {
                             // TODO: Consider falling back to sequential instead
                             return Err(PevmError::NonceMismatch {
                                 tx_idx: *tx_idx,
-                                tx_nonce,
+                                tx_nonce: tx.nonce,
                                 executed_nonce,
                             });
                         }
@@ -373,7 +368,7 @@ impl Pevm {
             }
         }
 
-        self.dropper.drop((mv_memory, scheduler, txs));
+        self.dropper.drop((mv_memory, scheduler));
 
         Ok(fully_evaluated_results)
     }
@@ -443,26 +438,25 @@ fn try_validate(
 /// Execute REVM transactions sequentially.
 // Useful for falling back for (small) blocks with many dependencies.
 // TODO: Use this for a long chain of sequential transactions even in parallel mode.
-pub fn execute_revm_sequential<S: Storage, C: PevmChain>(
+pub fn execute_revm_sequential<S: Storage + Debug, C: PevmChain>(
     chain: &C,
     storage: &S,
-    spec_id: SpecId,
+    spec_id: C::EvmSpecId,
     block_env: BlockEnv,
-    txs: Vec<TxEnv>,
+    txs: Vec<C::EvmTx>,
 ) -> PevmResult<C> {
-    let mut db = CacheDB::new(StorageWrapper(storage));
-    let mut evm = build_evm(&mut db, chain, spec_id, block_env, None, true);
-    let mut results = Vec::with_capacity(txs.len());
+    let db = CacheDB::new(StorageWrapper(storage));
+    let mut evm = chain.build_evm(spec_id, block_env, db);
+
+    let mut results: Vec<PevmTxExecutionResult> = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u64 = 0;
     for tx in txs {
-        *evm.tx_mut() = tx;
-
         // TODO: More concrete type for `EVMError<StorageWrapperError<S>>`
         let result_and_state = evm
-            .transact()
+            .transact(tx)
             .map_err(|err| ExecutionError::Custom(err.to_string()))?;
 
-        evm.db_mut().commit(result_and_state.state.clone());
+        evm.ctx().db().commit(result_and_state.state.clone());
 
         let mut execution_result =
             PevmTxExecutionResult::from_revm(chain, spec_id, result_and_state);

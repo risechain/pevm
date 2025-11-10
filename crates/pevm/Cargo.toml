@@ -6,15 +6,6 @@ version = "0.1.0"
 [features]
 defaults = []
 
-full = ["optimism", "rpc-storage"]
-
-optimism = [
-  "revm/optimism",
-  "dep:op-alloy-consensus",
-  "dep:op-alloy-network",
-  "dep:op-alloy-rpc-types",
-]
-
 rpc-storage = ["dep:alloy-transport", "dep:reqwest", "dep:tokio"]
 
 global-alloc = ["dep:rpmalloc", "dep:snmalloc-rs", "dep:tikv-jemallocator"]
@@ -37,11 +28,11 @@ smallvec.workspace = true
 thiserror.workspace = true
 
 revm.workspace = true
+op-revm.workspace = true
 
-# OP dependencies
-op-alloy-consensus = { workspace = true, optional = true }
-op-alloy-network = { workspace = true, optional = true }
-op-alloy-rpc-types = { workspace = true, optional = true }
+op-alloy-consensus.workspace = true
+op-alloy-network.workspace = true
+op-alloy-rpc-types.workspace = true
 
 # Storage RPC feature dependencies
 alloy-transport = { workspace = true, optional = true }
@@ -61,6 +52,7 @@ rand.workspace = true
 rayon.workspace = true
 reqwest.workspace = true
 revme.workspace = true
+revm-statetest-types.workspace = true
 serde_json.workspace = true
 walkdir.workspace = true
 

@@ -39,7 +39,7 @@ unnested_or_patterns = "warn"
 use_self = "warn"
 
 [workspace.dependencies]
-pevm = { path = "crates/pevm", features = ["full"] }
+pevm = { path = "crates/pevm", features = ["rpc-storage"] }
 
 # alloy
 alloy-consensus = "0.12.6"
@@ -54,8 +54,10 @@ alloy-transport = "0.12.6"
 alloy-trie = "0.7.9"
 
 # Will remove [revm] with https://github.com/risechain/pevm/issues/382.
-revm = { version = "19.4.0", features = ["serde"] }
-revme = "2.4.0"
+revm = { version = "20.0.0", features = ["serde"] }
+op-revm = "1.0.0"
+revme = "3.0.0"
+revm-statetest-types = "1.0.0"
 
 # OP
 op-alloy-consensus = "0.11.3"

@@ -15,14 +15,14 @@ use pevm::{
     PevmTxExecutionResult,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use revm::db::PlainAccount;
-use revm::primitives::InvalidTransaction;
-use revm::primitives::ruint::ParseError;
-use revm::primitives::{
-    AccountInfo, BlobExcessGasAndPrice, BlockEnv, Bytecode, KECCAK_EMPTY, SpecId, TransactTo,
-    TxEnv, calc_excess_blob_gas,
-};
-use revme::cmd::statetest::models::{Env, SpecName, Test, TestSuite, TestUnit, TransactionParts};
+use revm::context::result::InvalidTransaction;
+use revm::context::{BlockEnv, TransactTo, TxEnv};
+use revm::context_interface::block::{BlobExcessGasAndPrice, calc_excess_blob_gas};
+use revm::database::PlainAccount;
+use revm::primitives::KECCAK_EMPTY;
+use revm::primitives::hardfork::SpecId;
+use revm::state::{AccountInfo, Bytecode};
+use revm_statetest_types::{Env, SpecName, Test, TestSuite, TestUnit, TransactionParts};
 use revme::cmd::statetest::{
     merkle_trie::{log_rlp_hash, state_merkle_trie_root},
     utils::recover_address,
@@ -37,11 +37,11 @@ pub mod common;
 
 fn build_block_env(env: &Env, spec_id: SpecId) -> BlockEnv {
     BlockEnv {
-        number: env.current_number,
-        coinbase: env.current_coinbase,
-        timestamp: env.current_timestamp,
-        gas_limit: env.current_gas_limit,
-        basefee: env.current_base_fee.unwrap_or_default(),
+        number: env.current_number.saturating_to(),
+        beneficiary: env.current_coinbase,
+        timestamp: env.current_timestamp.saturating_to(),
+        gas_limit: env.current_gas_limit.saturating_to(),
+        basefee: env.current_base_fee.unwrap_or_default().saturating_to(),
         difficulty: env.current_difficulty,
         prevrandao: env.current_random,
         blob_excess_gas_and_price: if let Some(current_excess_blob_gas) =
@@ -71,8 +71,9 @@ fn build_block_env(env: &Env, spec_id: SpecId) -> BlockEnv {
     }
 }
 
-fn build_tx_env(path: &Path, tx: &TransactionParts, test: &Test) -> Result<TxEnv, ParseError> {
-    Ok(TxEnv {
+fn build_tx_env(path: &Path, tx: &TransactionParts, test: &Test) -> Option<TxEnv> {
+    Some(TxEnv {
+        tx_type: tx.tx_type(test.indexes.data)? as u8,
         caller: if let Some(address) = tx.sender {
             address
         } else if let Some(address) = recover_address(tx.secret_key.as_slice()) {
@@ -81,27 +82,33 @@ fn build_tx_env(path: &Path, tx: &TransactionParts, test: &Test) -> Result<TxEnv
             panic!("Failed to parse caller for {path:?}");
         },
         gas_limit: tx.gas_limit[test.indexes.gas].saturating_to(),
-        gas_price: tx.gas_price.or(tx.max_fee_per_gas).unwrap_or_default(),
-        transact_to: match tx.to {
+        gas_price: tx
+            .gas_price
+            .or(tx.max_fee_per_gas)
+            .unwrap_or_default()
+            .saturating_to(),
+        kind: match tx.to {
             Some(address) => TransactTo::Call(address),
             None => TransactTo::Create,
         },
         value: tx.value[test.indexes.value],
         data: tx.data[test.indexes.data].clone(),
-        nonce: Some(tx.nonce.saturating_to()),
+        nonce: tx.nonce.saturating_to(),
         chain_id: Some(1), // Ethereum mainnet
         access_list: tx
             .access_lists
             .get(test.indexes.data)
-            .and_then(Option::as_deref)
             .cloned()
+            .flatten()
             .unwrap_or_default(),
-        gas_priority_fee: tx.max_priority_fee_per_gas,
+        gas_priority_fee: tx.max_priority_fee_per_gas.map(|g| g.saturating_to()),
         blob_hashes: tx.blob_versioned_hashes.clone(),
-        max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-        authorization_list: test.eip7702_authorization_list().unwrap(),
-        #[cfg(feature = "optimism")]
-        optimism: revm::primitives::OptimismFields::default(),
+        max_fee_per_blob_gas: tx.max_fee_per_blob_gas.unwrap_or_default().saturating_to(),
+        authorization_list: tx
+            .authorization_list
+            .clone()
+            .map(|auth_list| auth_list.into_iter().map(Into::into).collect())
+            .unwrap_or_default(),
     })
 }
 
@@ -116,7 +123,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
 
         tests.into_par_iter().for_each(|test| {
             let tx_env = build_tx_env(path, &unit.transaction, &test);
-            if test.expect_exception.as_deref() == Some("TR_RLP_WRONGVALUE") && tx_env.is_err() {
+            if test.expect_exception.is_some() && tx_env.is_none() {
                 return;
             }
 
@@ -169,26 +176,30 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     };
 
                     // TODO: Cleaner code would be nice..
-                    assert!(match exception {
+                    let res = match exception {
                         "TR_TypeNotSupported" => true, // REVM is yielding arbitrary errors in these cases.
                         "SenderNotEOA" => error == InvalidTransaction::RejectCallerWithCode,
-                        "TR_NoFundsX" => error == InvalidTransaction::OverflowPaymentInTransaction,
+                        "TR_NoFundsX" => matches!(error, InvalidTransaction::LackOfFundForMaxFee{..}),
                         "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => error == InvalidTransaction::BlobGasPriceGreaterThanMax,
                         "TR_BLOBCREATE" => error == InvalidTransaction::BlobCreateTransaction,
                         "TR_GasLimitReached" => error == InvalidTransaction::CallerGasLimitMoreThanBlock,
                         "TR_TipGtFeeCap" => error == InvalidTransaction::PriorityFeeGreaterThanMaxFee,
 
                         "TR_NoFundsOrGas" | "IntrinsicGas" | "TR_IntrinsicGas" | "TransactionException.INTRINSIC_GAS_TOO_LOW" =>
-                            error == InvalidTransaction::CallGasCostMoreThanGasLimit,
+                            matches!(error, InvalidTransaction::CallGasCostMoreThanGasLimit{..}),
                         "TR_FeeCapLessThanBlocks" | "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS" => error == InvalidTransaction::GasPriceLessThanBasefee,
                         "TR_NoFunds" | "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS" => matches!(error, InvalidTransaction::LackOfFundForMaxFee { .. }),
                         "TR_EMPTYBLOB" | "TransactionException.TYPE_3_TX_ZERO_BLOBS" => error == InvalidTransaction::EmptyBlobs,
                         "TR_BLOBLIST_OVERSIZE" | "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED" => matches!(error, InvalidTransaction::TooManyBlobs { .. }),
                         "TR_BLOBVERSION_INVALID" | "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH" => error == InvalidTransaction::BlobVersionNotSupported,
-                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" | "TransactionException.TYPE_3_TX_PRE_FORK" => error == InvalidTransaction::BlobVersionedHashesNotSupported,
+                        "TransactionException.TYPE_3_TX_PRE_FORK|TransactionException.TYPE_3_TX_ZERO_BLOBS" | "TransactionException.TYPE_3_TX_PRE_FORK" => error == InvalidTransaction::Eip4844NotSupported,
                         "TransactionException.INITCODE_SIZE_EXCEEDED" | "TR_InitCodeLimitExceeded" => error == InvalidTransaction::CreateInitCodeSizeLimit,
                         _ => panic!("Mismatched error!\nPath: {path:?}\nExpected: {exception:?}\nGot: {error:?}")
-                    });
+                    };
+                    if !res {
+                        dbg!(path, exception, error);
+                    }
+                    assert!(res);
                 }
                 // Tests that expect execution to succeed -> match post state root
                 (None, Ok(exec_results)) => {

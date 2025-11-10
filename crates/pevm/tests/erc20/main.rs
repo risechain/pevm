@@ -12,7 +12,8 @@ use common::test_execute_revm;
 use erc20::generate_cluster;
 use pevm::chain::PevmEthereum;
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
-use revm::primitives::{Address, TxEnv};
+use revm::context::TxEnv;
+use revm::primitives::Address;
 use std::sync::Arc;
 
 #[test]

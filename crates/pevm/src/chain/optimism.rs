@@ -1,23 +1,28 @@
 //! Optimism
 use alloy_consensus::Transaction;
-use alloy_primitives::{Address, B256, Bytes, ChainId, U256};
+use alloy_primitives::{Address, B256, ChainId, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
-use op_alloy_consensus::{
-    DepositTransaction, OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType,
-};
+use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType};
 use op_alloy_network::eip2718::Encodable2718;
-use revm::{
-    Handler,
-    primitives::{AuthorizationList, BlockEnv, OptimismFields, SpecId, TxEnv},
+use op_revm::{
+    L1BlockInfo, OpBuilder, OpContext, OpEvm, OpHaltReason, OpSpecId, OpTransaction,
+    OpTransactionError,
+    constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT},
+    transaction::{OpTxTr, deposit::DepositTransactionParts},
 };
+use revm::{
+    Context, Database, MainContext,
+    context::{BlockEnv, CfgEnv, TxEnv},
+};
+use smallvec::SmallVec;
 
 use crate::{
-    BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, hash_deterministic,
-    mv_memory::MvMemory,
+    BuildIdentityHasher, MemoryLocation, MemoryLocationHash, PevmTxExecutionResult,
+    hash_deterministic, mv_memory::MvMemory,
 };
 
-use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};
+use super::{CalculateReceiptRootError, PevmChain};
 
 /// Implementation of [`PevmChain`] for Optimism
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,41 +55,25 @@ pub enum OptimismTransactionParsingError {
     MissingGasPrice,
 }
 
-fn get_optimism_gas_price(tx: &OpTxEnvelope) -> Result<U256, OptimismTransactionParsingError> {
+fn get_optimism_gas_price(tx: &OpTxEnvelope) -> Result<u128, OptimismTransactionParsingError> {
     match tx.tx_type() {
         OpTxType::Legacy | OpTxType::Eip2930 => tx
             .gas_price()
-            .map(U256::from)
             .ok_or(OptimismTransactionParsingError::MissingGasPrice),
-        OpTxType::Eip1559 | OpTxType::Eip7702 => Ok(U256::from(tx.max_fee_per_gas())),
-        OpTxType::Deposit => Ok(U256::ZERO),
+        OpTxType::Eip1559 | OpTxType::Eip7702 => Ok(tx.max_fee_per_gas()),
+        OpTxType::Deposit => Ok(0),
     }
-}
-
-/// Extract [`OptimismFields`] from [`OpTxEnvelope`]
-fn get_optimism_fields(
-    tx: &OpTxEnvelope,
-) -> Result<OptimismFields, OptimismTransactionParsingError> {
-    let mut envelope_buf = Vec::<u8>::new();
-    tx.encode_2718(&mut envelope_buf);
-
-    let (source_hash, mint) = match &tx {
-        OpTxEnvelope::Deposit(deposit) => (deposit.inner().source_hash(), deposit.inner().mint()),
-        _ => (None, None),
-    };
-
-    Ok(OptimismFields {
-        source_hash,
-        mint,
-        is_system_transaction: Some(tx.is_system_transaction()),
-        enveloped_tx: Some(Bytes::from(envelope_buf)),
-    })
 }
 
 impl PevmChain for PevmOptimism {
     type Network = op_alloy_network::Optimism;
     type Transaction = op_alloy_rpc_types::Transaction;
     type Envelope = OpTxEnvelope;
+    type Evm<DB: Database> = OpEvm<OpContext<DB>, ()>;
+    type EvmSpecId = OpSpecId;
+    type EvmTx = OpTransaction<TxEnv>;
+    type EvmHaltReason = OpHaltReason;
+    type EvmErrorType = OpTransactionError;
     type BlockSpecError = OptimismBlockSpecError;
     type TransactionParsingError = OptimismTransactionParsingError;
 
@@ -101,20 +90,20 @@ impl PevmChain for PevmOptimism {
         }
     }
 
-    fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError> {
+    fn get_block_spec(&self, header: &Header) -> Result<OpSpecId, Self::BlockSpecError> {
         // TODO: The implementation below is only true for Optimism Mainnet.
         // When supporting other networks (e.g. Optimism Sepolia), remember to adjust the code here.
         if header.timestamp >= 1720627201 {
-            Ok(SpecId::FJORD)
+            Ok(OpSpecId::FJORD)
         } else if header.timestamp >= 1710374401 {
-            Ok(SpecId::ECOTONE)
+            Ok(OpSpecId::ECOTONE)
         } else if header.timestamp >= 1704992401 {
-            Ok(SpecId::CANYON)
+            Ok(OpSpecId::CANYON)
         } else if header.number >= 105235063 {
             // On Optimism Mainnet, Bedrock and Regolith are activated at the same time.
-            // Therefore, this function never returns SpecId::BEDROCK.
+            // Therefore, this function never returns OpSpecId::BEDROCK.
             // The statement above might not be true for other networks, e.g. Optimism Goerli.
-            Ok(SpecId::REGOLITH)
+            Ok(OpSpecId::REGOLITH)
         } else {
             // TODO: revm does not support pre-Bedrock blocks.
             // https://docs.optimism.io/builders/node-operators/architecture#legacy-geth
@@ -122,16 +111,31 @@ impl PevmChain for PevmOptimism {
         }
     }
 
-    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
+    fn build_evm<DB: Database>(
+        &self,
+        spec_id: Self::EvmSpecId,
+        block_env: BlockEnv,
+        db: DB,
+    ) -> Self::Evm<DB> {
+        Context::mainnet()
+            .with_cfg(CfgEnv::new_with_spec(spec_id))
+            .with_block(block_env)
+            .with_db(db)
+            .with_tx(OpTransaction::default())
+            .with_chain(L1BlockInfo::default())
+            .build_op()
+    }
+
+    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[OpTransaction<TxEnv>]) -> MvMemory {
         let beneficiary_location_hash =
-            hash_deterministic(MemoryLocation::Basic(block_env.coinbase));
-        let l1_fee_recipient_location_hash = hash_deterministic(revm::L1_FEE_RECIPIENT);
-        let base_fee_recipient_location_hash = hash_deterministic(revm::BASE_FEE_RECIPIENT);
+            hash_deterministic(MemoryLocation::Basic(block_env.beneficiary));
+        let l1_fee_recipient_location_hash = hash_deterministic(L1_FEE_RECIPIENT);
+        let base_fee_recipient_location_hash = hash_deterministic(BASE_FEE_RECIPIENT);
 
         // TODO: Estimate more locations based on sender, to, etc.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
         for (index, tx) in txs.iter().enumerate() {
-            if tx.optimism.source_hash.is_none() {
+            if tx.is_deposit() {
                 estimated_locations
                     .entry(beneficiary_location_hash)
                     .or_insert_with(|| Vec::with_capacity(txs.len()))
@@ -153,34 +157,40 @@ impl PevmChain for PevmOptimism {
         MvMemory::new(
             txs.len(),
             estimated_locations,
-            [
-                block_env.coinbase,
-                revm::L1_FEE_RECIPIENT,
-                revm::BASE_FEE_RECIPIENT,
-            ],
+            [block_env.beneficiary, L1_FEE_RECIPIENT, BASE_FEE_RECIPIENT],
         )
     }
 
-    fn get_handler<'a, EXT, DB: revm::Database>(
+    fn get_rewards<DB: Database>(
         &self,
-        spec_id: SpecId,
-        with_reward_beneficiary: bool,
-    ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB> {
-        let mut handler = Handler::optimism_with_spec(spec_id);
-        if !with_reward_beneficiary {
-            handler.post_execution.reward_beneficiary = std::sync::Arc::new(|_, _| Ok(()));
-        }
-        handler
-    }
-
-    fn get_reward_policy(&self) -> RewardPolicy {
-        RewardPolicy::Optimism {
-            l1_fee_recipient_location_hash: hash_deterministic(MemoryLocation::Basic(
-                revm::optimism::L1_FEE_RECIPIENT,
-            )),
-            base_fee_vault_location_hash: hash_deterministic(MemoryLocation::Basic(
-                revm::optimism::BASE_FEE_RECIPIENT,
-            )),
+        beneficiary_location_hash: u64,
+        gas_used: U256,
+        gas_price: U256,
+        evm: &mut Self::Evm<DB>,
+        tx: &Self::EvmTx,
+    ) -> SmallVec<[(MemoryLocationHash, U256); 1]> {
+        let is_deposit = !tx.deposit.source_hash.is_empty();
+        if is_deposit {
+            SmallVec::new()
+        } else {
+            let Some(enveloped_tx) = &tx.enveloped_tx else {
+                panic!("[OPTIMISM] Failed to load enveloped transaction.");
+            };
+            let spec_id = evm.0.cfg.spec;
+            let l1_cost = evm.0.chain.calculate_tx_l1_cost(enveloped_tx, spec_id);
+            let l1_fee_recipient_location_hash = hash_deterministic(L1_FEE_RECIPIENT);
+            let base_fee_recipient_location_hash = hash_deterministic(BASE_FEE_RECIPIENT);
+            smallvec::smallvec![
+                (
+                    beneficiary_location_hash,
+                    gas_price.saturating_mul(gas_used)
+                ),
+                (l1_fee_recipient_location_hash, l1_cost),
+                (
+                    base_fee_recipient_location_hash,
+                    U256::from(evm.0.block.basefee).saturating_mul(gas_used),
+                ),
+            ]
         }
     }
 
@@ -189,7 +199,7 @@ impl PevmChain for PevmOptimism {
     // https://github.com/paradigmxyz/reth/blob/b4a1b733c93f7e262f1b774722670e08cdcb6276/crates/primitives/src/proofs.rs
     fn calculate_receipt_root(
         &self,
-        spec_id: SpecId,
+        spec_id: OpSpecId,
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> Result<B256, CalculateReceiptRootError> {
@@ -211,8 +221,9 @@ impl PevmChain for PevmOptimism {
                             .ok_or(CalculateReceiptRootError::OpDepositMissingSender)?;
                         let receipt = OpDepositReceipt {
                             inner: receipt,
-                            deposit_nonce: (spec_id >= SpecId::CANYON).then_some(account.nonce - 1),
-                            deposit_receipt_version: (spec_id >= SpecId::CANYON).then_some(1),
+                            deposit_nonce: (spec_id >= OpSpecId::CANYON)
+                                .then_some(account.nonce - 1),
+                            deposit_receipt_version: (spec_id >= OpSpecId::CANYON).then_some(1),
                         };
                         OpReceiptEnvelope::Deposit(receipt.with_bloom())
                     }
@@ -235,32 +246,52 @@ impl PevmChain for PevmOptimism {
         Ok(hash_builder.root())
     }
 
-    fn get_tx_env(&self, tx: &Self::Transaction) -> Result<TxEnv, OptimismTransactionParsingError> {
-        Ok(TxEnv {
-            optimism: get_optimism_fields(&tx.inner.inner)?,
-            caller: tx.inner.inner.signer(),
-            gas_limit: tx.gas_limit(),
-            gas_price: get_optimism_gas_price(&tx.inner.inner)?,
-            gas_priority_fee: tx.max_priority_fee_per_gas().map(U256::from),
-            transact_to: tx.kind(),
-            value: tx.value(),
-            data: tx.input().clone(),
-            nonce: Some(tx.nonce()),
-            chain_id: tx.chain_id(),
-            access_list: tx.access_list().cloned().unwrap_or_default().to_vec(),
-            blob_hashes: tx.blob_versioned_hashes().unwrap_or_default().to_vec(),
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas().map(U256::from),
-            authorization_list: tx
-                .authorization_list()
-                .map(|auths| AuthorizationList::Signed(auths.to_vec())),
+    fn get_tx_env(
+        &self,
+        tx: &Self::Transaction,
+    ) -> Result<OpTransaction<TxEnv>, OptimismTransactionParsingError> {
+        Ok(OpTransaction {
+            base: TxEnv {
+                tx_type: tx.inner.inner.tx_type().into(),
+                caller: tx.inner.inner.signer(),
+                gas_limit: tx.gas_limit(),
+                gas_price: get_optimism_gas_price(&tx.inner.inner)?,
+                gas_priority_fee: tx.max_priority_fee_per_gas(),
+                kind: tx.kind(),
+                value: tx.value(),
+                data: tx.input().clone(),
+                nonce: tx.nonce(),
+                chain_id: tx.chain_id(),
+                access_list: tx.access_list().cloned().unwrap_or_default(),
+                blob_hashes: tx.blob_versioned_hashes().unwrap_or_default().to_vec(),
+                max_fee_per_blob_gas: tx.max_fee_per_blob_gas().unwrap_or_default(),
+                authorization_list: tx
+                    .authorization_list()
+                    .map(|auths| auths.to_vec())
+                    .unwrap_or_default(),
+            },
+            enveloped_tx: None, // TODO: Do we need to fill this?
+            deposit: if let Some(deposit) = tx.inner.inner.as_deposit() {
+                DepositTransactionParts::new(
+                    deposit.source_hash,
+                    deposit.mint,
+                    deposit.is_system_transaction,
+                )
+            } else {
+                DepositTransactionParts::new(B256::ZERO, None, false)
+            },
         })
     }
 
-    fn is_eip_1559_enabled(&self, _spec_id: SpecId) -> bool {
+    fn into_tx_env(&self, tx: Self::EvmTx) -> TxEnv {
+        tx.base
+    }
+
+    fn is_eip_1559_enabled(&self, _: OpSpecId) -> bool {
         true
     }
 
-    fn is_eip_161_enabled(&self, _spec_id: SpecId) -> bool {
+    fn is_eip_161_enabled(&self, _: OpSpecId) -> bool {
         true
     }
 }

@@ -4,8 +4,11 @@ use pevm::{
     EvmAccount, Pevm, Storage,
     chain::{CalculateReceiptRootError, PevmChain},
 };
-use revm::primitives::{Address, BlockEnv, SpecId, TxEnv, U256, alloy_primitives::U160};
-use std::{num::NonZeroUsize, thread};
+use revm::{
+    context::BlockEnv,
+    primitives::{Address, U256, alloy_primitives::U160},
+};
+use std::{fmt::Debug, num::NonZeroUsize, thread};
 
 /// Mock an account from an integer index that is used as the address.
 /// Useful for mock iterations.
@@ -23,24 +26,24 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
 
 /// Execute an REVM block sequentially and parallelly with PEVM and assert that
 /// the execution results match.
-pub fn test_execute_revm<C, S>(chain: &C, storage: S, txs: Vec<TxEnv>)
+pub fn test_execute_revm<C, S>(chain: &C, storage: S, txs: Vec<C::EvmTx>)
 where
     C: PevmChain + PartialEq + Send + Sync,
-    S: Storage + Send + Sync,
+    S: Storage + Send + Sync + Debug,
 {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     assert_eq!(
         pevm::execute_revm_sequential(
             chain,
             &storage,
-            SpecId::LATEST,
+            C::EvmSpecId::default(),
             BlockEnv::default(),
             txs.clone(),
         ),
         Pevm::default().execute_revm_parallel(
             chain,
             &storage,
-            SpecId::LATEST,
+            C::EvmSpecId::default(),
             BlockEnv::default(),
             txs,
             concurrency_level,
@@ -57,7 +60,7 @@ pub fn test_execute_alloy<C, S>(
     must_match_block_header: bool,
 ) where
     C: PevmChain + PartialEq + Send + Sync,
-    S: Storage + Send + Sync,
+    S: Storage + Send + Sync + Debug,
 {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let mut pevm = Pevm::default();

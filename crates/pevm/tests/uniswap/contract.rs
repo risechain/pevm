@@ -3,10 +3,13 @@ use crate::common::storage::{
 };
 use hashbrown::HashMap;
 use pevm::EvmAccount;
-use revm::primitives::{
-    Address, B256, Bytecode, Bytes, FixedBytes, U256, fixed_bytes,
-    hex::{FromHex, ToHexExt},
-    keccak256, uint,
+use revm::{
+    primitives::{
+        Address, B256, Bytes, FixedBytes, U256, fixed_bytes,
+        hex::{FromHex, ToHexExt},
+        keccak256, uint,
+    },
+    state::Bytecode,
 };
 use rustc_hash::FxBuildHasher;
 

@@ -6,14 +6,20 @@ use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
 use revm::{
-    Handler,
-    primitives::{AuthorizationList, BlockEnv, SpecId, TxEnv},
+    Context, Database, MainBuilder, MainContext, MainnetEvm,
+    context::{
+        BlockEnv, CfgEnv, TxEnv,
+        result::{HaltReason, InvalidTransaction},
+    },
+    handler::MainnetContext,
+    primitives::hardfork::SpecId,
 };
+use smallvec::SmallVec;
 
-use super::{CalculateReceiptRootError, PevmChain, RewardPolicy};
+use super::{CalculateReceiptRootError, PevmChain};
 use crate::{
-    BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx, hash_deterministic,
-    mv_memory::MvMemory,
+    BuildIdentityHasher, MemoryLocation, MemoryLocationHash, PevmTxExecutionResult, TxIdx,
+    hash_deterministic, mv_memory::MvMemory,
 };
 
 /// Implementation of [`PevmChain`] for Ethereum
@@ -39,13 +45,12 @@ pub enum EthereumTransactionParsingError {
     MissingGasPrice,
 }
 
-fn get_ethereum_gas_price(tx: &TxEnvelope) -> Result<U256, EthereumTransactionParsingError> {
+fn get_ethereum_gas_price(tx: &TxEnvelope) -> Result<u128, EthereumTransactionParsingError> {
     match tx.tx_type() {
         TxType::Legacy | TxType::Eip2930 => tx
             .gas_price()
-            .map(U256::from)
             .ok_or(EthereumTransactionParsingError::MissingGasPrice),
-        TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => Ok(U256::from(tx.max_fee_per_gas())),
+        TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => Ok(tx.max_fee_per_gas()),
     }
 }
 
@@ -53,6 +58,11 @@ impl PevmChain for PevmEthereum {
     type Network = alloy_provider::network::Ethereum;
     type Transaction = alloy_rpc_types_eth::Transaction;
     type Envelope = TxEnvelope;
+    type Evm<DB: Database> = MainnetEvm<MainnetContext<DB>>;
+    type EvmSpecId = SpecId;
+    type EvmTx = TxEnv;
+    type EvmHaltReason = HaltReason;
+    type EvmErrorType = InvalidTransaction;
     type BlockSpecError = std::convert::Infallible;
     type TransactionParsingError = EthereumTransactionParsingError;
 
@@ -100,36 +110,53 @@ impl PevmChain for PevmEthereum {
         })
     }
 
+    fn build_evm<DB: Database>(
+        &self,
+        spec_id: Self::EvmSpecId,
+        block_env: BlockEnv,
+        db: DB,
+    ) -> Self::Evm<DB> {
+        Context::mainnet()
+            .with_cfg(CfgEnv::new_with_spec(spec_id))
+            .with_block(block_env)
+            .with_db(db)
+            .build_mainnet()
+    }
+
     /// Get the REVM tx envs of an Alloy block.
     // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
     // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
     // TODO: Properly test this.
     fn get_tx_env(&self, tx: &Self::Transaction) -> Result<TxEnv, EthereumTransactionParsingError> {
         Ok(TxEnv {
+            tx_type: tx.inner.tx_type().into(),
             caller: tx.inner.signer(),
             gas_limit: tx.gas_limit(),
             gas_price: get_ethereum_gas_price(&tx.inner)?,
-            gas_priority_fee: tx.max_priority_fee_per_gas().map(U256::from),
-            transact_to: tx.kind(),
+            gas_priority_fee: tx.max_priority_fee_per_gas(),
+            kind: tx.kind(),
             value: tx.value(),
             data: tx.input().clone(),
-            nonce: Some(tx.nonce()),
+            nonce: tx.nonce(),
             chain_id: tx.chain_id(),
-            access_list: tx.access_list().cloned().unwrap_or_default().to_vec(),
+            access_list: tx.access_list().cloned().unwrap_or_default(),
             blob_hashes: tx.blob_versioned_hashes().unwrap_or_default().to_vec(),
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas().map(U256::from),
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas().unwrap_or_default(),
             authorization_list: tx
                 .authorization_list()
-                .map(|auths| AuthorizationList::Signed(auths.to_vec())),
-            #[cfg(feature = "optimism")]
-            optimism: revm::primitives::OptimismFields::default(),
+                .map(|auths| auths.to_vec())
+                .unwrap_or_default(),
         })
+    }
+
+    fn into_tx_env(&self, tx: Self::EvmTx) -> TxEnv {
+        tx
     }
 
     fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
         let block_size = txs.len();
         let beneficiary_location_hash =
-            hash_deterministic(MemoryLocation::Basic(block_env.coinbase));
+            hash_deterministic(MemoryLocation::Basic(block_env.beneficiary));
 
         // TODO: Estimate more locations based on sender, to, etc.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
@@ -138,23 +165,21 @@ impl PevmChain for PevmEthereum {
             (0..block_size).collect::<Vec<TxIdx>>(),
         );
 
-        MvMemory::new(block_size, estimated_locations, [block_env.coinbase])
+        MvMemory::new(block_size, estimated_locations, [block_env.beneficiary])
     }
 
-    fn get_handler<'a, EXT, DB: revm::Database>(
+    fn get_rewards<DB: Database>(
         &self,
-        spec_id: SpecId,
-        with_reward_beneficiary: bool,
-    ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB> {
-        let mut handler = Handler::mainnet_with_spec(spec_id);
-        if !with_reward_beneficiary {
-            handler.post_execution.reward_beneficiary = std::sync::Arc::new(|_, _| Ok(()));
-        }
-        handler
-    }
-
-    fn get_reward_policy(&self) -> RewardPolicy {
-        RewardPolicy::Ethereum
+        beneficiary_location_hash: u64,
+        gas_used: U256,
+        gas_price: U256,
+        _: &mut Self::Evm<DB>,
+        _: &Self::EvmTx,
+    ) -> SmallVec<[(MemoryLocationHash, U256); 1]> {
+        smallvec::smallvec![(
+            beneficiary_location_hash,
+            U256::from(gas_price).saturating_mul(gas_used)
+        )]
     }
 
     // Refer to section 4.3.2. Holistic Validity in the Ethereum Yellow Paper.

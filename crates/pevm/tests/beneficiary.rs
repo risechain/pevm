@@ -1,16 +1,22 @@
 //! Tests for the beneficiary account, especially for the lazy update of its balance to avoid
 //! "implicit" dependency among consecutive transactions.
 
+use std::collections::HashMap;
+
 use pevm::InMemoryStorage;
 use pevm::chain::PevmEthereum;
 use rand::random;
-use revm::primitives::{Address, TransactTo, U256, alloy_primitives::U160, env::TxEnv};
+use revm::{
+    context::{TransactTo, TxEnv},
+    primitives::{Address, U256, alloy_primitives::U160},
+};
 
 pub mod common;
 
 const BLOCK_SIZE: usize = 100_000;
 
 fn test_beneficiary(get_address: fn(usize) -> Address) {
+    let mut nonces = HashMap::new();
     common::test_execute_revm(
         &PevmEthereum::mainnet(),
         // Mock the beneficiary account (`Address:ZERO`) and the next `BLOCK_SIZE` user accounts.
@@ -25,11 +31,14 @@ fn test_beneficiary(get_address: fn(usize) -> Address) {
             .map(|i| {
                 // Randomly insert a beneficiary spending every ~256 txs
                 let address = get_address(i);
+                let nonce = nonces.entry(address).or_insert(0);
+                *nonce = *nonce + 1;
                 TxEnv {
                     caller: address,
-                    transact_to: TransactTo::Call(address),
+                    nonce: *nonce,
+                    kind: TransactTo::Call(address),
                     value: U256::from(1),
-                    gas_price: U256::from(1),
+                    gas_price: 1,
                     ..TxEnv::default()
                 }
             })

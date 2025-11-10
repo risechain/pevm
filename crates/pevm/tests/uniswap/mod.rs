@@ -6,7 +6,10 @@ pub mod contract;
 use crate::erc20::contract::ERC20Token;
 use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
 use pevm::{Bytecodes, ChainState, EvmAccount};
-use revm::primitives::{Address, B256, Bytes, TransactTo, TxEnv, U256, fixed_bytes, uint};
+use revm::{
+    context::{TransactTo, TxEnv},
+    primitives::{Address, B256, Bytes, U256, fixed_bytes, uint},
+};
 
 /// The maximum amount of gas that can be used for a transaction in this configuration.
 pub const GAS_LIMIT: u64 = 200_000;
@@ -164,10 +167,10 @@ pub fn generate_cluster(
             txs.push(TxEnv {
                 caller: *person,
                 gas_limit: GAS_LIMIT,
-                gas_price: U256::from(0xb2d05e07u64),
-                transact_to: TransactTo::Call(single_swap_address),
+                gas_price: 0xb2d05e07,
+                kind: TransactTo::Call(single_swap_address),
                 data: Bytes::from(data_bytes),
-                nonce: Some(nonce as u64),
+                nonce: nonce as u64,
                 ..TxEnv::default()
             })
         }

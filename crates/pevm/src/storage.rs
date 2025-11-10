@@ -1,15 +1,21 @@
-use std::{fmt::Display, sync::Arc};
+use std::{
+    fmt::{Debug, Display},
+    sync::Arc,
+};
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 use bitvec::vec::BitVec;
 use hashbrown::HashMap;
 use revm::{
     DatabaseRef,
-    interpreter::analysis::to_analysed,
-    primitives::{
-        Account, AccountInfo, Bytecode, EIP7702_MAGIC_BYTES, Eip7702Bytecode, Eof, JumpTable,
-        KECCAK_EMPTY,
+    bytecode::{
+        Eof, JumpTable,
+        eip7702::{EIP7702_MAGIC_BYTES, Eip7702Bytecode},
+        eof::EofDecodeError,
     },
+    context::DBErrorMarker,
+    primitives::KECCAK_EMPTY,
+    state::{Account, AccountInfo, Bytecode},
 };
 use rustc_hash::FxBuildHasher;
 use serde::{Deserialize, Serialize};
@@ -108,21 +114,18 @@ pub enum EvmCode {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BytecodeConversionError {
     #[error("Failed to decode EOF")]
-    EofDecodingError(#[source] revm::primitives::eof::EofDecodeError),
+    EofDecodingError(#[source] EofDecodeError),
 }
 
 impl TryFrom<EvmCode> for Bytecode {
     type Error = BytecodeConversionError;
     fn try_from(code: EvmCode) -> Result<Self, Self::Error> {
         match code {
-            // TODO: Turn this [unsafe] into a proper [Result]
-            EvmCode::Legacy(code) => unsafe {
-                Ok(Self::new_analyzed(
-                    code.bytecode,
-                    code.original_len,
-                    JumpTable(code.jump_table),
-                ))
-            },
+            EvmCode::Legacy(code) => Ok(Self::new_analyzed(
+                code.bytecode,
+                code.original_len,
+                JumpTable(code.jump_table),
+            )),
             EvmCode::Eip7702(code) => {
                 let mut raw = EIP7702_MAGIC_BYTES.to_vec();
                 raw.push(code.version);
@@ -144,8 +147,6 @@ impl TryFrom<EvmCode> for Bytecode {
 impl From<Bytecode> for EvmCode {
     fn from(code: Bytecode) -> Self {
         match code {
-            // This arm will recursively fallback to LegacyAnalyzed.
-            Bytecode::LegacyRaw(_) => to_analysed(code).into(),
             Bytecode::LegacyAnalyzed(code) => Self::Legacy(LegacyCode {
                 // We should be able to consume these instead of cloning if the
                 // fields are `pub`. Won't be relevant as we rewrite `revm` anyway.
@@ -177,7 +178,7 @@ pub type BlockHashes = HashMap<u64, B256, BuildIdentityHasher>;
 /// TODO: Better API for third-party integration.
 pub trait Storage {
     /// Errors when querying data from storage.
-    type Error: Display;
+    type Error: Display + Debug;
 
     /// Get basic account information.
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error>;
@@ -207,12 +208,14 @@ pub enum StorageWrapperError<S: Storage> {
     InvalidBytecode(BytecodeConversionError),
 }
 
+impl<S: Storage + Debug> DBErrorMarker for StorageWrapperError<S> {}
+
 /// A Storage wrapper that implements REVM's [`DatabaseRef`] for ease of
 /// integration.
 #[derive(Debug)]
 pub struct StorageWrapper<'a, S: Storage>(pub &'a S);
 
-impl<S: Storage> DatabaseRef for StorageWrapper<'_, S> {
+impl<S: Storage + Debug> DatabaseRef for StorageWrapper<'_, S> {
     type Error = StorageWrapperError<S>;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
@@ -283,8 +286,7 @@ pub use rpc::RpcStorage;
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Bytes, bytes};
-    use revm::primitives::eip7702::EIP7702_VERSION;
-    use revm::primitives::eof::EofDecodeError;
+    use revm::bytecode::eip7702::EIP7702_VERSION;
 
     use super::*;
 
@@ -315,16 +317,10 @@ mod tests {
 
     #[test]
     fn legacy_bytecodes() {
-        let contract_bytecode = Bytecode::new_legacy(BYTECODE);
-        let analyzed = to_analysed(contract_bytecode.clone());
-
-        let evm_code = EvmCode::from(analyzed.clone());
-        assert!(eq_bytecodes(&analyzed, &evm_code));
-        assert_eq!(analyzed, evm_code.try_into().unwrap());
-
-        let evm_code = EvmCode::from(contract_bytecode);
-        assert!(eq_bytecodes(&analyzed, &evm_code));
-        assert_eq!(analyzed, evm_code.try_into().unwrap());
+        let bytecode = Bytecode::new_legacy(BYTECODE);
+        let evm_code = EvmCode::from(bytecode.clone());
+        assert!(eq_bytecodes(&bytecode, &evm_code));
+        assert_eq!(bytecode, evm_code.try_into().unwrap());
     }
 
     #[test]

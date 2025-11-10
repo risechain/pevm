@@ -5,7 +5,10 @@ pub mod contract;
 
 use contract::ERC20Token;
 use pevm::{Bytecodes, ChainState, EvmAccount};
-use revm::primitives::{Address, TransactTo, TxEnv, U256, uint};
+use revm::{
+    context::{TransactTo, TxEnv},
+    primitives::{Address, U256, uint},
+};
 
 /// The maximum amount of gas that can be used for a transaction in this configuration.
 pub const GAS_LIMIT: u64 = 35_000;
@@ -61,10 +64,10 @@ pub fn generate_cluster(
                 txs.push(TxEnv {
                     caller: *person,
                     gas_limit: GAS_LIMIT,
-                    gas_price: U256::from(0xb2d05e07u64),
-                    transact_to: TransactTo::Call(gld_address),
+                    gas_price: 0xb2d05e07,
+                    kind: TransactTo::Call(gld_address),
                     data: calldata,
-                    nonce: Some(nonce as u64),
+                    nonce: nonce as u64,
                     ..TxEnv::default()
                 })
             }

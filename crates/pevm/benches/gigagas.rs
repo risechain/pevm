@@ -10,7 +10,10 @@ use pevm::{
     Bytecodes, ChainState, EvmAccount, InMemoryStorage, Pevm, chain::PevmEthereum,
     execute_revm_sequential,
 };
-use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
+use revm::{
+    context::{BlockEnv, TransactTo, TxEnv},
+    primitives::hardfork::SpecId,
+};
 
 // Better project structure
 
@@ -90,10 +93,10 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
                 let address = Address::from(U160::from(START_ADDRESS + i));
                 TxEnv {
                     caller: address,
-                    transact_to: TransactTo::Call(address),
+                    kind: TransactTo::Call(address),
                     value: U256::from(1),
                     gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
-                    gas_price: U256::from(1),
+                    gas_price: 1,
                     ..TxEnv::default()
                 }
             })
