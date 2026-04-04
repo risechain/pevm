@@ -6,8 +6,7 @@ use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, SpecId, U256};
 
 /// Get the REVM block env of an Alloy block.
 // https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L23-L48
-// TODO: Better error handling & properly test this, especially
-// [blob_excess_gas_and_price].
+// TODO: Better error handling & add tests, especially for [blob_excess_gas_and_price].
 pub(crate) fn get_block_env(header: &Header, spec_id: SpecId) -> BlockEnv {
     BlockEnv {
         number: U256::from(header.number),
