@@ -21,7 +21,7 @@ where
     use alloy_provider::{Provider, ProviderBuilder};
     use alloy_rpc_types_eth::BlockId;
 
-    let provider = ProviderBuilder::<_, _, C::Network>::default().on_http(url);
+    let provider = ProviderBuilder::<_, _, C::Network>::default().connect_http(url);
 
     for &block_number in block_numbers {
         let block = provider

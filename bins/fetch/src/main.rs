@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     let Fetch { block_id, rpc_url } = Fetch::parse();
 
     // Define provider.
-    let provider = ProviderBuilder::<_, _, Ethereum>::default().on_http(rpc_url);
+    let provider = ProviderBuilder::<_, _, Ethereum>::default().connect_http(rpc_url);
 
     // Retrieve block from provider.
     let block = provider
