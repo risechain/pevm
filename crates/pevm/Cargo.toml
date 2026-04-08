@@ -54,6 +54,7 @@ reqwest.workspace = true
 revm-statetest-types.workspace = true
 revme.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 walkdir.workspace = true
 
 [lints]

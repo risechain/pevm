@@ -277,7 +277,7 @@ impl PevmChain for PevmOptimism {
             deposit: if let Some(deposit) = tx.inner.inner.as_deposit() {
                 DepositTransactionParts::new(
                     deposit.source_hash,
-                    deposit.mint,
+                    Some(deposit.mint),
                     deposit.is_system_transaction,
                 )
             } else {

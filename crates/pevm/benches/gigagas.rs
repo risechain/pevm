@@ -40,7 +40,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<TxEnv>) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let chain = PevmEthereum::mainnet();
-    let spec_id = SpecId::LATEST;
+    let spec_id = SpecId::OSAKA;
     let block_env = BlockEnv::default();
     let mut pevm = Pevm::default();
     let mut group = c.benchmark_group(name);

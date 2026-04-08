@@ -42,27 +42,27 @@ use_self = "warn"
 pevm = { path = "crates/pevm", features = ["rpc-storage"] }
 
 # alloy
-alloy-consensus = "0.12.6"
-alloy-primitives = { version = "0.8.25", features = [
+alloy-consensus = "=1.7.3"
+alloy-primitives = { version = "1.0.0", features = [
   "asm-keccak",
   "map-fxhash",
 ] }
-alloy-provider = "0.12.6"
+alloy-provider = "=1.7.3"
 alloy-rlp = "0.3.12"
-alloy-rpc-types-eth = "0.12.6"
-alloy-transport = "0.12.6"
-alloy-trie = "0.7.9"
+alloy-rpc-types-eth = "=1.7.3"
+alloy-transport = "=1.7.3"
+alloy-trie = "0.9.5"
 
 # Will remove [revm] with https://github.com/risechain/pevm/issues/382.
-op-revm = "1.0.0"
-revm = { version = "20.0.0", features = ["serde"] }
-revm-statetest-types = "1.0.0"
-revme = "3.0.0"
+op-revm = "3.0.0"
+revm = { version = "22.0.1", features = ["serde"] }
+revm-statetest-types = "3.0.1"
+revme = "4.0.2"
 
 # OP
-op-alloy-consensus = "0.11.3"
-op-alloy-network = "0.11.3"
-op-alloy-rpc-types = "0.11.3"
+op-alloy-consensus = "0.24.0"
+op-alloy-network = "0.24.0"
+op-alloy-rpc-types = "0.24.0"
 
 # Allocators
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
@@ -78,12 +78,12 @@ color-eyre = "0.6.5"
 criterion = "0.7.0"
 dashmap = "6.1.0"
 flate2 = "1.1.5"
-hashbrown = "0.15.5"
+hashbrown = { version = "0.15.5", features = ["serde"] }
 rand = "0.8.5"
 rayon = "1.11.0"
 reqwest = "0.12.24"
 rustc-hash = "2.1.1"
-serde = "=1.0.221"
+serde = "1.0.228"
 serde_json = "1.0.145"
 smallvec = "1.15.1"
 thiserror = "2.0.17"
