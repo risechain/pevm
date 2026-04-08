@@ -1,4 +1,5 @@
 //! Test if snapshotted mainnet data is correct
+#![cfg(feature = "rpc-storage")]
 
 use alloy_primitives::B256;
 use alloy_provider::{Provider, ProviderBuilder};
