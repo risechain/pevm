@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::fs::File;
 
 #[tokio::test]
-async fn snapshotted_mainnet_block_hashes() {
-    let mut file = File::open("../../data/block_hashes.bincode").unwrap();
+async fn snapshotted_ethereum_block_hashes() {
+    let mut file = File::open("../../data/ethereum/block_hashes.bincode").unwrap();
     let block_hashes = bincode::serde::decode_from_std_read::<BTreeMap<u64, B256>, _, _>(
         &mut file,
         bincode::config::standard(),

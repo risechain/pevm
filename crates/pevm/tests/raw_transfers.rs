@@ -102,19 +102,19 @@ fn ethereum_independent_raw_transfers() {
 }
 
 #[test]
-fn optimism_empty_alloy_block() {
-    use pevm::chain::PevmOptimism;
-    common::test_independent_raw_transfers(&PevmOptimism::mainnet(), 0);
+fn rise_empty_alloy_block() {
+    use pevm::chain::PevmRise;
+    common::test_independent_raw_transfers(&PevmRise, 0);
 }
 
 #[test]
-fn optimism_one_tx_alloy_block() {
-    use pevm::chain::PevmOptimism;
-    common::test_independent_raw_transfers(&PevmOptimism::mainnet(), 1);
+fn rise_one_tx_alloy_block() {
+    use pevm::chain::PevmRise;
+    common::test_independent_raw_transfers(&PevmRise, 1);
 }
 
 #[test]
-fn optimism_independent_raw_transfers() {
-    use pevm::chain::PevmOptimism;
-    common::test_independent_raw_transfers(&PevmOptimism::mainnet(), 100_000);
+fn rise_independent_raw_transfers() {
+    use pevm::chain::PevmRise;
+    common::test_independent_raw_transfers(&PevmRise, 100_000);
 }

@@ -131,18 +131,25 @@ pub trait PevmChain: Debug {
     /// Get a reference to the base [`TxEnv`] from a chain-specific transaction
     fn tx_env<'a>(&self, tx: &'a Self::EvmTx) -> &'a TxEnv;
 
+    /// Whether this transaction has a nonce. Return false for types that have no nonce
+    /// (e.g. OP deposits) so pevm's sender-nonce ordering check is skipped. Implementations
+    /// may also adjust EVM cfg as a side effect (e.g. setting `disable_nonce_check`).
+    fn has_nonce<DB: Database>(&self, _: &mut Self::Evm<DB>, _: &Self::EvmTx) -> bool {
+        true
+    }
+
     /// Build [`MvMemory`]
     fn build_mv_memory(&self, _block_env: &BlockEnv, txs: &[Self::EvmTx]) -> MvMemory {
         MvMemory::new(txs.len(), [], [])
     }
 
     /// Get rewards (balance increments) to beneficiary accounts, etc.
-    fn get_rewards<DB: Database>(
+    fn get_rewards(
         &self,
         beneficiary_location_hash: u64,
         gas_used: U256,
         gas_price: U256,
-        evm: &mut Self::Evm<DB>,
+        basefee: u64,
         tx: &Self::EvmTx,
     ) -> SmallVec<[(MemoryLocationHash, U256); 1]>;
 
@@ -166,5 +173,5 @@ pub trait PevmChain: Debug {
 mod ethereum;
 pub use ethereum::PevmEthereum;
 
-mod optimism;
-pub use optimism::PevmOptimism;
+mod rise;
+pub use rise::{PevmRise, RiseTransactionParsingError};

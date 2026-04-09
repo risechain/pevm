@@ -1,4 +1,6 @@
-//! Optimism
+//! RISE
+use std::sync::LazyLock;
+
 use alloy_consensus::Transaction;
 use alloy_primitives::{Address, B256, ChainId, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header};
@@ -8,13 +10,14 @@ use op_alloy_network::eip2718::Encodable2718;
 use op_revm::{
     L1BlockInfo, OpBuilder, OpContext, OpEvm, OpHaltReason, OpSpecId, OpTransaction,
     OpTransactionError,
-    constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT},
+    constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT},
     transaction::{OpTxTr, deposit::DepositTransactionParts},
 };
 use revm::{
     Context, Database, MainContext,
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::either::Either,
+    handler::EvmTr,
 };
 use smallvec::SmallVec;
 
@@ -25,48 +28,40 @@ use crate::{
 
 use super::{CalculateReceiptRootError, PevmChain};
 
-/// Implementation of [`PevmChain`] for Optimism
+const RISE_CHAIN_ID: ChainId = 4153; // Mainnet
+
+static BASE_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
+    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(BASE_FEE_RECIPIENT)));
+
+static L1_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
+    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(L1_FEE_RECIPIENT)));
+
+static OPERATOR_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
+    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(OPERATOR_FEE_RECIPIENT)));
+
+/// Implementation of [`PevmChain`] for RISE
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PevmOptimism {
-    id: ChainId,
-}
+pub struct PevmRise;
 
-impl PevmOptimism {
-    /// Optimism Mainnet
-    pub const fn mainnet() -> Self {
-        Self { id: 10 }
-    }
-
-    /// Custom network
-    pub const fn custom(id: ChainId) -> Self {
-        Self { id }
-    }
-}
-
+/// Represents errors that can occur when parsing RISE transactions
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum OptimismBlockSpecError {
-    #[error("Spec is not supported")]
-    UnsupportedSpec,
-}
-
-/// Represents errors that can occur when parsing transactions
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum OptimismTransactionParsingError {
+pub enum RiseTransactionParsingError {
+    /// Transaction is missing a gas price
     #[error("Transaction must set gas price")]
     MissingGasPrice,
 }
 
-fn get_optimism_gas_price(tx: &OpTxEnvelope) -> Result<u128, OptimismTransactionParsingError> {
+fn get_gas_price(tx: &OpTxEnvelope) -> Result<u128, RiseTransactionParsingError> {
     match tx.tx_type() {
         OpTxType::Legacy | OpTxType::Eip2930 => tx
             .gas_price()
-            .ok_or(OptimismTransactionParsingError::MissingGasPrice),
+            .ok_or(RiseTransactionParsingError::MissingGasPrice),
         OpTxType::Eip1559 | OpTxType::Eip7702 => Ok(tx.max_fee_per_gas()),
         OpTxType::Deposit => Ok(0),
     }
 }
 
-impl PevmChain for PevmOptimism {
+impl PevmChain for PevmRise {
     type Network = op_alloy_network::Optimism;
     type Transaction = op_alloy_rpc_types::Transaction;
     type Envelope = OpTxEnvelope;
@@ -75,14 +70,13 @@ impl PevmChain for PevmOptimism {
     type EvmTx = OpTransaction<TxEnv>;
     type EvmHaltReason = OpHaltReason;
     type EvmErrorType = OpTransactionError;
-    type BlockSpecError = OptimismBlockSpecError;
-    type TransactionParsingError = OptimismTransactionParsingError;
+    type BlockSpecError = std::convert::Infallible;
+    type TransactionParsingError = RiseTransactionParsingError;
 
     fn id(&self) -> ChainId {
-        self.id
+        RISE_CHAIN_ID
     }
 
-    // TODO: allow to construct deposit transactions
     fn mock_tx(&self, envelope: Self::Envelope, from: Address) -> Self::Transaction {
         Self::Transaction {
             inner: Self::mock_rpc_tx(envelope, from),
@@ -91,25 +85,9 @@ impl PevmChain for PevmOptimism {
         }
     }
 
-    fn get_block_spec(&self, header: &Header) -> Result<OpSpecId, Self::BlockSpecError> {
-        // TODO: The implementation below is only true for Optimism Mainnet.
-        // When supporting other networks (e.g. Optimism Sepolia), remember to adjust the code here.
-        if header.timestamp >= 1720627201 {
-            Ok(OpSpecId::FJORD)
-        } else if header.timestamp >= 1710374401 {
-            Ok(OpSpecId::ECOTONE)
-        } else if header.timestamp >= 1704992401 {
-            Ok(OpSpecId::CANYON)
-        } else if header.number >= 105235063 {
-            // On Optimism Mainnet, Bedrock and Regolith are activated at the same time.
-            // Therefore, this function never returns OpSpecId::BEDROCK.
-            // The statement above might not be true for other networks, e.g. Optimism Goerli.
-            Ok(OpSpecId::REGOLITH)
-        } else {
-            // TODO: revm does not support pre-Bedrock blocks.
-            // https://docs.optimism.io/builders/node-operators/architecture#legacy-geth
-            Err(OptimismBlockSpecError::UnsupportedSpec)
-        }
+    fn get_block_spec(&self, _header: &Header) -> Result<OpSpecId, Self::BlockSpecError> {
+        // RISE Mainnet launched as JOVIAN; currently all blocks use this spec.
+        Ok(OpSpecId::JOVIAN)
     }
 
     fn build_evm<DB: Database>(
@@ -119,7 +97,7 @@ impl PevmChain for PevmOptimism {
         db: DB,
     ) -> Self::Evm<DB> {
         Context::mainnet()
-            .with_cfg(CfgEnv::new_with_spec(spec_id).with_chain_id(self.id))
+            .with_cfg(CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID))
             .with_block(block_env)
             .with_db(db)
             .with_tx(OpTransaction::default())
@@ -130,27 +108,30 @@ impl PevmChain for PevmOptimism {
     fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[OpTransaction<TxEnv>]) -> MvMemory {
         let beneficiary_location_hash =
             hash_deterministic(MemoryLocation::Basic(block_env.beneficiary));
-        let l1_fee_recipient_location_hash = hash_deterministic(L1_FEE_RECIPIENT);
-        let base_fee_recipient_location_hash = hash_deterministic(BASE_FEE_RECIPIENT);
 
         // TODO: Estimate more locations based on sender, to, etc.
+        // TODO: Benchmark to check whether adding these estimated
+        // locations helps or harms the performance.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
+
         for (index, tx) in txs.iter().enumerate() {
-            if tx.is_deposit() {
+            // Deposit transactions pay no fees so they write nothing to these fee recipients.
+            if !tx.is_deposit() {
                 estimated_locations
                     .entry(beneficiary_location_hash)
                     .or_insert_with(|| Vec::with_capacity(txs.len()))
                     .push(index);
-            } else {
-                // TODO: Benchmark to check whether adding these estimated
-                // locations helps or harms the performance.
                 estimated_locations
-                    .entry(l1_fee_recipient_location_hash)
-                    .or_insert_with(|| Vec::with_capacity(1))
+                    .entry(*BASE_FEE_RECIPIENT_LOCATION_HASH)
+                    .or_insert_with(|| Vec::with_capacity(txs.len()))
                     .push(index);
                 estimated_locations
-                    .entry(base_fee_recipient_location_hash)
-                    .or_insert_with(|| Vec::with_capacity(1))
+                    .entry(*L1_FEE_RECIPIENT_LOCATION_HASH)
+                    .or_insert_with(|| Vec::with_capacity(txs.len()))
+                    .push(index);
+                estimated_locations
+                    .entry(*OPERATOR_FEE_RECIPIENT_LOCATION_HASH)
+                    .or_insert_with(|| Vec::with_capacity(txs.len()))
                     .push(index);
             }
         }
@@ -158,38 +139,40 @@ impl PevmChain for PevmOptimism {
         MvMemory::new(
             txs.len(),
             estimated_locations,
-            [block_env.beneficiary, L1_FEE_RECIPIENT, BASE_FEE_RECIPIENT],
+            [
+                block_env.beneficiary,
+                BASE_FEE_RECIPIENT,
+                L1_FEE_RECIPIENT,
+                OPERATOR_FEE_RECIPIENT,
+            ],
         )
     }
 
-    fn get_rewards<DB: Database>(
+    fn get_rewards(
         &self,
         beneficiary_location_hash: u64,
         gas_used: U256,
         gas_price: U256,
-        evm: &mut Self::Evm<DB>,
+        basefee: u64,
         tx: &Self::EvmTx,
     ) -> SmallVec<[(MemoryLocationHash, U256); 1]> {
         if tx.is_deposit() {
             SmallVec::new()
         } else {
-            let Some(enveloped_tx) = &tx.enveloped_tx else {
-                panic!("[OPTIMISM] Failed to load enveloped transaction.");
-            };
-            let spec_id = evm.0.cfg.spec;
-            let l1_cost = evm.0.chain.calculate_tx_l1_cost(enveloped_tx, spec_id);
-            let l1_fee_recipient_location_hash = hash_deterministic(L1_FEE_RECIPIENT);
-            let base_fee_recipient_location_hash = hash_deterministic(BASE_FEE_RECIPIENT);
             smallvec::smallvec![
                 (
                     beneficiary_location_hash,
                     gas_price.saturating_mul(gas_used)
                 ),
-                (l1_fee_recipient_location_hash, l1_cost),
                 (
-                    base_fee_recipient_location_hash,
-                    U256::from(evm.0.block.basefee).saturating_mul(gas_used),
+                    *BASE_FEE_RECIPIENT_LOCATION_HASH,
+                    U256::from(basefee).saturating_mul(gas_used),
                 ),
+                // RISE disables DA footprint and operator fees. Annoyingly, we still
+                // need to touch these to match revm's sequential execution for now.
+                // Will remove once we rewrite our own EVM implementation.
+                (*L1_FEE_RECIPIENT_LOCATION_HASH, U256::ZERO),
+                (*OPERATOR_FEE_RECIPIENT_LOCATION_HASH, U256::ZERO),
             ]
         }
     }
@@ -249,13 +232,13 @@ impl PevmChain for PevmOptimism {
     fn get_tx_env(
         &self,
         tx: &Self::Transaction,
-    ) -> Result<OpTransaction<TxEnv>, OptimismTransactionParsingError> {
+    ) -> Result<OpTransaction<TxEnv>, RiseTransactionParsingError> {
         Ok(OpTransaction {
             base: TxEnv {
                 tx_type: tx.inner.inner.tx_type().into(),
                 caller: tx.inner.inner.signer(),
                 gas_limit: tx.gas_limit(),
-                gas_price: get_optimism_gas_price(&tx.inner.inner)?,
+                gas_price: get_gas_price(&tx.inner.inner)?,
                 gas_priority_fee: tx.max_priority_fee_per_gas(),
                 kind: tx.kind(),
                 value: tx.value(),
@@ -289,6 +272,15 @@ impl PevmChain for PevmOptimism {
 
     fn tx_env<'a>(&self, tx: &'a OpTransaction<TxEnv>) -> &'a TxEnv {
         &tx.base
+    }
+
+    fn has_nonce<DB: Database>(&self, evm: &mut Self::Evm<DB>, tx: &Self::EvmTx) -> bool {
+        if tx.is_deposit() {
+            evm.ctx().modify_cfg(|cfg| cfg.disable_nonce_check = true);
+            false
+        } else {
+            true
+        }
     }
 
     fn is_eip_1559_enabled(&self, _: OpSpecId) -> bool {

@@ -68,28 +68,32 @@ async fn mainnet_blocks_from_rpc() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "rpc-storage")]
-async fn optimism_mainnet_blocks_from_rpc() {
+async fn rise_mainnet_blocks_from_rpc() {
     test_blocks_from_rpc(
-        pevm::chain::PevmOptimism::mainnet(),
-        get_rpc_url("OPTIMISM_RPC_URL", "https://mainnet.optimism.io"),
-        &[
-            114874075, // CANYON (https://specs.optimism.io/protocol/canyon/overview.html)
-                      // TODO: doesn't pass `Err(ExecutionError("Database(InvalidNonce(0))"))`
-                      // 117874236, // ECOTONE (https://specs.optimism.io/protocol/ecotone/overview.html)
-                      // 122874325, // FJORD (https://specs.optimism.io/protocol/fjord/overview.html)
-                      // 125874340, // GRANITE (https://specs.optimism.io/protocol/granite/overview.html)
-        ],
+        pevm::chain::PevmRise,
+        get_rpc_url("RISE_RPC_URL", "https://rpc.risechain.com"),
+        &[8138510],
     )
     .await;
 }
 
 #[test]
 fn mainnet_blocks_from_disk() {
-    common::for_each_block_from_disk(|block, storage| {
+    common::for_each_block_from_disk("ethereum", |block, storage| {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
             common::test_execute_alloy(&PevmEthereum::mainnet(), &storage, block.clone(), true)
+        }
+    });
+}
+
+#[test]
+fn rise_blocks_from_disk() {
+    use pevm::chain::PevmRise;
+    common::for_each_block_from_disk("rise", |block, storage| {
+        for _ in 0..3 {
+            common::test_execute_alloy(&PevmRise, &storage, block.clone(), true)
         }
     });
 }
