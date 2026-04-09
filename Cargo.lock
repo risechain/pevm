@@ -3441,8 +3441,10 @@ dependencies = [
  "clap",
  "color-eyre",
  "flate2",
+ "op-alloy-network",
  "pevm",
  "reqwest 0.13.2",
+ "serde",
  "serde_json",
  "tokio",
 ]

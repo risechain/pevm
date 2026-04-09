@@ -27,10 +27,15 @@ pub mod storage;
 /// The gas limit for a basic transfer transaction.
 pub const RAW_TRANSFER_GAS_LIMIT: u64 = 21_000;
 
-// TODO: Put somewhere better?
-/// Iterates over blocks stored on disk and processes each block using the provided handler.
-pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage)) {
-    let data_dir = std::path::PathBuf::from("../../data");
+/// Iterates over blocks for `chain` stored on disk and processes each with the provided handler.
+///
+/// Expects `../../data/{chain}/blocks/` for block snapshots and `../../data/{chain}/` for
+/// shared artifacts (`bytecodes.bincode.gz`, `block_hashes.bincode`).
+pub fn for_each_block_from_disk<T: serde::de::DeserializeOwned>(
+    chain: &str,
+    mut handler: impl FnMut(Block<T>, InMemoryStorage),
+) {
+    let data_dir = std::path::PathBuf::from(format!("../../data/{chain}"));
 
     // TODO: Deduplicate logic with [bin/fetch.rs] when there is more usage
     let bytecodes = bincode::serde::decode_from_std_read(
@@ -42,23 +47,23 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
     .map(Arc::new)
     .unwrap();
 
-    let block_hashes = bincode::serde::decode_from_std_read::<BlockHashes, _, _>(
-        &mut BufReader::new(File::open(data_dir.join("block_hashes.bincode")).unwrap()),
-        bincode::config::standard(),
-    )
-    .map(Arc::new)
-    .unwrap();
+    let block_hashes = Arc::new(match File::open(data_dir.join("block_hashes.bincode")) {
+        Ok(file) => bincode::serde::decode_from_std_read::<BlockHashes, _, _>(
+            &mut BufReader::new(file),
+            bincode::config::standard(),
+        )
+        .unwrap(),
+        Err(_) => BlockHashes::default(),
+    });
 
     for block_path in fs::read_dir(data_dir.join("blocks")).unwrap() {
         let block_dir = block_path.unwrap().path();
 
-        // Parse block
         let block = serde_json::from_reader(BufReader::new(
             File::open(block_dir.join("block.json")).unwrap(),
         ))
         .unwrap();
 
-        // Parse state
         let accounts: HashMap<Address, EvmAccount, BuildSuffixHasher> = serde_json::from_reader(
             BufReader::new(File::open(block_dir.join("pre_state.json")).unwrap()),
         )

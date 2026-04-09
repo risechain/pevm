@@ -51,7 +51,7 @@ cargo bench --features global-alloc --bench gigagas
 3. **Multi-version memory** (`mv_memory.rs`) — stores all write sets indexed by `(location, tx_index, incarnation)`; lets each transaction read the latest prior write without locking.
 4. **Pevm** (`pevm.rs`) — top-level orchestrator; sets up the multi-version memory, spawns worker threads via `std::thread::scope`, collects receipts, applies block rewards.
 5. **Storage** (`storage/`) — abstraction over chain state; backends: `InMemoryStorage` (tests) and `RpcStorage` (live chain, feature-gated).
-6. **Chain** (`chain/`) — per-chain policies: `PevmEthereum` for Ethereum mainnet, `PevmOptimism` for OP-EVM chains (RISE, Base, and any other OP Stack chain). Handles block env construction, tx parsing, and reward application.
+6. **Chain** (`chain/`) — per-chain policies: `PevmEthereum` for Ethereum mainnet, `PevmRise` for RISE (OP Stack chain with fixed base fees and no DA footprint). Handles block env construction, tx parsing, and reward application.
 
 ### Key design choices
 

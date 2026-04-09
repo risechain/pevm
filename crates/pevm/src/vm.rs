@@ -138,6 +138,9 @@ struct VmDb<'a, S: Storage> {
     // Indicates if we lazy update this transaction.
     // Only applied to raw transfers' senders & recipients at the moment.
     is_lazy: bool,
+    // Whether to enforce the sender-nonce ordering check for this transaction.
+    // False for transaction types with no nonce (e.g. OP deposits).
+    has_nonce: bool,
     read_set: ReadSet,
     // TODO: Clearer type for [AccountBasic] plus code hash
     read_accounts: HashMap<MemoryLocationHash, (AccountBasic, Option<B256>), BuildIdentityHasher>,
@@ -152,6 +155,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
         tx: &'a TxEnv,
         from_hash: MemoryLocationHash,
         to_hash: Option<MemoryLocationHash>,
+        has_nonce: bool,
     ) -> Result<(), ReadError> {
         self.tx_idx = tx_idx;
         self.tx = tx;
@@ -159,10 +163,18 @@ impl<'a, S: Storage> VmDb<'a, S> {
         self.to_hash = to_hash;
         self.to_code_hash = None;
         self.is_lazy = false;
+        self.has_nonce = has_nonce;
         self.read_set.clear();
         self.read_accounts.clear();
         if let TxKind::Call(to) = tx.kind {
             self.to_code_hash = self.get_code_hash(to)?;
+
+            // We only lazy update raw transfers that already have the sender
+            // or recipient in [MvMemory] since sequentially evaluating memory
+            // locations with only one entry is much costlier than fully
+            // evaluating it concurrently.
+            // TODO: Only lazy update in block syncing mode, not for block
+            // building.
             self.is_lazy = self.to_code_hash.is_none()
                 && (self.mv_memory.data.contains_key(&from_hash)
                     || self.mv_memory.data.contains_key(&to_hash.unwrap()));
@@ -362,7 +374,7 @@ impl<S: Storage> Database for VmDb<'_, S> {
         if let Some(mut account) = final_account {
             // Check sender nonce
             account.nonce += nonce_addition;
-            if location_hash == self.from_hash && self.tx.nonce != account.nonce {
+            if self.has_nonce && location_hash == self.from_hash && self.tx.nonce != account.nonce {
                 return if self.tx_idx > 0 {
                     // TODO: Better retry strategy -- immediately, to the
                     // closest sender tx, to the missing sender tx, etc.
@@ -498,6 +510,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             to_hash: None,
             to_code_hash: None,
             is_lazy: false,
+            has_nonce: true,
             // Unless it is a raw transfer that is lazy updated, we'll
             // read at least from the sender and recipient accounts.
             read_set: ReadSet::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
@@ -546,12 +559,14 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             .to()
             .map(|to| hash_deterministic(MemoryLocation::Basic(*to)));
 
+        let has_nonce = self.chain.has_nonce(&mut self.evm, full_tx);
+
         // Prepare state for execution
         {
             let ctx = self.evm.ctx();
 
             ctx.db_mut()
-                .set_tx(tx_version.tx_idx, tx, from_hash, to_hash)
+                .set_tx(tx_version.tx_idx, tx, from_hash, to_hash, has_nonce)
                 .map_err(VmExecutionError::from)?;
 
             ctx.set_tx(full_tx.clone());
@@ -673,7 +688,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     self.beneficiary_location_hash,
                     U256::from(result_and_state.result.gas_used()),
                     U256::from(gas_price),
-                    &mut self.evm,
+                    self.block_env.basefee,
                     full_tx,
                 );
                 for (recipient, amount) in rewards {
@@ -699,7 +714,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 }
 
                 let (is_lazy, read_set) = {
-                    let db = self.evm.ctx().db_mut();
+                    let db = ctx.db_mut();
                     (db.is_lazy, std::mem::take(&mut db.read_set))
                 };
 

@@ -42,7 +42,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         );
     let mut pevm = Pevm::default();
 
-    common::for_each_block_from_disk(|block, storage| {
+    common::for_each_block_from_disk("ethereum", |block, storage| {
         let mut group = c.benchmark_group(format!(
             "Block {}({} txs, {} gas)",
             block.header.number,

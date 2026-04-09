@@ -178,12 +178,12 @@ impl PevmChain for PevmEthereum {
         MvMemory::new(block_size, estimated_locations, [block_env.beneficiary])
     }
 
-    fn get_rewards<DB: Database>(
+    fn get_rewards(
         &self,
         beneficiary_location_hash: u64,
         gas_used: U256,
         gas_price: U256,
-        _: &mut Self::Evm<DB>,
+        _: u64,
         _: &Self::EvmTx,
     ) -> SmallVec<[(MemoryLocationHash, U256); 1]> {
         smallvec::smallvec![(
