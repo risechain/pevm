@@ -2,14 +2,14 @@ use alloy_primitives::{Address, B256, TxKind, U256};
 use alloy_rpc_types_eth::Receipt;
 use hashbrown::HashMap;
 use revm::{
-    Database, ExecuteEvm,
+    Database,
     context::{
-        BlockEnv, ContextTr, DBErrorMarker, TxEnv,
-        result::{EVMError, InvalidTransaction, ResultAndState},
+        BlockEnv, ContextSetters, ContextTr, DBErrorMarker, JournalTr, TxEnv,
+        result::{EVMError, ExecutionResult, InvalidTransaction, ResultAndState},
     },
     handler::{EthFrame, EvmTr, FrameResult, Handler, instructions::InstructionProvider},
     primitives::KECCAK_EMPTY,
-    state::{AccountInfo, Bytecode},
+    state::{AccountInfo, Bytecode, EvmState},
 };
 use smallvec::SmallVec;
 
@@ -46,7 +46,10 @@ impl PevmTxExecutionResult {
     pub fn from_revm<C: PevmChain>(
         chain: &C,
         spec_id: C::EvmSpecId,
-        ResultAndState { result, state }: ResultAndState<C::EvmHaltReason>,
+        ResultAndState { result, state }: ResultAndState<
+            ExecutionResult<C::EvmHaltReason>,
+            EvmState,
+        >,
     ) -> Self {
         Self {
             receipt: Receipt {
@@ -550,13 +553,19 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         let mut evm = self
             .chain
             .build_evm(self.spec_id, self.block_env.clone(), db);
-        evm.set_tx(full_tx.clone());
+        evm.ctx().set_tx(full_tx.clone());
 
         match NoBeneficiaryHandler::<C, _>::default().run(&mut evm) {
-            Ok(result_and_state) => {
+            Ok(exec_result) => {
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
                 let mut write_set = WriteSet::with_capacity(3);
+
+                let ctx = evm.ctx();
+
+                let result_and_state =
+                    ResultAndState::new(exec_result, ctx.journal_mut().finalize());
+
                 for (address, account) in &result_and_state.state {
                     if account.is_selfdestructed() {
                         // TODO: Also write [SelfDestructed] to the basic location?
@@ -572,7 +581,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     if account.is_touched() {
                         let account_location_hash =
                             hash_deterministic(MemoryLocation::Basic(*address));
-                        let read_account = evm.ctx().db().read_accounts.get(&account_location_hash);
+                        let read_account = ctx.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
                         let is_new_code = has_code
@@ -586,7 +595,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                     || basic.balance != account.info.balance
                             })
                         {
-                            if evm.ctx().db().is_lazy {
+                            if ctx.db().is_lazy {
                                 if account_location_hash == from_hash {
                                     write_set.push((
                                         account_location_hash,

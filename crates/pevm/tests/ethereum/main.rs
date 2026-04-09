@@ -21,6 +21,9 @@ use revm::context_interface::block::{BlobExcessGasAndPrice, calc_excess_blob_gas
 use revm::context_interface::either::Either;
 use revm::database::PlainAccount;
 use revm::primitives::KECCAK_EMPTY;
+use revm::primitives::eip4844::{
+    BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN, BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE,
+};
 use revm::primitives::hardfork::SpecId;
 use revm::state::{AccountInfo, Bytecode};
 use revm_statetest_types::{Env, SpecName, Test, TestSuite, TestUnit, TransactionParts};
@@ -37,10 +40,15 @@ use walkdir::{DirEntry, WalkDir};
 pub mod common;
 
 fn build_block_env(env: &Env, spec_id: SpecId) -> BlockEnv {
+    let blob_fraction = if spec_id.is_enabled_in(SpecId::PRAGUE) {
+        BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
+    } else {
+        BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN
+    };
     BlockEnv {
-        number: env.current_number.saturating_to(),
+        number: env.current_number,
         beneficiary: env.current_coinbase,
-        timestamp: env.current_timestamp.saturating_to(),
+        timestamp: env.current_timestamp,
         gas_limit: env.current_gas_limit.saturating_to(),
         basefee: env.current_base_fee.unwrap_or_default().saturating_to(),
         difficulty: env.current_difficulty,
@@ -50,7 +58,7 @@ fn build_block_env(env: &Env, spec_id: SpecId) -> BlockEnv {
         {
             Some(BlobExcessGasAndPrice::new(
                 current_excess_blob_gas.to(),
-                spec_id.is_enabled_in(SpecId::PRAGUE),
+                blob_fraction,
             ))
         } else if let (Some(parent_blob_gas_used), Some(parent_excess_blob_gas)) =
             (env.parent_blob_gas_used, env.parent_excess_blob_gas)
@@ -64,7 +72,7 @@ fn build_block_env(env: &Env, spec_id: SpecId) -> BlockEnv {
                         // https://github.com/bluealloy/revm/blob/a2451cdb30bd9d9aaca95f13bd50e2eafb619d8f/crates/specification/src/eip4844.rs#L23
                         .unwrap_or(3 * (1 << 17)),
                 ),
-                spec_id.is_enabled_in(SpecId::PRAGUE),
+                blob_fraction,
             ))
         } else {
             None
