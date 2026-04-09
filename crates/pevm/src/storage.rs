@@ -5,10 +5,7 @@ use alloy_primitives::{Address, B256, Bytes, U256};
 use hashbrown::HashMap;
 use revm::{
     DatabaseRef,
-    bytecode::{
-        JumpTable,
-        eip7702::{EIP7702_MAGIC_BYTES, Eip7702Bytecode},
-    },
+    bytecode::{BytecodeKind, JumpTable},
     context::DBErrorMarker,
     primitives::KECCAK_EMPTY,
     state::{Account, AccountInfo, Bytecode},
@@ -86,22 +83,13 @@ pub struct LegacyCode {
     jump_table: JumpTable,
 }
 
-/// EIP7702 delegated code.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Eip7702Code {
-    /// Address of the EOA which will inherit the bytecode.
-    delegated_address: Address,
-    /// Version of the bytecode.
-    version: u8,
-}
-
 /// EVM Code, currently mapping to REVM's [`ByteCode`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EvmCode {
     /// Maps both analyzed and non-analyzed REVM legacy bytecode.
     Legacy(LegacyCode),
     /// Maps delegated EIP7702 bytecode.
-    Eip7702(Eip7702Code),
+    Eip7702(Address),
 }
 
 impl From<EvmCode> for Bytecode {
@@ -110,34 +98,20 @@ impl From<EvmCode> for Bytecode {
             EvmCode::Legacy(code) => {
                 Self::new_analyzed(code.bytecode, code.original_len, code.jump_table)
             }
-            EvmCode::Eip7702(code) => {
-                let mut raw = EIP7702_MAGIC_BYTES.to_vec();
-                raw.push(code.version);
-                raw.extend(&code.delegated_address);
-                Self::Eip7702(Eip7702Bytecode {
-                    delegated_address: code.delegated_address,
-                    version: code.version,
-                    raw: raw.into(),
-                })
-            }
+            EvmCode::Eip7702(delegated_address) => Self::new_eip7702(delegated_address),
         }
     }
 }
 
 impl From<Bytecode> for EvmCode {
     fn from(code: Bytecode) -> Self {
-        match code {
-            Bytecode::LegacyAnalyzed(code) => Self::Legacy(LegacyCode {
-                // We should be able to consume these instead of cloning if the
-                // fields are `pub`. Won't be relevant as we rewrite `revm` anyway.
+        match code.kind() {
+            BytecodeKind::LegacyAnalyzed => Self::Legacy(LegacyCode {
                 bytecode: code.bytecode().clone(),
-                original_len: code.original_len(),
-                jump_table: code.jump_table().clone(),
+                original_len: code.len(),
+                jump_table: code.legacy_jump_table().unwrap().clone(),
             }),
-            Bytecode::Eip7702(code) => Self::Eip7702(Eip7702Code {
-                delegated_address: code.delegated_address,
-                version: code.version,
-            }),
+            BytecodeKind::Eip7702 => Self::Eip7702(code.eip7702_address().unwrap()),
         }
     }
 }
@@ -204,6 +178,7 @@ impl<S: Storage + Debug> DatabaseRef for StorageWrapper<'_, S> {
             nonce: basic.nonce,
             code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
             code,
+            account_id: None,
         }))
     }
 
@@ -232,7 +207,6 @@ pub use rpc::{RpcStorage, RpcStorageError};
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Bytes, bytes};
-    use revm::bytecode::eip7702::EIP7702_VERSION;
 
     use super::*;
 
@@ -243,14 +217,14 @@ mod tests {
     );
 
     fn eq_bytecodes(revm_code: &Bytecode, pevm_code: &EvmCode) -> bool {
-        match (revm_code, pevm_code) {
-            (Bytecode::LegacyAnalyzed(revm), EvmCode::Legacy(pevm)) => {
-                revm.bytecode() == &pevm.bytecode
-                    && revm.original_len() == pevm.original_len
-                    && revm.jump_table() == &pevm.jump_table
+        match (revm_code.kind(), pevm_code) {
+            (BytecodeKind::LegacyAnalyzed, EvmCode::Legacy(pevm)) => {
+                revm_code.bytecode() == &pevm.bytecode
+                    && revm_code.len() == pevm.original_len
+                    && revm_code.legacy_jump_table().unwrap() == &pevm.jump_table
             }
-            (Bytecode::Eip7702(revm), EvmCode::Eip7702(pevm)) => {
-                revm.delegated_address == pevm.delegated_address && revm.version == pevm.version
+            (BytecodeKind::Eip7702, EvmCode::Eip7702(pevm_address)) => {
+                revm_code.eip7702_address().unwrap() == *pevm_address
             }
             _ => false,
         }
@@ -267,29 +241,7 @@ mod tests {
     #[test]
     fn eip7702_bytecodes() {
         let delegated_address = Address::new([0x01; 20]);
-
-        let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new(delegated_address));
-        let evm_code = EvmCode::from(bytecode.clone());
-        assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, evm_code.into());
-
-        let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
-        bytes.push(EIP7702_VERSION);
-        bytes.extend(delegated_address);
-        let bytecode = Bytecode::Eip7702(Eip7702Bytecode::new_raw(bytes.into()).unwrap());
-        let evm_code = EvmCode::from(bytecode.clone());
-        assert!(eq_bytecodes(&bytecode, &evm_code));
-        assert_eq!(bytecode, evm_code.into());
-
-        let mut eip_bytecode = Eip7702Bytecode::new(delegated_address);
-        // Mutate version and raw bytes after construction.
-        let new_version = 5;
-        eip_bytecode.version = new_version;
-        let mut bytes = EIP7702_MAGIC_BYTES.to_vec();
-        bytes.push(new_version);
-        bytes.extend(delegated_address);
-        eip_bytecode.raw = bytes.into();
-        let bytecode = Bytecode::Eip7702(eip_bytecode);
+        let bytecode = Bytecode::new_eip7702(delegated_address);
         let evm_code = EvmCode::from(bytecode.clone());
         assert!(eq_bytecodes(&bytecode, &evm_code));
         assert_eq!(bytecode, evm_code.into());

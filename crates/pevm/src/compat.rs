@@ -35,5 +35,6 @@ pub(crate) fn get_block_env(header: &Header, spec_id: impl Into<SpecId>) -> Bloc
                 },
             )
         }),
+        slot_num: 0,
     }
 }

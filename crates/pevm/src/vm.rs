@@ -256,6 +256,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
                     balance: U256::MAX,
                     code: None,
                     code_hash: KECCAK_EMPTY,
+                    account_id: None,
                 }));
             } else if Some(location_hash) == self.to_hash {
                 return Ok(None);
@@ -413,6 +414,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
                 nonce: account.nonce,
                 code_hash: code_hash.unwrap_or(KECCAK_EMPTY),
                 code,
+                account_id: None,
             }));
         }
 
