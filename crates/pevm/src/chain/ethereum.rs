@@ -122,9 +122,9 @@ impl PevmChain for PevmEthereum {
     ) -> Self::Evm<DB> {
         let mut cfg = CfgEnv::new_with_spec(spec_id).with_chain_id(self.id);
         if spec_id >= SpecId::PRAGUE {
-            cfg = cfg.with_blob_max_count(MAX_BLOB_NUMBER_PER_BLOCK_PRAGUE);
+            cfg = cfg.with_max_blobs_per_tx(MAX_BLOB_NUMBER_PER_BLOCK_PRAGUE);
         } else if spec_id >= SpecId::CANCUN {
-            cfg = cfg.with_blob_max_count(MAX_BLOB_NUMBER_PER_BLOCK_CANCUN);
+            cfg = cfg.with_max_blobs_per_tx(MAX_BLOB_NUMBER_PER_BLOCK_CANCUN);
         }
         Context::mainnet()
             .with_cfg(cfg)

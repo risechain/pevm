@@ -242,7 +242,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                                 balance: account.balance,
                                 nonce: account.nonce,
                                 code_hash: account.code_hash.unwrap_or(KECCAK_EMPTY),
-                                code: account.code.map(|evm_code| Bytecode::try_from(evm_code).unwrap()),
+                                code: account.code.map(Bytecode::from),
                             },
                             storage: account.storage.into_iter().collect(),
                         })}).collect::<Vec<_>>();

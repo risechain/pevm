@@ -5,11 +5,11 @@ use revm::{
     Database,
     context::{
         BlockEnv, ContextSetters, ContextTr, DBErrorMarker, JournalTr, TxEnv,
-        result::{EVMError, ExecutionResult, InvalidTransaction, ResultAndState},
+        result::{EVMError, InvalidTransaction, ResultAndState},
     },
-    handler::{EthFrame, EvmTr, FrameResult, Handler, instructions::InstructionProvider},
+    handler::{EvmTr, FrameResult, Handler},
     primitives::KECCAK_EMPTY,
-    state::{AccountInfo, Bytecode, EvmState},
+    state::{AccountInfo, Bytecode},
 };
 use smallvec::SmallVec;
 
@@ -17,7 +17,6 @@ use crate::{
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
     MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
     TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
-    storage::BytecodeConversionError,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -46,10 +45,7 @@ impl PevmTxExecutionResult {
     pub fn from_revm<C: PevmChain>(
         chain: &C,
         spec_id: C::EvmSpecId,
-        ResultAndState { result, state }: ResultAndState<
-            ExecutionResult<C::EvmHaltReason>,
-            EvmState,
-        >,
+        ResultAndState { result, state }: ResultAndState<C::EvmHaltReason>,
     ) -> Self {
         Self {
             receipt: Receipt {
@@ -104,9 +100,6 @@ pub enum ReadError {
     /// there is no performant way to mark all storage slots as cleared.
     #[error("Tried to read self-destructed account")]
     SelfDestructedAccount,
-    /// The bytecode is invalid and cannot be converted.
-    #[error("Invalid bytecode")]
-    InvalidBytecode(#[source] BytecodeConversionError),
     /// The stored memory value type doesn't match its location type.
     // TODO: Handle this at the type level?
     #[error("Invalid type of stored memory value")]
@@ -405,10 +398,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
                     Some(code.clone())
                 } else {
                     match self.vm.storage.code_by_hash(code_hash) {
-                        Ok(code) => code
-                            .map(Bytecode::try_from)
-                            .transpose()
-                            .map_err(ReadError::InvalidBytecode)?,
+                        Ok(code) => code.map(Bytecode::from),
                         Err(err) => return Err(ReadError::StorageError(err.to_string())),
                     }
                 }
@@ -436,7 +426,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
             .code_by_hash(&code_hash)
             .map_err(|err| ReadError::StorageError(err.to_string()))?
         {
-            Some(evm_code) => Bytecode::try_from(evm_code).map_err(ReadError::InvalidBytecode),
+            Some(evm_code) => Ok(Bytecode::from(evm_code)),
             None => Ok(Bytecode::default()),
         }
     }
@@ -759,11 +749,6 @@ impl<C, DB> Default for NoBeneficiaryHandler<C, DB> {
 impl<C: PevmChain, DB: Database> Handler for NoBeneficiaryHandler<C, DB> {
     type Evm = C::Evm<DB>;
     type Error = EVMError<DB::Error, InvalidTransaction>;
-    type Frame = EthFrame<
-        Self::Evm,
-        EVMError<DB::Error, InvalidTransaction>,
-        <<Self::Evm as EvmTr>::Instructions as InstructionProvider>::InterpreterTypes,
-    >;
     type HaltReason = C::EvmHaltReason;
 
     fn reward_beneficiary(

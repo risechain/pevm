@@ -229,4 +229,4 @@ mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};
 
 #[cfg(feature = "rpc-storage")]
-pub use storage::RpcStorage;
+pub use storage::{RpcStorage, RpcStorageError};

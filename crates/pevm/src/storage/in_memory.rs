@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -30,8 +31,7 @@ impl InMemoryStorage {
 }
 
 impl Storage for InMemoryStorage {
-    // TODO: More proper error handling
-    type Error = u8;
+    type Error = Infallible;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
         Ok(self.accounts.get(address).map(|account| AccountBasic {
