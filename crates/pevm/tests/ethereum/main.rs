@@ -17,7 +17,7 @@ use pevm::{
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use revm::context::result::InvalidTransaction;
 use revm::context::{BlockEnv, TransactTo, TxEnv};
-use revm::context_interface::block::{BlobExcessGasAndPrice, calc_excess_blob_gas};
+use revm::context_interface::block::BlobExcessGasAndPrice;
 use revm::context_interface::either::Either;
 use revm::database::PlainAccount;
 use revm::primitives::KECCAK_EMPTY;
@@ -53,30 +53,9 @@ fn build_block_env(env: &Env, spec_id: SpecId) -> BlockEnv {
         basefee: env.current_base_fee.unwrap_or_default().saturating_to(),
         difficulty: env.current_difficulty,
         prevrandao: env.current_random,
-        blob_excess_gas_and_price: if let Some(current_excess_blob_gas) =
-            env.current_excess_blob_gas
-        {
-            Some(BlobExcessGasAndPrice::new(
-                current_excess_blob_gas.to(),
-                blob_fraction,
-            ))
-        } else if let (Some(parent_blob_gas_used), Some(parent_excess_blob_gas)) =
-            (env.parent_blob_gas_used, env.parent_excess_blob_gas)
-        {
-            Some(BlobExcessGasAndPrice::new(
-                calc_excess_blob_gas(
-                    parent_blob_gas_used.to(),
-                    parent_excess_blob_gas.to(),
-                    env.parent_target_blobs_per_block
-                        .map(|i| i.to())
-                        // https://github.com/bluealloy/revm/blob/a2451cdb30bd9d9aaca95f13bd50e2eafb619d8f/crates/specification/src/eip4844.rs#L23
-                        .unwrap_or(3 * (1 << 17)),
-                ),
-                blob_fraction,
-            ))
-        } else {
-            None
-        },
+        blob_excess_gas_and_price: env
+            .current_excess_blob_gas
+            .map(|excess| BlobExcessGasAndPrice::new(excess.to(), blob_fraction)),
     }
 }
 
@@ -194,7 +173,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                         "TR_TypeNotSupported" => true, // REVM is yielding arbitrary errors in these cases.
                         "SenderNotEOA" => error == InvalidTransaction::RejectCallerWithCode,
                         "TR_NoFundsX" => matches!(error, InvalidTransaction::LackOfFundForMaxFee{..}  | InvalidTransaction::OverflowPaymentInTransaction),
-                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => error == InvalidTransaction::BlobGasPriceGreaterThanMax,
+                        "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => matches!(error, InvalidTransaction::BlobGasPriceGreaterThanMax { .. }),
                         "TR_BLOBCREATE" => error == InvalidTransaction::BlobCreateTransaction,
                         "TR_GasLimitReached" => error == InvalidTransaction::CallerGasLimitMoreThanBlock,
                         "TR_TipGtFeeCap" => error == InvalidTransaction::PriorityFeeGreaterThanMaxFee,
