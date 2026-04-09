@@ -66,7 +66,7 @@ mod tests {
                 beneficiary: header.beneficiary,
                 timestamp: U256::from(header.timestamp),
                 gas_limit: header.gas_limit,
-                basefee: header.base_fee_per_gas.unwrap(),
+                basefee: header.base_fee_per_gas.unwrap_or_default(),
                 difficulty: header.difficulty,
                 prevrandao: Some(header.mix_hash),
                 blob_excess_gas_and_price: None,
@@ -78,15 +78,12 @@ mod tests {
     fn get_block_env_uses_prague_blob_fraction_when_enabled() {
         let mut header = test_header();
         header.excess_blob_gas = Some(10_000_000);
+        let excess_blob_gas = header.excess_blob_gas.unwrap();
 
-        let cancun = BlobExcessGasAndPrice::new(
-            header.excess_blob_gas.unwrap(),
-            BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN,
-        );
-        let prague = BlobExcessGasAndPrice::new(
-            header.excess_blob_gas.unwrap(),
-            BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE,
-        );
+        let cancun =
+            BlobExcessGasAndPrice::new(excess_blob_gas, BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN);
+        let prague =
+            BlobExcessGasAndPrice::new(excess_blob_gas, BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE);
 
         assert_ne!(cancun, prague);
         assert_eq!(
