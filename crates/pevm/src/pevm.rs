@@ -452,10 +452,10 @@ pub fn execute_revm_sequential<S: Storage + Debug, C: PevmChain>(
     for tx in txs {
         // TODO: More concrete type for `EVMError<StorageWrapperError<S>>`
         let result_and_state = evm
-            .transact(tx)
+            .transact_finalize(tx)
             .map_err(|err| ExecutionError::Custom(err.to_string()))?;
 
-        evm.ctx().db().commit(result_and_state.state.clone());
+        evm.ctx().db_mut().commit(result_and_state.state.clone());
 
         let mut execution_result =
             PevmTxExecutionResult::from_revm(chain, spec_id, result_and_state);

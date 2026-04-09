@@ -7,17 +7,18 @@ use alloy_consensus::{Signed, TxLegacy, transaction::Recovered};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header, Transaction};
 use revm::context::result::HaltReason;
-use revm::context::{JournalOutput, JournalTr, TxEnv};
+use revm::context::{ContextSetters, JournalTr, TxEnv};
 use revm::handler::PrecompileProvider;
 use revm::handler::instructions::InstructionProvider;
 use revm::interpreter::InterpreterResult;
 use revm::interpreter::interpreter::EthInterpreter;
 use revm::primitives::hardfork::SpecId;
+use revm::state::EvmState;
 use revm::{
     Database, ExecuteEvm,
     context::{
         BlockEnv, ContextTr,
-        result::{EVMError, ResultAndState},
+        result::{EVMError, ExecutionResult},
     },
     handler::EvmTr,
 };
@@ -52,7 +53,8 @@ pub trait PevmChain: Debug {
 
     /// The EVM type
     type Evm<DB: Database>: EvmTr<
-            Context: ContextTr<Db = DB, Journal: JournalTr<FinalOutput = JournalOutput>>,
+            Context: ContextTr<Db = DB, Tx = Self::EvmTx, Journal: JournalTr<State = EvmState>>
+                         + ContextSetters,
             Precompiles: PrecompileProvider<
                 <Self::Evm<DB> as EvmTr>::Context,
                 Output = InterpreterResult,
@@ -63,10 +65,9 @@ pub trait PevmChain: Debug {
             >,
         > + ExecuteEvm<
             Tx = Self::EvmTx,
-            Output = Result<
-                ResultAndState<Self::EvmHaltReason>,
-                EVMError<DB::Error, Self::EvmErrorType>,
-            >,
+            ExecutionResult = ExecutionResult<Self::EvmHaltReason>,
+            State = EvmState,
+            Error = EVMError<DB::Error, Self::EvmErrorType>,
         >;
 
     /// The EVM Spec type
