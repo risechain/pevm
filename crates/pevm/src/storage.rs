@@ -297,8 +297,7 @@ mod tests {
     );
 
     // Bytecode from revm test code.
-    // https://github.com/bluealloy/revm/blob/925c042ad748695bc45e516dfd2457e7b44cd3a8/crates/bytecode/src/eof.rs#L210
-    const EOF_BYTECODE: Bytes = bytes!("ef000101000402000100010400000000800000fe");
+    const EOF_BYTECODE: Bytes = bytes!("ef00010100040200010001ff00000000800000fe");
 
     fn eq_bytecodes(revm_code: &Bytecode, pevm_code: &EvmCode) -> bool {
         match (revm_code, pevm_code) {

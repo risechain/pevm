@@ -14,6 +14,7 @@ use op_revm::{
 use revm::{
     Context, Database, MainContext,
     context::{BlockEnv, CfgEnv, TxEnv},
+    context_interface::either::Either,
 };
 use smallvec::SmallVec;
 
@@ -266,7 +267,7 @@ impl PevmChain for PevmOptimism {
                 max_fee_per_blob_gas: tx.max_fee_per_blob_gas().unwrap_or_default(),
                 authorization_list: tx
                     .authorization_list()
-                    .map(|auths| auths.to_vec())
+                    .map(|auths| auths.iter().cloned().map(Either::Left).collect())
                     .unwrap_or_default(),
             },
             enveloped_tx: if tx.inner.inner.is_deposit() {
@@ -291,7 +292,7 @@ impl PevmChain for PevmOptimism {
     }
 
     fn into_db<DB: Database>(evm: OpEvm<OpContext<DB>, ()>) -> DB {
-        evm.0.data.ctx.journaled_state.database
+        evm.0.ctx.journaled_state.database
     }
 
     fn is_eip_1559_enabled(&self, _: OpSpecId) -> bool {

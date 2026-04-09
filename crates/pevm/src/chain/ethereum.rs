@@ -11,8 +11,12 @@ use revm::{
         BlockEnv, CfgEnv, TxEnv,
         result::{HaltReason, InvalidTransaction},
     },
+    context_interface::either::Either,
     handler::MainnetContext,
-    primitives::hardfork::SpecId,
+    primitives::{
+        eip4844::{MAX_BLOB_NUMBER_PER_BLOCK_CANCUN, MAX_BLOB_NUMBER_PER_BLOCK_PRAGUE},
+        hardfork::SpecId,
+    },
 };
 use smallvec::SmallVec;
 
@@ -116,8 +120,14 @@ impl PevmChain for PevmEthereum {
         block_env: BlockEnv,
         db: DB,
     ) -> Self::Evm<DB> {
+        let mut cfg = CfgEnv::new_with_spec(spec_id).with_chain_id(self.id);
+        if spec_id >= SpecId::PRAGUE {
+            cfg = cfg.with_blob_max_count(MAX_BLOB_NUMBER_PER_BLOCK_PRAGUE);
+        } else if spec_id >= SpecId::CANCUN {
+            cfg = cfg.with_blob_max_count(MAX_BLOB_NUMBER_PER_BLOCK_CANCUN);
+        }
         Context::mainnet()
-            .with_cfg(CfgEnv::new_with_spec(spec_id).with_chain_id(self.id))
+            .with_cfg(cfg)
             .with_block(block_env)
             .with_db(db)
             .build_mainnet()
@@ -144,7 +154,7 @@ impl PevmChain for PevmEthereum {
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas().unwrap_or_default(),
             authorization_list: tx
                 .authorization_list()
-                .map(|auths| auths.to_vec())
+                .map(|auths| auths.iter().cloned().map(Either::Left).collect())
                 .unwrap_or_default(),
         })
     }
@@ -154,7 +164,7 @@ impl PevmChain for PevmEthereum {
     }
 
     fn into_db<DB: Database>(evm: MainnetEvm<MainnetContext<DB>>) -> DB {
-        evm.data.ctx.journaled_state.database
+        evm.ctx.journaled_state.database
     }
 
     fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
