@@ -19,7 +19,6 @@ alloy-rpc-types-eth.workspace = true
 alloy-trie.workspace = true
 
 bitflags.workspace = true
-bitvec.workspace = true
 dashmap.workspace = true
 hashbrown.workspace = true
 rustc-hash.workspace = true

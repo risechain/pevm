@@ -450,9 +450,9 @@ pub fn execute_revm_sequential<S: Storage + Debug, C: PevmChain>(
     let mut results: Vec<PevmTxExecutionResult> = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u64 = 0;
     for tx in txs {
-        // TODO: More concrete type for `EVMError<StorageWrapperError<S>>`
+        // TODO: More concrete error type
         let result_and_state = evm
-            .transact_finalize(tx)
+            .transact(tx)
             .map_err(|err| ExecutionError::Custom(err.to_string()))?;
 
         evm.ctx().db_mut().commit(result_and_state.state.clone());

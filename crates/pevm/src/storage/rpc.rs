@@ -13,6 +13,7 @@ use alloy_provider::{
 use alloy_rpc_types_eth::{BlockId, BlockNumberOrTag};
 use alloy_transport::TransportError;
 use hashbrown::HashMap;
+use revm::context::DBErrorMarker;
 use revm::{
     precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
@@ -26,6 +27,13 @@ use tokio::{
 use crate::{AccountBasic, EvmAccount, Storage};
 
 use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
+
+/// Error type for [`RpcStorage`].
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct RpcStorageError(#[from] pub TransportError);
+
+impl DBErrorMarker for RpcStorageError {}
 
 /// A storage that fetches state data via RPC for execution.
 #[derive(Debug)]
@@ -112,7 +120,7 @@ impl<N: Network> RpcStorage<N> {
 }
 
 impl<N: Network> Storage for RpcStorage<N> {
-    type Error = TransportError;
+    type Error = RpcStorageError;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
         if let Some(account) = self.cache_accounts.lock().unwrap().get(address) {
