@@ -54,10 +54,10 @@ alloy-transport = "=1.7.3"
 alloy-trie = "0.9.5"
 
 # Will remove [revm] with https://github.com/risechain/pevm/issues/382.
-op-revm = "7.0.0"
-revm = { version = "26.0.1", features = ["serde"] }
-revm-statetest-types = "=8.0.1"
-revme = "=7.0.1"
+op-revm = "12.0.2"
+revm = { version = "31.0.2", features = ["serde"] }
+revm-statetest-types = "=11.0.2"
+revme = "=9.0.2"
 
 # OP
 op-alloy-consensus = "0.24.0"

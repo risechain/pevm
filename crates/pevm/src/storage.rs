@@ -75,7 +75,7 @@ impl Default for AccountBasic {
 }
 
 /// Analyzed legacy code.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LegacyCode {
     /// Bytecode with 32 zero bytes padding.
     // TODO: Store unpadded bytecode and pad on revm conversion
@@ -85,18 +85,6 @@ pub struct LegacyCode {
     /// Jump table.
     jump_table: JumpTable,
 }
-
-// `JumpTable` derives `PartialEq` but includes a `table_ptr: *const u8` cache
-// field that makes equality pointer-based rather than content-based...
-impl PartialEq for LegacyCode {
-    fn eq(&self, other: &Self) -> bool {
-        self.bytecode == other.bytecode
-            && self.original_len == other.original_len
-            && self.jump_table.table == other.jump_table.table
-    }
-}
-
-impl Eq for LegacyCode {}
 
 /// EIP7702 delegated code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
