@@ -56,6 +56,7 @@ fn build_block_env(env: &Env, spec_id: SpecId) -> BlockEnv {
         blob_excess_gas_and_price: env
             .current_excess_blob_gas
             .map(|excess| BlobExcessGasAndPrice::new(excess.to(), blob_fraction)),
+        slot_num: 0,
     }
 }
 
@@ -222,6 +223,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                                 nonce: account.nonce,
                                 code_hash: account.code_hash.unwrap_or(KECCAK_EMPTY),
                                 code: account.code.map(Bytecode::from),
+                                account_id: None,
                             },
                             storage: account.storage.into_iter().collect(),
                         })}).collect::<Vec<_>>();

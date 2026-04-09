@@ -33,15 +33,19 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
     let data_dir = std::path::PathBuf::from("../../data");
 
     // TODO: Deduplicate logic with [bin/fetch.rs] when there is more usage
-    let bytecodes = bincode::deserialize_from(GzDecoder::new(BufReader::new(
-        File::open(data_dir.join("bytecodes.bincode.gz")).unwrap(),
-    )))
+    let bytecodes = bincode::serde::decode_from_std_read(
+        &mut GzDecoder::new(BufReader::new(
+            File::open(data_dir.join("bytecodes.bincode.gz")).unwrap(),
+        )),
+        bincode::config::standard(),
+    )
     .map(Arc::new)
     .unwrap();
 
-    let block_hashes = bincode::deserialize_from::<_, BlockHashes>(BufReader::new(
-        File::open(data_dir.join("block_hashes.bincode")).unwrap(),
-    ))
+    let block_hashes = bincode::serde::decode_from_std_read::<BlockHashes, _, _>(
+        &mut BufReader::new(File::open(data_dir.join("block_hashes.bincode")).unwrap()),
+        bincode::config::standard(),
+    )
     .map(Arc::new)
     .unwrap();
 

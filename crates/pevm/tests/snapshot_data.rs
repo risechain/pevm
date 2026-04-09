@@ -8,8 +8,12 @@ use std::fs::File;
 
 #[tokio::test]
 async fn snapshotted_mainnet_block_hashes() {
-    let file = File::open("../../data/block_hashes.bincode").unwrap();
-    let block_hashes = bincode::deserialize_from::<_, BTreeMap<u64, B256>>(file).unwrap();
+    let mut file = File::open("../../data/block_hashes.bincode").unwrap();
+    let block_hashes = bincode::serde::decode_from_std_read::<BTreeMap<u64, B256>, _, _>(
+        &mut file,
+        bincode::config::standard(),
+    )
+    .unwrap();
 
     let rpc_url = match std::env::var("ETHEREUM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?

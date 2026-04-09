@@ -73,10 +73,11 @@ async fn main() -> Result<()> {
     // Populate bytecodes and state from RPC storage.
     // TODO: Deduplicate logic with [for_each_block_from_disk] when there is more usage
     let mut bytecodes: BTreeMap<B256, EvmCode> = match File::open("data/bytecodes.bincode.gz") {
-        Ok(compressed_file) => {
-            bincode::deserialize_from(GzDecoder::new(BufReader::new(compressed_file)))
-                .context("Failed to deserialize bytecodes from file")?
-        }
+        Ok(compressed_file) => bincode::serde::decode_from_std_read(
+            &mut GzDecoder::new(BufReader::new(compressed_file)),
+            bincode::config::standard(),
+        )
+        .context("Failed to deserialize bytecodes from file")?,
         Err(_) => BTreeMap::new(),
     };
     let (chainstate, cached_bytecodes, cached_block_hashes) = storage.into_snapshot();
@@ -95,11 +96,15 @@ async fn main() -> Result<()> {
     }
 
     // Write compressed bytecodes to disk.
-    let writer_bytecodes = File::create("data/bytecodes.bincode.gz")
+    let mut writer_bytecodes = File::create("data/bytecodes.bincode.gz")
         .map(|f| GzEncoder::new(f, Compression::default()))
         .context("Failed to create compressed bytecodes file")?;
-    bincode::serialize_into(writer_bytecodes, &bytecodes)
-        .context("Failed to write bytecodes to file")?;
+    bincode::serde::encode_into_std_write(
+        &bytecodes,
+        &mut writer_bytecodes,
+        bincode::config::standard(),
+    )
+    .context("Failed to write bytecodes to file")?;
 
     // Write pre-state to disk.
     let file_state = File::create(format!("{block_dir}/pre_state.json"))
@@ -108,18 +113,27 @@ async fn main() -> Result<()> {
 
     // TODO: Deduplicate logic with [for_each_block_from_disk] when there is more usage
     let mut block_hashes = match File::open("data/block_hashes.bincode") {
-        Ok(compressed_file) => bincode::deserialize_from::<_, BTreeMap<u64, B256>>(compressed_file)
-            .context("Failed to deserialize block hashes from file")?,
+        Ok(mut compressed_file) => {
+            bincode::serde::decode_from_std_read::<BTreeMap<u64, B256>, _, _>(
+                &mut compressed_file,
+                bincode::config::standard(),
+            )
+            .context("Failed to deserialize block hashes from file")?
+        }
         Err(_) => BTreeMap::new(),
     };
     block_hashes.extend(cached_block_hashes);
 
     if !block_hashes.is_empty() {
         // Write compressed block hashes to disk
-        let file = File::create("data/block_hashes.bincode")
+        let mut file = File::create("data/block_hashes.bincode")
             .context("Failed to create block hashes file")?;
-        bincode::serialize_into(file, &block_hashes)
-            .context("Failed to write block hashes to file")?;
+        bincode::serde::encode_into_std_write(
+            &block_hashes,
+            &mut file,
+            bincode::config::standard(),
+        )
+        .context("Failed to write block hashes to file")?;
     }
 
     Ok(())
