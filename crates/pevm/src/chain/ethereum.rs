@@ -163,10 +163,6 @@ impl PevmChain for PevmEthereum {
         tx
     }
 
-    fn into_db<DB: Database>(evm: MainnetEvm<MainnetContext<DB>>) -> DB {
-        evm.ctx.journaled_state.database
-    }
-
     fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
         let block_size = txs.len();
         let beneficiary_location_hash =

@@ -127,8 +127,9 @@ pub(crate) struct VmExecutionResult {
 // A database interface that intercepts reads while executing a specific
 // transaction with Revm. It provides values from the multi-version data
 // structure & storage, and tracks the read set of the current execution.
-struct VmDb<'a, S: Storage, C: PevmChain> {
-    vm: &'a Vm<'a, S, C>,
+struct VmDb<'a, S: Storage> {
+    storage: &'a S,
+    mv_memory: &'a MvMemory,
     tx_idx: TxIdx,
     tx: &'a TxEnv,
     from_hash: MemoryLocationHash,
@@ -142,40 +143,31 @@ struct VmDb<'a, S: Storage, C: PevmChain> {
     read_accounts: HashMap<MemoryLocationHash, (AccountBasic, Option<B256>), BuildIdentityHasher>,
 }
 
-impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
-    fn new(
-        vm: &'a Vm<'a, S, C>,
+impl<'a, S: Storage> VmDb<'a, S> {
+    // Reset per-transaction fields for allocation reuse.
+    // Must be called before each transaction execution.
+    fn set_tx(
+        &mut self,
         tx_idx: TxIdx,
         tx: &'a TxEnv,
         from_hash: MemoryLocationHash,
         to_hash: Option<MemoryLocationHash>,
-    ) -> Result<Self, ReadError> {
-        let mut db = Self {
-            vm,
-            tx_idx,
-            tx,
-            from_hash,
-            to_hash,
-            to_code_hash: None,
-            is_lazy: false,
-            // Unless it is a raw transfer that is lazy updated, we'll
-            // read at least from the sender and recipient accounts.
-            read_set: ReadSet::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
-            read_accounts: HashMap::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
-        };
-        // We only lazy update raw transfers that already have the sender
-        // or recipient in [MvMemory] since sequentially evaluating memory
-        // locations with only one entry is much costlier than fully
-        // evaluating it concurrently.
-        // TODO: Only lazy update in block syncing mode, not for block
-        // building.
+    ) -> Result<(), ReadError> {
+        self.tx_idx = tx_idx;
+        self.tx = tx;
+        self.from_hash = from_hash;
+        self.to_hash = to_hash;
+        self.to_code_hash = None;
+        self.is_lazy = false;
+        self.read_set.clear();
+        self.read_accounts.clear();
         if let TxKind::Call(to) = tx.kind {
-            db.to_code_hash = db.get_code_hash(to)?;
-            db.is_lazy = db.to_code_hash.is_none()
-                && (vm.mv_memory.data.contains_key(&from_hash)
-                    || vm.mv_memory.data.contains_key(&to_hash.unwrap()));
+            self.to_code_hash = self.get_code_hash(to)?;
+            self.is_lazy = self.to_code_hash.is_none()
+                && (self.mv_memory.data.contains_key(&from_hash)
+                    || self.mv_memory.data.contains_key(&to_hash.unwrap()));
         }
-        Ok(db)
+        Ok(())
     }
 
     fn hash_basic(&self, address: &Address) -> MemoryLocationHash {
@@ -210,7 +202,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // Try to read the latest code hash in [MvMemory]
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
-        if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash)
+        if let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
             && let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
                 written_transactions.range(..self.tx_idx).next_back()
         {
@@ -234,14 +226,13 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
 
         // Fallback to storage
         Self::push_origin(read_origins, ReadOrigin::Storage)?;
-        self.vm
-            .storage
+        self.storage
             .code_hash(&address)
             .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 }
 
-impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
+impl<S: Storage> Database for VmDb<'_, S> {
     type Error = ReadError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
@@ -278,7 +269,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
 
         // Try reading from multi-version data
         if self.tx_idx > 0
-            && let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash)
+            && let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
         {
             let mut iter = written_transactions.range(..self.tx_idx);
 
@@ -355,7 +346,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
             {
                 return Err(ReadError::InconsistentRead);
             }
-            final_account = match self.vm.storage.basic(&address) {
+            final_account = match self.storage.basic(&address) {
                 Ok(Some(basic)) => Some(basic),
                 Ok(None) => (balance_addition > U256::ZERO).then(AccountBasic::default),
                 Err(err) => return Err(ReadError::StorageError(err.to_string())),
@@ -395,10 +386,10 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
                 self.get_code_hash(address)?
             };
             let code = if let Some(code_hash) = &code_hash {
-                if let Some(code) = self.vm.mv_memory.new_bytecodes.get(code_hash) {
+                if let Some(code) = self.mv_memory.new_bytecodes.get(code_hash) {
                     Some(code.clone())
                 } else {
-                    match self.vm.storage.code_by_hash(code_hash) {
+                    match self.storage.code_by_hash(code_hash) {
                         Ok(code) => code.map(Bytecode::from),
                         Err(err) => return Err(ReadError::StorageError(err.to_string())),
                     }
@@ -423,7 +414,6 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         match self
-            .vm
             .storage
             .code_by_hash(&code_hash)
             .map_err(|err| ReadError::StorageError(err.to_string()))?
@@ -440,7 +430,7 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
 
         // Try reading from multi-version data
         if self.tx_idx > 0
-            && let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash)
+            && let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
             && let Some((closest_idx, entry)) =
                 written_transactions.range(..self.tx_idx).next_back()
         {
@@ -462,49 +452,67 @@ impl<S: Storage, C: PevmChain> Database for VmDb<'_, S, C> {
 
         // Fall back to storage
         Self::push_origin(read_origins, ReadOrigin::Storage)?;
-        self.vm
-            .storage
+        self.storage
             .storage(&address, &index)
             .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        self.vm
-            .storage
+        self.storage
             .block_hash(&number)
             .map_err(|err| ReadError::StorageError(err.to_string()))
     }
 }
 
+// Per-worker execution VM. Holds all block-level state and a reusable EVM.
 pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
-    storage: &'a S,
-    mv_memory: &'a MvMemory,
+    // Shared block-level state
     chain: &'a C,
+    spec_id: C::EvmSpecId,
     block_env: &'a BlockEnv,
     txs: &'a [C::EvmTx],
-    spec_id: C::EvmSpecId,
+    mv_memory: &'a MvMemory,
     beneficiary_location_hash: MemoryLocationHash,
+    // Dedicated EVM for the worker, reset before each transaction exectution.
+    evm: C::Evm<VmDb<'a, S>>,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     pub(crate) fn new(
-        storage: &'a S,
-        mv_memory: &'a MvMemory,
         chain: &'a C,
+        spec_id: C::EvmSpecId,
         block_env: &'a BlockEnv,
         txs: &'a [C::EvmTx],
-        spec_id: C::EvmSpecId,
+        storage: &'a S,
+        mv_memory: &'a MvMemory,
     ) -> Self {
-        Self {
+        // The DB is initialised with mock values; each transaction execution
+        // [VmDb::set_tx] the intended transaction before executing.
+        let db = VmDb {
             storage,
             mv_memory,
+            tx_idx: 0,
+            // SAFETY: txs is non-empty (checked by the caller before spawning threads).
+            tx: chain.tx_env(unsafe { txs.get_unchecked(0) }),
+            from_hash: 0,
+            to_hash: None,
+            to_code_hash: None,
+            is_lazy: false,
+            // Unless it is a raw transfer that is lazy updated, we'll
+            // read at least from the sender and recipient accounts.
+            read_set: ReadSet::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
+            read_accounts: HashMap::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
+        };
+        Self {
             chain,
+            spec_id,
             block_env,
             txs,
-            spec_id,
+            mv_memory,
             beneficiary_location_hash: hash_deterministic(MemoryLocation::Basic(
                 block_env.beneficiary,
             )),
+            evm: chain.build_evm(spec_id, block_env.clone(), db),
         }
     }
 
@@ -525,7 +533,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     // (if it is not the first time the transaction wrote to this location during the
     // execution).
     pub(crate) fn execute(
-        &self,
+        &mut self,
         tx_version: &TxVersion,
     ) -> Result<VmExecutionResult, VmExecutionError> {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
@@ -538,22 +546,28 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             .to()
             .map(|to| hash_deterministic(MemoryLocation::Basic(*to)));
 
-        // Execute
-        let db = VmDb::new(self, tx_version.tx_idx, tx, from_hash, to_hash)
-            .map_err(VmExecutionError::from)?;
+        // Prepare state for execution
+        {
+            let ctx = self.evm.ctx();
 
-        let mut evm = self
-            .chain
-            .build_evm(self.spec_id, self.block_env.clone(), db);
-        evm.ctx().set_tx(full_tx.clone());
+            ctx.db_mut()
+                .set_tx(tx_version.tx_idx, tx, from_hash, to_hash)
+                .map_err(VmExecutionError::from)?;
 
-        match NoBeneficiaryHandler::<C, _>::default().run(&mut evm) {
+            ctx.set_tx(full_tx.clone());
+
+            // We reset the journal when we finalise it into the result state on a
+            // successful execution but not on errors. Always reset here to be sure.
+            ctx.journal_mut().clear();
+        }
+
+        match NoBeneficiaryHandler::<C, _>::default().run(&mut self.evm) {
             Ok(exec_result) => {
                 // There are at least three locations most of the time: the sender,
                 // the recipient, and the beneficiary accounts.
                 let mut write_set = WriteSet::with_capacity(3);
 
-                let ctx = evm.ctx();
+                let ctx = self.evm.ctx();
 
                 let result_and_state =
                     ResultAndState::new(exec_result, ctx.journal_mut().finalize());
@@ -659,7 +673,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     self.beneficiary_location_hash,
                     U256::from(result_and_state.result.gas_used()),
                     U256::from(gas_price),
-                    &mut evm,
+                    &mut self.evm,
                     full_tx,
                 );
                 for (recipient, amount) in rewards {
@@ -684,20 +698,23 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     }
                 }
 
-                let db = C::into_db(evm);
+                let (is_lazy, read_set) = {
+                    let db = self.evm.ctx().db_mut();
+                    (db.is_lazy, std::mem::take(&mut db.read_set))
+                };
 
-                if db.is_lazy {
+                if is_lazy {
                     self.mv_memory
                         .add_lazy_addresses([tx.caller, *tx.kind.to().unwrap()]);
                 }
 
-                let mut flags = if tx_version.tx_idx > 0 && !db.is_lazy {
+                let mut flags = if tx_version.tx_idx > 0 && !is_lazy {
                     FinishExecFlags::NeedValidation
                 } else {
                     FinishExecFlags::empty()
                 };
 
-                if self.mv_memory.record(tx_version, db.read_set, write_set) {
+                if self.mv_memory.record(tx_version, read_set, write_set) {
                     flags |= FinishExecFlags::WroteNewLocation;
                 }
 

@@ -131,9 +131,6 @@ pub trait PevmChain: Debug {
     /// Get a reference to the base [`TxEnv`] from a chain-specific transaction
     fn tx_env<'a>(&self, tx: &'a Self::EvmTx) -> &'a TxEnv;
 
-    /// Consume the EVM and return the database
-    fn into_db<DB: Database>(evm: Self::Evm<DB>) -> DB;
-
     /// Build [`MvMemory`]
     fn build_mv_memory(&self, _block_env: &BlockEnv, txs: &[Self::EvmTx]) -> MvMemory {
         MvMemory::new(txs.len(), [], [])

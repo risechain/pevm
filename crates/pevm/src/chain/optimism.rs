@@ -291,10 +291,6 @@ impl PevmChain for PevmOptimism {
         &tx.base
     }
 
-    fn into_db<DB: Database>(evm: OpEvm<OpContext<DB>, ()>) -> DB {
-        evm.0.ctx.journaled_state.database
-    }
-
     fn is_eip_1559_enabled(&self, _: OpSpecId) -> bool {
         true
     }
