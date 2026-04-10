@@ -184,7 +184,6 @@ impl Pevm {
         let scheduler = Scheduler::new(block_size);
 
         let mv_memory = chain.build_mv_memory(&block_env, &txs);
-        let vm = Vm::new(storage, &mv_memory, chain, &block_env, &txs, spec_id);
 
         let additional = block_size.saturating_sub(self.execution_results.len());
         if additional > 0 {
@@ -198,11 +197,12 @@ impl Pevm {
         thread::scope(|scope| {
             for _ in 0..concurrency_level.into() {
                 scope.spawn(|| {
+                    let mut vm = Vm::new(chain, spec_id, &block_env, &txs, storage, &mv_memory);
                     let mut task = scheduler.next_task();
                     while task.is_some() {
                         task = match task.unwrap() {
                             Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
+                                self.try_execute(&mut vm, &scheduler, tx_version)
                             }
                             Task::Validation(tx_version) => {
                                 try_validate(&mv_memory, &scheduler, &tx_version)
@@ -372,9 +372,9 @@ impl Pevm {
         Ok(fully_evaluated_results)
     }
 
-    fn try_execute<S: Storage, C: PevmChain>(
+    fn try_execute<'a, S: Storage, C: PevmChain>(
         &self,
-        vm: &Vm<'_, S, C>,
+        vm: &mut Vm<'a, S, C>,
         scheduler: &Scheduler,
         tx_version: TxVersion,
     ) -> Option<Task> {
