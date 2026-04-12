@@ -32,23 +32,22 @@ where
     S: Storage + Send + Sync + Debug,
 {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
-    assert_eq!(
-        pevm::execute_revm_sequential(
-            chain,
-            &storage,
-            C::EvmSpecId::default(),
-            BlockEnv::default(),
-            txs.clone(),
-        ),
-        Pevm::default().execute_revm_parallel(
-            chain,
-            &storage,
-            C::EvmSpecId::default(),
-            BlockEnv::default(),
-            txs,
-            concurrency_level,
-        ),
+    let seq = pevm::execute_revm_sequential(
+        chain,
+        &storage,
+        C::EvmSpecId::default(),
+        BlockEnv::default(),
+        txs.clone(),
     );
+    let par = Pevm::default().execute_revm_parallel(
+        chain,
+        &storage,
+        C::EvmSpecId::default(),
+        BlockEnv::default(),
+        txs,
+        concurrency_level,
+    );
+    assert_eq!(seq, par);
 }
 
 /// Execute an Alloy block sequentially & with pevm and assert that

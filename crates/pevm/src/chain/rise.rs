@@ -8,8 +8,7 @@ use hashbrown::HashMap;
 use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType};
 use op_alloy_network::eip2718::Encodable2718;
 use op_revm::{
-    L1BlockInfo, OpBuilder, OpContext, OpEvm, OpHaltReason, OpSpecId, OpTransaction,
-    OpTransactionError,
+    L1BlockInfo, OpBuilder, OpEvm, OpHaltReason, OpSpecId, OpTransaction, OpTransactionError,
     constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT},
     transaction::{OpTxTr, deposit::DepositTransactionParts},
 };
@@ -19,6 +18,8 @@ use revm::{
     context_interface::either::Either,
     handler::EvmTr,
 };
+
+use crate::PevmJournal;
 use smallvec::SmallVec;
 
 use crate::{
@@ -65,7 +66,10 @@ impl PevmChain for PevmRise {
     type Network = op_alloy_network::Optimism;
     type Transaction = op_alloy_rpc_types::Transaction;
     type Envelope = OpTxEnvelope;
-    type Evm<DB: Database> = OpEvm<OpContext<DB>, ()>;
+    type Evm<DB: Database> = OpEvm<
+        Context<BlockEnv, OpTransaction<TxEnv>, CfgEnv<OpSpecId>, DB, PevmJournal<DB>, L1BlockInfo>,
+        (),
+    >;
     type EvmSpecId = OpSpecId;
     type EvmTx = OpTransaction<TxEnv>;
     type EvmHaltReason = OpHaltReason;
@@ -96,13 +100,31 @@ impl PevmChain for PevmRise {
         block_env: BlockEnv,
         db: DB,
     ) -> Self::Evm<DB> {
-        Context::mainnet()
+        let ctx = Context::mainnet()
             .with_cfg(CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID))
             .with_block(block_env)
             .with_db(db)
             .with_tx(OpTransaction::default())
-            .with_chain(L1BlockInfo::default())
-            .build_op()
+            .with_chain(L1BlockInfo::default());
+        let Context {
+            block,
+            tx,
+            cfg,
+            journaled_state,
+            chain,
+            local,
+            error,
+        } = ctx;
+        Context {
+            block,
+            tx,
+            cfg,
+            journaled_state: PevmJournal::from_journal(journaled_state),
+            chain,
+            local,
+            error,
+        }
+        .build_op()
     }
 
     fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[OpTransaction<TxEnv>]) -> MvMemory {
@@ -275,12 +297,11 @@ impl PevmChain for PevmRise {
     }
 
     fn has_nonce<DB: Database>(&self, evm: &mut Self::Evm<DB>, tx: &Self::EvmTx) -> bool {
-        if tx.is_deposit() {
-            evm.ctx().modify_cfg(|cfg| cfg.disable_nonce_check = true);
-            false
-        } else {
-            true
-        }
+        let is_deposit = tx.is_deposit();
+        // Always set the flag to keep cfg consistent across reused EVM instances.
+        evm.ctx()
+            .modify_cfg(|cfg| cfg.disable_nonce_check = is_deposit);
+        !is_deposit
     }
 
     fn is_eip_1559_enabled(&self, _: OpSpecId) -> bool {
