@@ -275,12 +275,10 @@ impl PevmChain for PevmRise {
     }
 
     fn has_nonce<DB: Database>(&self, evm: &mut Self::Evm<DB>, tx: &Self::EvmTx) -> bool {
-        if tx.is_deposit() {
-            evm.ctx().modify_cfg(|cfg| cfg.disable_nonce_check = true);
-            false
-        } else {
-            true
-        }
+        let is_deposit = tx.is_deposit();
+        evm.ctx()
+            .modify_cfg(|cfg| cfg.disable_nonce_check = is_deposit);
+        !is_deposit
     }
 
     fn is_eip_1559_enabled(&self, _: OpSpecId) -> bool {
