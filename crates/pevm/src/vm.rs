@@ -578,9 +578,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
         match NoBeneficiaryHandler::<C, _>::default().run(&mut self.evm) {
             Ok(exec_result) => {
-                // There are at least three locations most of the time: the sender,
-                // the recipient, and the beneficiary accounts.
-                let mut write_set = WriteSet::with_capacity(3);
+                // There are at least six locations most of the time: the sender,
+                // the recipient, and up to four fee recipients (beneficiary, base fee,
+                // L1 fee, operator fee on OP Stack chains).
+                let mut write_set = WriteSet::with_capacity(6);
 
                 let ctx = self.evm.ctx();
 
