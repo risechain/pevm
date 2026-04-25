@@ -42,27 +42,27 @@ use_self = "warn"
 pevm = { path = "crates/pevm", features = ["rpc-storage"] }
 
 # alloy
-alloy-consensus = "=1.7.3" # Cannot bump because of `op-alloy-consensus`
+alloy-consensus = "2.0.1"
 alloy-primitives = { version = "1.5.7", features = [
   "asm-keccak",
   "map-fxhash",
 ] }
-alloy-provider = "=1.7.3"
+alloy-provider = "2.0.1"
 alloy-rlp = "0.3.15"
-alloy-rpc-types-eth = "=1.7.3"
-alloy-transport = "=1.7.3"
+alloy-rpc-types-eth = "2.0.1"
+alloy-transport = "2.0.1"
 alloy-trie = "0.9.5"
 
 # Will remove [revm] with https://github.com/risechain/pevm/issues/382.
-op-revm = "17.0.0"
-revm = { version = "36.0.0", features = ["serde"] }
-revm-statetest-types = "16.0.0"
-revme = "13.0.0"
+op-revm = "19.0.0"
+revm = { version = "38.0.0", features = ["serde"] }
+revm-statetest-types = "17.0.1"
+revme = "15.0.0"
 
 # OP
-op-alloy-consensus = "0.24.0"
-op-alloy-network = "0.24.0"
-op-alloy-rpc-types = "0.24.0"
+op-alloy-consensus = "2.0.0"
+op-alloy-network = "2.0.0"
+op-alloy-rpc-types = "2.0.0"
 
 # Allocators
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
@@ -71,20 +71,20 @@ tikv-jemallocator = "0.6.1"
 
 bincode = { version = "2.0.1", features = ["serde"] }
 # We can roll our own but [revm] depends on this anyway.
-bitflags = "2.11.0"
-clap = { version = "4.6.0", features = ["derive"] }
+bitflags = "2.11.1"
+clap = { version = "4.6.1", features = ["derive"] }
 color-eyre = "0.6.5"
 criterion = "0.8.2"
 dashmap = "6.1.0"
 flate2 = "1.1.9"
-hashbrown = { version = "0.16.1", features = ["serde"] }
-rand = "0.10.0"
-rayon = "1.11.0"
+hashbrown = { version = "0.17.0", features = ["serde"] }
+rand = "0.10.1"
+rayon = "1.12.0"
 reqwest = "0.13.2"
 rustc-hash = "2.1.2"
 serde = "1.0.228"
 serde_json = "1.0.149"
 smallvec = "1.15.1"
 thiserror = "2.0.18"
-tokio = { version = "1.51.1", features = ["rt-multi-thread"] }
+tokio = { version = "1.52.1", features = ["rt-multi-thread"] }
 walkdir = "2.5.0"

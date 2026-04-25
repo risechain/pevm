@@ -103,6 +103,7 @@ pub trait PevmChain: Debug {
             inner: Recovered::new_unchecked(envelope, from),
             block_hash: None,
             block_number: None,
+            block_timestamp: None,
             transaction_index: None,
             effective_gas_price: None,
         }
