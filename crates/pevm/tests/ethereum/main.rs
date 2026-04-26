@@ -109,7 +109,10 @@ fn build_tx_env(path: &Path, tx: &TransactionParts, test: &Test) -> Option<TxEnv
 fn single_exception_matches(exception: &str, error: &InvalidTransaction) -> bool {
     match exception {
         "TransactionException.INTRINSIC_GAS_TOO_LOW" => {
-            matches!(error, InvalidTransaction::CallGasCostMoreThanGasLimit { .. })
+            matches!(
+                error,
+                InvalidTransaction::CallGasCostMoreThanGasLimit { .. }
+            )
         }
         "TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST" => {
             matches!(error, InvalidTransaction::GasFloorMoreThanGasLimit { .. })
