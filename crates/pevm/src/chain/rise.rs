@@ -182,7 +182,7 @@ impl PevmChain for PevmRise {
     // https://github.com/paradigmxyz/reth/blob/b4a1b733c93f7e262f1b774722670e08cdcb6276/crates/primitives/src/proofs.rs
     fn calculate_receipt_root(
         &self,
-        spec_id: OpSpecId,
+        _: OpSpecId,
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> Result<B256, CalculateReceiptRootError> {
@@ -204,9 +204,8 @@ impl PevmChain for PevmRise {
                             .ok_or(CalculateReceiptRootError::OpDepositMissingSender)?;
                         let receipt = OpDepositReceipt {
                             inner: receipt,
-                            deposit_nonce: (spec_id >= OpSpecId::CANYON)
-                                .then_some(account.nonce - 1),
-                            deposit_receipt_version: (spec_id >= OpSpecId::CANYON).then_some(1),
+                            deposit_nonce: Some(account.nonce - 1),
+                            deposit_receipt_version: Some(1),
                         };
                         OpReceiptEnvelope::Deposit(receipt.with_bloom())
                     }
