@@ -1,3 +1,4 @@
 .vscode
 /target
 perf.*
+crates/pevm/tests/ethereum/fixtures/
