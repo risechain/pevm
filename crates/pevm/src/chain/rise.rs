@@ -57,7 +57,7 @@ fn get_gas_price(tx: &OpTxEnvelope) -> Result<u128, RiseTransactionParsingError>
             .gas_price()
             .ok_or(RiseTransactionParsingError::MissingGasPrice),
         OpTxType::Eip1559 | OpTxType::Eip7702 => Ok(tx.max_fee_per_gas()),
-        OpTxType::Deposit => Ok(0),
+        OpTxType::Deposit | OpTxType::PostExec => Ok(0),
     }
 }
 
@@ -210,6 +210,7 @@ impl PevmChain for PevmRise {
                         };
                         OpReceiptEnvelope::Deposit(receipt.with_bloom())
                     }
+                    OpTxType::PostExec => OpReceiptEnvelope::PostExec(receipt.with_bloom()),
                 })
             })
             .enumerate()

@@ -50,7 +50,7 @@ impl PevmTxExecutionResult {
         Self {
             receipt: Receipt {
                 status: result.is_success().into(),
-                cumulative_gas_used: result.gas_used(),
+                cumulative_gas_used: result.tx_gas_used(),
                 logs: result.into_logs(),
             },
             state: state
@@ -687,7 +687,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 }
                 let rewards = self.chain.get_rewards(
                     self.beneficiary_location_hash,
-                    U256::from(result_and_state.result.gas_used()),
+                    U256::from(result_and_state.result.tx_gas_used()),
                     U256::from(gas_price),
                     self.block_env.basefee,
                     full_tx,

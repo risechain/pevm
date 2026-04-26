@@ -157,10 +157,6 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     NonZeroUsize::MIN,
                 ),
             ) {
-                // EIP-2681
-                (Some("TR_NonceHasMaxValue"), Err(err)) => {
-                    assert!(matches!(err, PevmError::NonceMismatch { .. }))
-                }
                 // Skipping special cases where REVM returns `Ok` on unsupported features.
                 (Some("TR_TypeNotSupported"), Ok(_)) => {}
                 // Remaining tests that expect execution to fail -> match error
@@ -172,6 +168,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     // TODO: Cleaner code would be nice..
                     let res = match exception {
                         "TR_TypeNotSupported" => true, // REVM is yielding arbitrary errors in these cases.
+                        "TR_NonceHasMaxValue" => error == InvalidTransaction::NonceOverflowInTransaction,
                         "SenderNotEOA" => error == InvalidTransaction::RejectCallerWithCode,
                         "TR_NoFundsX" => matches!(error, InvalidTransaction::LackOfFundForMaxFee{..}  | InvalidTransaction::OverflowPaymentInTransaction),
                         "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS" => matches!(error, InvalidTransaction::BlobGasPriceGreaterThanMax { .. }),
