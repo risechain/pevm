@@ -24,7 +24,7 @@ cargo fmt --all
 taplo fmt --option reorder_keys=true   # TOML formatting
 
 # Tests (must use --test-threads=1 to avoid resource contention)
-git submodule update --init            # Required once: pulls ethereum/tests submodule
+bash scripts/fetch-eest-fixtures.sh    # Required once: downloads EEST state test fixtures
 cargo test --workspace --release -- --test-threads=1
 
 # Run a single test
@@ -61,7 +61,7 @@ cargo bench --features global-alloc --bench gigagas
 
 ### Testing layout (`crates/pevm/tests/`)
 
-- `ethereum/` — general state tests from the official `ethereum/tests` submodule
+- `ethereum/` — EEST state test fixtures (`fixtures_stable.tar.gz` from `ethereum/execution-spec-tests` releases, downloaded via `scripts/fetch-eest-fixtures.sh`, gitignored)
 - `evm/` — mocked blocks (raw transfers, ERC-20, Uniswap, mixed, beneficiary edge cases)
 - `mainnet/` — snapshots of real Ethereum mainnet blocks
 - `common/` — shared test harness (`runner.rs`, `storage.rs`, `snapshot_data.rs`)
