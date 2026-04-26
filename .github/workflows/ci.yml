@@ -36,5 +36,5 @@ jobs:
         # Running our heavy tests in parallel would congest resources.
         # Each test still executes parallelly anyway.
         run: |
-          git submodule update --init
+          bash scripts/fetch-eest-fixtures.sh
           cargo test --release --workspace -- --test-threads=1
