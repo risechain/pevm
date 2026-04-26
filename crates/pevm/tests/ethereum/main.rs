@@ -168,7 +168,6 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     // TODO: Cleaner code would be nice..
                     let res = match exception {
                         "TR_TypeNotSupported" => true, // REVM is yielding arbitrary errors in these cases.
-                        // EIP-2681: revm now rejects nonce == u64::MAX at validation time.
                         "TR_NonceHasMaxValue" => error == InvalidTransaction::NonceOverflowInTransaction,
                         "SenderNotEOA" => error == InvalidTransaction::RejectCallerWithCode,
                         "TR_NoFundsX" => matches!(error, InvalidTransaction::LackOfFundForMaxFee{..}  | InvalidTransaction::OverflowPaymentInTransaction),
