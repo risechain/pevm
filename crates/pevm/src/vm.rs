@@ -16,7 +16,8 @@ use smallvec::SmallVec;
 use crate::{
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
     MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
-    TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
+    TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic,
+    mv_memory::MvMemory,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -215,8 +216,9 @@ impl<'a, S: Storage> VmDb<'a, S> {
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
         if let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
+            && let Some(map) = written_transactions.as_sparse()
             && let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
-                written_transactions.range(..self.tx_idx).next_back()
+                map.range(..self.tx_idx).next_back()
         {
             match value {
                 MemoryValue::SelfDestructed => {
@@ -282,8 +284,9 @@ impl<S: Storage> Database for VmDb<'_, S> {
         // Try reading from multi-version data
         if self.tx_idx > 0
             && let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
+            && let Some(map) = written_transactions.as_sparse()
         {
-            let mut iter = written_transactions.range(..self.tx_idx);
+            let mut iter = map.range(..self.tx_idx);
 
             // Fully evaluate lazy updates
             loop {
@@ -443,8 +446,8 @@ impl<S: Storage> Database for VmDb<'_, S> {
         // Try reading from multi-version data
         if self.tx_idx > 0
             && let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
-            && let Some((closest_idx, entry)) =
-                written_transactions.range(..self.tx_idx).next_back()
+            && let Some(map) = written_transactions.as_sparse()
+            && let Some((closest_idx, entry)) = map.range(..self.tx_idx).next_back()
         {
             match entry {
                 MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {

@@ -97,6 +97,7 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
                     value: U256::from(1),
                     gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
                     gas_price: 1,
+                    nonce: 1,
                     ..TxEnv::default()
                 }
             })
