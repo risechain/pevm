@@ -216,9 +216,8 @@ impl<'a, S: Storage> VmDb<'a, S> {
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
         if let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
-            && let Some(map) = written_transactions.as_sparse()
             && let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
-                map.range(..self.tx_idx).next_back()
+                written_transactions.iter_back_below(self.tx_idx).next_back()
         {
             match value {
                 MemoryValue::SelfDestructed => {
@@ -228,7 +227,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
                     Self::push_origin(
                         read_origins,
                         ReadOrigin::MvMemory(TxVersion {
-                            tx_idx: *tx_idx,
+                            tx_idx,
                             tx_incarnation: *tx_incarnation,
                         }),
                     )?;
@@ -284,15 +283,14 @@ impl<S: Storage> Database for VmDb<'_, S> {
         // Try reading from multi-version data
         if self.tx_idx > 0
             && let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
-            && let Some(map) = written_transactions.as_sparse()
         {
-            let mut iter = map.range(..self.tx_idx);
+            let mut iter = written_transactions.iter_back_below(self.tx_idx);
 
             // Fully evaluate lazy updates
             loop {
                 match iter.next_back() {
                     Some((blocking_idx, MemoryEntry::Estimate)) => {
-                        return Err(ReadError::Blocking(*blocking_idx));
+                        return Err(ReadError::Blocking(blocking_idx));
                     }
                     Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
                         // About to push a new origin
@@ -301,7 +299,7 @@ impl<S: Storage> Database for VmDb<'_, S> {
                             return Err(ReadError::InconsistentRead);
                         }
                         let origin = ReadOrigin::MvMemory(TxVersion {
-                            tx_idx: *closest_idx,
+                            tx_idx: closest_idx,
                             tx_incarnation: *tx_incarnation,
                         });
                         // Inconsistent: new origin is different from the previous!
@@ -446,21 +444,21 @@ impl<S: Storage> Database for VmDb<'_, S> {
         // Try reading from multi-version data
         if self.tx_idx > 0
             && let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
-            && let Some(map) = written_transactions.as_sparse()
-            && let Some((closest_idx, entry)) = map.range(..self.tx_idx).next_back()
+            && let Some((closest_idx, entry)) =
+                written_transactions.iter_back_below(self.tx_idx).next_back()
         {
             match entry {
                 MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
                     Self::push_origin(
                         read_origins,
                         ReadOrigin::MvMemory(TxVersion {
-                            tx_idx: *closest_idx,
+                            tx_idx: closest_idx,
                             tx_incarnation: *tx_incarnation,
                         }),
                     )?;
                     return Ok(*value);
                 }
-                MemoryEntry::Estimate => return Err(ReadError::Blocking(*closest_idx)),
+                MemoryEntry::Estimate => return Err(ReadError::Blocking(closest_idx)),
                 _ => return Err(ReadError::InvalidMemoryValueType),
             }
         }

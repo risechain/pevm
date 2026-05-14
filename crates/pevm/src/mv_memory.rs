@@ -64,13 +64,17 @@ impl MvEntries {
         )
     }
 
-    // Returns the inner BTreeMap for Sparse entries.
-    // Dense entries are for lazy addresses whose reads are mocked in the VM (is_lazy=true),
-    // so they never reach the MvMemory range-query path. Returning None is correct there.
-    pub(crate) fn as_sparse(&self) -> Option<&BTreeMap<TxIdx, MemoryEntry>> {
+    // Iterate prior entries with key < `tx_idx` in decreasing order. Unified across
+    // Sparse (BTreeMap range) and Dense (linear backward scan, skipping empty slots).
+    // VM reads and validate_read_locations both rely on this ordering to find the
+    // closest prior writer and to detect Estimate markers from aborted incarnations.
+    pub(crate) fn iter_back_below(&self, tx_idx: TxIdx) -> MvIter<'_> {
         match self {
-            Self::Sparse(map) => Some(map),
-            Self::Dense(_) => None,
+            Self::Sparse(map) => MvIter::Sparse(map.range(..tx_idx)),
+            Self::Dense(slots) => MvIter::Dense {
+                slots,
+                cursor: tx_idx.min(slots.len()),
+            },
         }
     }
 
@@ -79,6 +83,35 @@ impl MvEntries {
     pub(crate) fn dense_iter(&self) -> impl Iterator<Item = Option<&MemoryEntry>> {
         let Self::Dense(slots) = self else { unreachable!() };
         slots.iter().map(|cell| unsafe { (*cell.get()).as_ref() })
+    }
+}
+
+pub(crate) enum MvIter<'a> {
+    Sparse(std::collections::btree_map::Range<'a, TxIdx, MemoryEntry>),
+    Dense {
+        slots: &'a [UnsafeCell<Option<MemoryEntry>>],
+        cursor: usize,
+    },
+}
+
+impl<'a> MvIter<'a> {
+    // Yield the next entry below the current cursor (most-recent-first). Returns the
+    // tx_idx and a reference to its MemoryEntry, or None if exhausted.
+    pub(crate) fn next_back(&mut self) -> Option<(TxIdx, &'a MemoryEntry)> {
+        match self {
+            Self::Sparse(r) => r.next_back().map(|(k, v)| (*k, v)),
+            Self::Dense { slots, cursor } => {
+                while *cursor > 0 {
+                    *cursor -= 1;
+                    // SAFETY: validation/read paths run after the corresponding record()
+                    // with happens-before edges from the scheduler's atomic state.
+                    if let Some(entry) = unsafe { (*slots[*cursor].get()).as_ref() } {
+                        return Some((*cursor, entry));
+                    }
+                }
+                None
+            }
+        }
     }
 }
 
@@ -159,16 +192,15 @@ impl MvMemory {
                 .entry(hash)
                 .or_insert_with(|| MvEntries::Sparse(BTreeMap::new()));
             let old = std::mem::replace(entry_ref.value_mut(), MvEntries::new_dense(self.block_size));
-            // Migrate existing Sparse Data entries into Dense so post-processing only looks there.
+            // Migrate all existing Sparse entries (Data + Estimate) into Dense. Preserving
+            // Estimate is required so concurrent VM reads still see "blocked, wait for
+            // re-execution" instead of silently reading a stale prior value.
             if let MvEntries::Sparse(map) = old {
                 let MvEntries::Dense(slots) = entry_ref.value() else { unreachable!() };
                 for (tx_idx, entry) in map {
-                    if let MemoryEntry::Data(..) = &entry {
-                        // SAFETY: no concurrent writes during add_lazy_addresses migration
-                        // since we hold the DashMap shard write lock.
-                        unsafe { *slots[tx_idx].get() = Some(entry) };
-                    }
-                    // Skip Estimate entries; they'll be overwritten on re-execution.
+                    // SAFETY: no concurrent writes during add_lazy_addresses migration
+                    // since we hold the DashMap shard write lock.
+                    unsafe { *slots[tx_idx].get() = Some(entry) };
                 }
             }
         }
@@ -273,62 +305,25 @@ impl MvMemory {
     pub(crate) fn validate_read_locations(&self, tx_idx: TxIdx) -> bool {
         for (location, prior_origins) in &index_mutex!(self.last_locations, tx_idx).read {
             if let Some(entries) = self.data.get(location) {
-                match entries.value() {
-                    MvEntries::Sparse(map) => {
-                        let mut iter = map.range(..tx_idx);
-                        for prior_origin in prior_origins {
-                            if let ReadOrigin::MvMemory(prior_version) = prior_origin {
-                                // Found something: Must match version.
-                                if let Some((closest_idx, MemoryEntry::Data(tx_incarnation, ..))) =
-                                    iter.next_back()
-                                {
-                                    if closest_idx != &prior_version.tx_idx
-                                        || &prior_version.tx_incarnation != tx_incarnation
-                                    {
-                                        return false;
-                                    }
-                                }
-                                // The previously read value is now cleared or marked ESTIMATE.
-                                else {
-                                    return false;
-                                }
-                            }
-                            // Read from storage but there is now something in between!
-                            else if iter.next_back().is_some() {
+                let mut iter = entries.iter_back_below(tx_idx);
+                for prior_origin in prior_origins {
+                    if let ReadOrigin::MvMemory(prior_version) = prior_origin {
+                        // Found something: must match version. Estimate (pending re-exec)
+                        // or a different (closest_idx, incarnation) means the read is stale.
+                        if let Some((closest_idx, MemoryEntry::Data(tx_incarnation, ..))) =
+                            iter.next_back()
+                        {
+                            if closest_idx != prior_version.tx_idx
+                                || &prior_version.tx_incarnation != tx_incarnation
+                            {
                                 return false;
                             }
+                        } else {
+                            return false;
                         }
-                    }
-                    MvEntries::Dense(slots) => {
-                        // Scan backward from tx_idx, maintaining a cursor so successive
-                        // next_back() calls don't re-scan already-checked indices.
-                        // Dense validation is rare (lazy-address reads are mocked in the VM),
-                        // so the O(tx_idx) scan is acceptable.
-                        let mut cursor = tx_idx;
-                        for prior_origin in prior_origins {
-                            let found = (0..cursor).rev().find_map(|i| {
-                                // SAFETY: validation runs after the corresponding record() with
-                                // a happens-before edge enforced by the scheduler's atomic state.
-                                let entry = unsafe { (*slots[i].get()).as_ref() }?;
-                                Some((i, entry))
-                            });
-                            if let ReadOrigin::MvMemory(prior_version) = prior_origin {
-                                if let Some((closest_idx, MemoryEntry::Data(tx_incarnation, ..))) =
-                                    found
-                                {
-                                    if closest_idx != prior_version.tx_idx
-                                        || &prior_version.tx_incarnation != tx_incarnation
-                                    {
-                                        return false;
-                                    }
-                                    cursor = closest_idx;
-                                } else {
-                                    return false;
-                                }
-                            } else if found.is_some() {
-                                return false;
-                            }
-                        }
+                    } else if iter.next_back().is_some() {
+                        // Read from storage but there is now something in between.
+                        return false;
                     }
                 }
             }
@@ -349,10 +344,8 @@ impl MvMemory {
             if let Some(mut e) = self.data.get_mut(location) {
                 match e.value_mut() {
                     MvEntries::Dense(slots) => {
-                        // Clear the slot so re-execution writes fresh data. Dense locations
-                        // don't use Estimate markers because lazy-address reads are mocked
-                        // in the VM and never block waiting for an Estimate to resolve.
-                        unsafe { *slots[tx_idx].get() = None };
+                        // SAFETY: see struct-level invariant.
+                        unsafe { *slots[tx_idx].get() = Some(MemoryEntry::Estimate) };
                     }
                     MvEntries::Sparse(map) => {
                         map.insert(tx_idx, MemoryEntry::Estimate);
