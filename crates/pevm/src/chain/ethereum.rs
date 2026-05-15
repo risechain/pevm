@@ -12,12 +12,12 @@ use revm::{
         result::{HaltReason, InvalidTransaction},
     },
     context_interface::either::Either,
-    handler::MainnetContext,
     primitives::{
         eip4844::{MAX_BLOB_NUMBER_PER_BLOCK_CANCUN, MAX_BLOB_NUMBER_PER_BLOCK_PRAGUE},
         hardfork::SpecId,
     },
 };
+
 use smallvec::SmallVec;
 
 use super::{CalculateReceiptRootError, PevmChain};
@@ -62,7 +62,8 @@ impl PevmChain for PevmEthereum {
     type Network = alloy_provider::network::Ethereum;
     type Transaction = alloy_rpc_types_eth::Transaction;
     type Envelope = TxEnvelope;
-    type Evm<DB: Database> = MainnetEvm<MainnetContext<DB>>;
+    type Evm<DB: Database> =
+        MainnetEvm<Context<BlockEnv, TxEnv, CfgEnv, DB, crate::journal::Journal<DB>, ()>>;
     type EvmSpecId = SpecId;
     type EvmTx = TxEnv;
     type EvmHaltReason = HaltReason;
@@ -126,11 +127,22 @@ impl PevmChain for PevmEthereum {
         } else if spec_id >= SpecId::CANCUN {
             cfg = cfg.with_max_blobs_per_tx(MAX_BLOB_NUMBER_PER_BLOCK_CANCUN);
         }
-        Context::mainnet()
+        // Use the standard builder to initialize all defaults and EIP-7708 config,
+        // then swap in our custom journal by destructuring the standard context.
+        let std_ctx = Context::mainnet()
             .with_cfg(cfg)
             .with_block(block_env)
-            .with_db(db)
-            .build_mainnet()
+            .with_db(db);
+        Context {
+            block: std_ctx.block,
+            tx: std_ctx.tx,
+            cfg: std_ctx.cfg,
+            journaled_state: crate::journal::Journal::from_inner(std_ctx.journaled_state),
+            chain: std_ctx.chain,
+            local: std_ctx.local,
+            error: std_ctx.error,
+        }
+        .build_mainnet()
     }
 
     /// Get the REVM tx envs of an Alloy block.
