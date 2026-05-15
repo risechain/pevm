@@ -21,6 +21,7 @@ alloy-trie.workspace = true
 bitflags.workspace = true
 dashmap.workspace = true
 hashbrown.workspace = true
+rayon.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 smallvec.workspace = true
