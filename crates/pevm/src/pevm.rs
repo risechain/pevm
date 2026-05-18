@@ -112,6 +112,8 @@ pub struct Pevm {
     dropper: AsyncDropper<(MvMemory, Scheduler)>,
 }
 
+// SAFETY: The scheduler guarantees that each transaction index is written by exactly one thread at a time,
+// and results are only read after all threads have joined. Other fields are either Sync or safe to share.
 unsafe impl Sync for Pevm {}
 
 impl Pevm {
@@ -248,6 +250,7 @@ impl Pevm {
         let mut fully_evaluated_results = Vec::with_capacity(block_size);
         let mut cumulative_gas_used: u64 = 0;
         for i in 0..block_size {
+            // SAFETY: All worker threads have joined, and the index is guaranteed to be in bounds.
             let taken = unsafe { (*self.execution_results.get_unchecked(i).get()).take() };
             let Some(mut result) = taken else {
                 return Err(PevmError::UnreachableError);
