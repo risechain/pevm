@@ -1,7 +1,8 @@
 use std::{
+    cell::UnsafeCell,
     fmt::Debug,
     num::NonZeroUsize,
-    sync::{Mutex, OnceLock, mpsc},
+    sync::{OnceLock, mpsc},
     thread,
 };
 
@@ -104,10 +105,14 @@ impl<T> AsyncDropper<T> {
 #[derive(Debug, Default)]
 /// The main pevm struct that executes blocks.
 pub struct Pevm {
-    execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
+    // The scheduler guarantees each tx index is written by exactly one thread at a time,
+    // so distinct-index concurrent access is race-free despite UnsafeCell not being Sync.
+    execution_results: Vec<UnsafeCell<Option<PevmTxExecutionResult>>>,
     abort_reason: OnceLock<AbortReason>,
     dropper: AsyncDropper<(MvMemory, Scheduler)>,
 }
+
+unsafe impl Sync for Pevm {}
 
 impl Pevm {
     /// Execute an Alloy block, which is becoming the "standard" format in Rust.
@@ -189,7 +194,7 @@ impl Pevm {
         if additional > 0 {
             self.execution_results.reserve(additional);
             for _ in 0..additional {
-                self.execution_results.push(Mutex::new(None));
+                self.execution_results.push(UnsafeCell::new(None));
             }
         }
 
@@ -243,11 +248,15 @@ impl Pevm {
         let mut fully_evaluated_results = Vec::with_capacity(block_size);
         let mut cumulative_gas_used: u64 = 0;
         for i in 0..block_size {
-            let mut execution_result = index_mutex!(self.execution_results, i).take().unwrap();
+            let taken = unsafe { (*self.execution_results.get_unchecked(i).get()).take() };
+            let Some(mut result) = taken else {
+                return Err(PevmError::UnreachableError);
+            };
+
             cumulative_gas_used =
-                cumulative_gas_used.saturating_add(execution_result.receipt.cumulative_gas_used);
-            execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
-            fully_evaluated_results.push(execution_result);
+                cumulative_gas_used.saturating_add(result.receipt.cumulative_gas_used);
+            result.receipt.cumulative_gas_used = cumulative_gas_used;
+            fully_evaluated_results.push(result);
         }
 
         // We fully evaluate (the balance and nonce of) the beneficiary account
@@ -412,8 +421,14 @@ impl Pevm {
                     execution_result,
                     flags,
                 }) => {
-                    *index_mutex!(self.execution_results, tx_version.tx_idx) =
-                        Some(execution_result);
+                    // SAFETY: scheduler ensures tx_idx < block_size and no two threads write
+                    // to the same index concurrently.
+                    unsafe {
+                        *self
+                            .execution_results
+                            .get_unchecked(tx_version.tx_idx)
+                            .get() = Some(execution_result);
+                    }
                     scheduler.finish_execution(tx_version, flags)
                 }
             };
