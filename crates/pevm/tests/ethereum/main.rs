@@ -206,7 +206,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                             chain_state_account.nonce = account.nonce;
                             chain_state_account.code_hash = account.code_hash;
                             chain_state_account.code = account.code;
-                            chain_state_account.storage.extend(account.storage.into_iter());
+                            chain_state_account.storage.extend(account.storage);
                         } else {
                             chain_state.remove(&address);
                         }
