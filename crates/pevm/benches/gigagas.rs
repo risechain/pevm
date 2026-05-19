@@ -53,6 +53,7 @@ pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<T
                 black_box(block_env.clone()),
                 black_box(txs.clone()),
             )
+            .expect("must benchmark successful runs")
         })
     });
     group.bench_function("Parallel", |b| {
@@ -65,6 +66,7 @@ pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<T
                 black_box(txs.clone()),
                 black_box(concurrency_level),
             )
+            .expect("must benchmark successful runs")
         })
     });
     group.finish();
@@ -93,6 +95,7 @@ pub fn bench_raw_transfers(c: &mut Criterion) {
                 let address = Address::from(U160::from(START_ADDRESS + i));
                 TxEnv {
                     caller: address,
+                    nonce: 1,
                     kind: TransactTo::Call(address),
                     value: U256::from(1),
                     gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
