@@ -13,8 +13,8 @@ use op_revm::{
     transaction::{OpTxTr, deposit::DepositTransactionParts},
 };
 use revm::{
-    Context, Database, MainContext,
-    context::{BlockEnv, CfgEnv, TxEnv},
+    Context, Database,
+    context::{BlockEnv, CfgEnv, LocalContext, TxEnv, journal::JournalCfg},
     context_interface::either::Either,
     handler::EvmTr,
 };
@@ -106,22 +106,20 @@ impl PevmChain for PevmRise {
         block_env: BlockEnv,
         db: DB,
     ) -> Self::Evm<DB> {
-        // Use the standard builder to initialize all defaults and EIP-7708 config,
-        // then swap in our custom journal by destructuring the standard context.
-        let std_ctx = Context::mainnet()
-            .with_cfg(CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID))
-            .with_block(block_env)
-            .with_db(db)
-            .with_tx(OpTransaction::default())
-            .with_chain(L1BlockInfo::default());
+        let cfg = CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID);
+        let journal_cfg = JournalCfg {
+            spec: spec_id.into(),
+            eip7708_disabled: cfg.amsterdam_eip7708_disabled,
+            eip7708_delayed_burn_disabled: cfg.amsterdam_eip7708_delayed_burn_disabled,
+        };
         Context {
-            block: std_ctx.block,
-            tx: std_ctx.tx,
-            cfg: std_ctx.cfg,
-            journaled_state: crate::journal::Journal::from_inner(std_ctx.journaled_state),
-            chain: std_ctx.chain,
-            local: std_ctx.local,
-            error: std_ctx.error,
+            block: block_env,
+            tx: OpTransaction::default(),
+            cfg,
+            journaled_state: crate::journal::Journal::new(db, journal_cfg),
+            chain: L1BlockInfo::default(),
+            local: LocalContext::default(),
+            error: Ok(()),
         }
         .build_op()
     }

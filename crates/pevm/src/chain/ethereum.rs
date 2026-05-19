@@ -6,9 +6,10 @@ use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
 use revm::{
-    Context, Database, MainBuilder, MainContext, MainnetEvm,
+    Context, Database, MainBuilder, MainnetEvm,
     context::{
-        BlockEnv, CfgEnv, TxEnv,
+        BlockEnv, CfgEnv, LocalContext, TxEnv,
+        journal::JournalCfg,
         result::{HaltReason, InvalidTransaction},
     },
     context_interface::either::Either,
@@ -127,20 +128,19 @@ impl PevmChain for PevmEthereum {
         } else if spec_id >= SpecId::CANCUN {
             cfg = cfg.with_max_blobs_per_tx(MAX_BLOB_NUMBER_PER_BLOCK_CANCUN);
         }
-        // Use the standard builder to initialize all defaults and EIP-7708 config,
-        // then swap in our custom journal by destructuring the standard context.
-        let std_ctx = Context::mainnet()
-            .with_cfg(cfg)
-            .with_block(block_env)
-            .with_db(db);
+        let journal_cfg = JournalCfg {
+            spec: spec_id,
+            eip7708_disabled: cfg.amsterdam_eip7708_disabled,
+            eip7708_delayed_burn_disabled: cfg.amsterdam_eip7708_delayed_burn_disabled,
+        };
         Context {
-            block: std_ctx.block,
-            tx: std_ctx.tx,
-            cfg: std_ctx.cfg,
-            journaled_state: crate::journal::Journal::from_inner(std_ctx.journaled_state),
-            chain: std_ctx.chain,
-            local: std_ctx.local,
-            error: std_ctx.error,
+            block: block_env,
+            tx: TxEnv::default(),
+            cfg,
+            journaled_state: crate::journal::Journal::new(db, journal_cfg),
+            chain: (),
+            local: LocalContext::default(),
+            error: Ok(()),
         }
         .build_mainnet()
     }
