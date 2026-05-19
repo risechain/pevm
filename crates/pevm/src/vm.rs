@@ -142,8 +142,6 @@ struct VmDb<'a, S: Storage> {
     // False for transaction types with no nonce (e.g. OP deposits).
     has_nonce: bool,
     read_set: ReadSet,
-    // TODO: Clearer type for [AccountBasic] plus code hash
-    read_accounts: HashMap<MemoryLocationHash, (AccountBasic, Option<B256>), BuildIdentityHasher>,
 }
 
 impl<'a, S: Storage> VmDb<'a, S> {
@@ -165,7 +163,6 @@ impl<'a, S: Storage> VmDb<'a, S> {
         self.is_lazy = false;
         self.has_nonce = has_nonce;
         self.read_set.clear();
-        self.read_accounts.clear();
         if let TxKind::Call(to) = tx.kind {
             self.to_code_hash = self.get_code_hash(to)?;
 
@@ -409,9 +406,6 @@ impl<S: Storage> Database for VmDb<'_, S> {
             } else {
                 None
             };
-            self.read_accounts
-                .insert(location_hash, (account.clone(), code_hash));
-
             return Ok(Some(AccountInfo {
                 balance: account.balance,
                 nonce: account.nonce,
@@ -514,7 +508,6 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             // Unless it is a raw transfer that is lazy updated, we'll
             // read at least from the sender and recipient accounts.
             read_set: ReadSet::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
-            read_accounts: HashMap::with_capacity_and_hasher(2, BuildIdentityHasher::default()),
         };
         Self {
             chain,
@@ -603,19 +596,13 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     if account.is_touched() {
                         let account_location_hash =
                             hash_deterministic(MemoryLocation::Basic(*address));
-                        let read_account = ctx.db().read_accounts.get(&account_location_hash);
-
                         let has_code = !account.info.is_empty_code_hash();
-                        let is_new_code = has_code
-                            && read_account.is_none_or(|(_, code_hash)| code_hash.is_none());
+                        let is_new_code = has_code && account.original_info.is_empty_code_hash();
 
                         // Write new account changes
                         if is_new_code
-                            || read_account.is_none()
-                            || read_account.is_some_and(|(basic, _)| {
-                                basic.nonce != account.info.nonce
-                                    || basic.balance != account.info.balance
-                            })
+                            || account.original_info.nonce != account.info.nonce
+                            || account.original_info.balance != account.info.balance
                         {
                             if ctx.db().is_lazy {
                                 if account_location_hash == from_hash {
