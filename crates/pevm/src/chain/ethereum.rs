@@ -64,7 +64,7 @@ impl PevmChain for PevmEthereum {
     type Transaction = alloy_rpc_types_eth::Transaction;
     type Envelope = TxEnvelope;
     type Evm<DB: Database> =
-        MainnetEvm<Context<BlockEnv, TxEnv, CfgEnv, DB, crate::journal::Journal<DB>, ()>>;
+        MainnetEvm<Context<BlockEnv, TxEnv, CfgEnv, DB, crate::journal::PevmJournal<DB>, ()>>;
     type EvmSpecId = SpecId;
     type EvmTx = TxEnv;
     type EvmHaltReason = HaltReason;
@@ -137,7 +137,7 @@ impl PevmChain for PevmEthereum {
             block: block_env,
             tx: TxEnv::default(),
             cfg,
-            journaled_state: crate::journal::Journal::new(db, journal_cfg),
+            journaled_state: crate::journal::PevmJournal::new(db, journal_cfg),
             chain: (),
             local: LocalContext::default(),
             error: Ok(()),

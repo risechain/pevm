@@ -16,7 +16,7 @@ use smallvec::SmallVec;
 use crate::{
     AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
     MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
-    TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
+    TxIdx, TxVersion, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -569,6 +569,15 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 .set_tx(tx_version.tx_idx, tx, from_hash, to_hash, has_nonce)
                 .map_err(VmExecutionError::from)?;
 
+            let is_lazy = ctx.db().is_lazy;
+            ctx.journal_mut().set_tx(
+                tx.caller,
+                from_hash,
+                tx.kind.to().copied(),
+                to_hash,
+                is_lazy,
+            );
+
             ctx.set_tx(full_tx.clone());
 
             // We reset the journal when we finalise it into the result state on a
@@ -578,100 +587,20 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
         match NoBeneficiaryHandler::<C, _>::default().run(&mut self.evm) {
             Ok(exec_result) => {
-                // There are at least six locations most of the time: the sender,
-                // the recipient, and up to four fee recipients (beneficiary, base fee,
-                // L1 fee, operator fee on OP Stack chains).
-                let mut write_set = WriteSet::with_capacity(6);
-
                 let ctx = self.evm.ctx();
+
+                // extract() must run before finalize() — finalize() clears dirty.
+                let crate::journal::ExtractedWrites {
+                    mut write_set,
+                    new_bytecodes,
+                    ..
+                } = ctx.journal_mut().extract();
+                for (hash, code) in new_bytecodes {
+                    self.mv_memory.new_bytecodes.entry(hash).or_insert(code);
+                }
 
                 let result_and_state =
                     ResultAndState::new(exec_result, ctx.journal_mut().finalize());
-
-                for (address, account) in &result_and_state.state {
-                    if account.is_selfdestructed() {
-                        // TODO: Also write [SelfDestructed] to the basic location?
-                        // For now we are betting on [code_hash] triggering the sequential
-                        // fallback when we read a self-destructed contract.
-                        write_set.push((
-                            hash_deterministic(MemoryLocation::CodeHash(*address)),
-                            MemoryValue::SelfDestructed,
-                        ));
-                        continue;
-                    }
-
-                    if account.is_touched() {
-                        let account_location_hash =
-                            hash_deterministic(MemoryLocation::Basic(*address));
-                        let read_account = ctx.db().read_accounts.get(&account_location_hash);
-
-                        let has_code = !account.info.is_empty_code_hash();
-                        let is_new_code = has_code
-                            && read_account.is_none_or(|(_, code_hash)| code_hash.is_none());
-
-                        // Write new account changes
-                        if is_new_code
-                            || read_account.is_none()
-                            || read_account.is_some_and(|(basic, _)| {
-                                basic.nonce != account.info.nonce
-                                    || basic.balance != account.info.balance
-                            })
-                        {
-                            if ctx.db().is_lazy {
-                                if account_location_hash == from_hash {
-                                    write_set.push((
-                                        account_location_hash,
-                                        MemoryValue::LazySender(U256::MAX - account.info.balance),
-                                    ));
-                                } else if Some(account_location_hash) == to_hash {
-                                    write_set.push((
-                                        account_location_hash,
-                                        MemoryValue::LazyRecipient(tx.value),
-                                    ));
-                                }
-                            }
-                            // We don't register empty accounts after [SPURIOUS_DRAGON]
-                            // as they are cleared. This can only happen via 2 ways:
-                            // 1. Self-destruction which is handled by an if above.
-                            // 2. Sending 0 ETH to an empty account, which we treat as a
-                            // non-write here. A later read would trace back to storage
-                            // and return a [None], i.e., [LoadedAsNotExisting]. Without
-                            // this check it would write then read a [Some] default
-                            // account, which may yield a wrong gas fee, etc.
-                            else if !self.chain.is_eip_161_enabled(self.spec_id)
-                                || !account.is_empty()
-                            {
-                                write_set.push((
-                                    account_location_hash,
-                                    MemoryValue::Basic(AccountBasic {
-                                        balance: account.info.balance,
-                                        nonce: account.info.nonce,
-                                    }),
-                                ));
-                            }
-                        }
-
-                        // Write new contract
-                        if is_new_code {
-                            write_set.push((
-                                hash_deterministic(MemoryLocation::CodeHash(*address)),
-                                MemoryValue::CodeHash(account.info.code_hash),
-                            ));
-                            self.mv_memory
-                                .new_bytecodes
-                                .entry(account.info.code_hash)
-                                .or_insert_with(|| account.info.code.clone().unwrap());
-                        }
-                    }
-
-                    // TODO: We should move this changed check to our read set like for account info?
-                    for (slot, value) in account.changed_storage_slots() {
-                        write_set.push((
-                            hash_deterministic(MemoryLocation::Storage(*address, *slot)),
-                            MemoryValue::Storage(value.present_value),
-                        ));
-                    }
-                }
 
                 // Rewards
                 let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {

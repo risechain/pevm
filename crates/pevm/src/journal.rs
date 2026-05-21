@@ -1,87 +1,551 @@
-//! Custom journal implementation for PEVM, based on revm's `Journal` but flattened
+//! Pevm-native journal (`PevmJournal<DB>`) that records `MvMemory` writes at
+//! write time, eliminating post-execution re-hashing and per-account storage
+//! allocations from the original extraction loop.
 
 use core::mem;
 
+use smallvec::SmallVec;
+
 use revm::{
     Database,
-    context::journal::{JournalCfg, JournalEntry, JournalEntryTr, warm_addresses::WarmAddresses},
+    context::journal::{JournalCfg, warm_addresses::WarmAddresses},
     context_interface::{
         context::{SStoreResult, SelfDestructResult},
         journaled_state::{
             AccountInfoLoad, AccountLoad, JournalCheckpoint, JournalLoadError, JournalTr,
-            StateLoad, TransferError,
-            account::{JournaledAccount, JournaledAccountTr},
+            StateLoad, TransferError, account::JournaledAccountTr,
             entry::SelfdestructionRevertStatus,
         },
     },
     primitives::{
-        Address, AddressMap, AddressSet, B256, Bytes, HashSet, KECCAK_EMPTY, Log, LogData,
-        StorageKey, StorageValue, U256,
+        Address,
+        AddressMap,
+        AddressSet,
+        B256,
+        Bytes,
+        HashSet,
+        KECCAK_EMPTY,
+        Log,
+        LogData,
+        StorageKey,
+        StorageValue,
+        U256,
         eip7708::{BURN_LOG_TOPIC, ETH_TRANSFER_LOG_ADDRESS, ETH_TRANSFER_LOG_TOPIC},
         hardfork::SpecId::{self, *},
-        hints_util::unlikely,
-        map::Entry,
+        // Entry/HashMap from alloy-primitives (hashbrown 0.16) — same version as EvmState,
+        // so Entry variants work for both accounts and our custom-hasher maps.
+        map::{Entry, HashMap},
     },
-    state::{Account, Bytecode, EvmState, TransientStorage},
+    state::{Account, Bytecode, EvmState, EvmStorageSlot, TransientStorage},
 };
 
-/// All fields from revm's `JournalInner` flattened directly onto this struct,
-/// alongside `database`. Implements `JournalTr` with identical behavior to
-/// `revm::context::Journal<DB>` — no extra wrapping layer.
+use crate::{
+    AccountBasic, BuildIdentityHasher, MemoryLocation, MemoryLocationHash, MemoryValue, WriteSet,
+    hash_deterministic,
+};
+
+// ── PevmJournal ──────────────────────────────────────────────────────────────
+//
+// Pevm-native journal that records writes in MvMemory-native form at write time,
+// eliminating the 80-line post-execution re-hashing loop in vm.rs.
+//
+// Key properties:
+// - `dirty`: write buffer keyed by MemoryLocationHash; drain → WriteSet with no re-hashing.
+// - `storage_slots`: flat cache for ALL accounts' storage; presence = warm, no transaction_id.
+// - `accounts`: account map; presence = warm; cleared on set_tx().
+// - Lazy values (LazySender / LazyRecipient) are written to dirty at write time.
+//
+// See PEVM_JOURNAL_SPEC.md for the full design.
+
+/// Undo log entry for `PevmJournal`. Used by `checkpoint_revert` to restore state.
 #[derive(Debug)]
-pub struct Journal<DB: Database> {
-    /// Database for state access.
-    pub database: DB,
-    /// The current state.
-    pub state: EvmState,
-    /// Transient storage (EIP-1153), discarded after every transaction.
-    pub transient_storage: TransientStorage,
-    /// Emitted logs.
-    pub logs: Vec<Log>,
-    /// Current call depth.
-    pub depth: usize,
-    /// Journal of state changes for checkpoint-based revert.
-    pub journal: Vec<JournalEntry>,
-    /// Number of transactions executed (including reverted).
-    pub transaction_id: usize,
-    /// Spec ID and EIP-7708 flags.
-    pub cfg: JournalCfg,
-    /// Warm address tracking (coinbase, precompiles, access list).
-    pub warm_addresses: WarmAddresses,
-    /// Addresses self-destructed for the first time in this transaction (EIP-7708).
-    pub selfdestructed_addresses: Vec<Address>,
+#[allow(dead_code)]
+pub(crate) enum PevmJournalEntry {
+    AccountWarmed(Address),
+    AccountTouched(Address),
+    BalanceChange {
+        address: Address,
+        old_balance: U256,
+    },
+    BalanceTransfer {
+        from: Address,
+        to: Address,
+        amount: U256,
+    },
+    NonceBump {
+        address: Address,
+    },
+    NonceChange {
+        address: Address,
+        previous_nonce: u64,
+    },
+    CodeChange {
+        address: Address,
+    },
+    AccountCreated {
+        address: Address,
+        globally: bool,
+    },
+    AccountDestroyed {
+        address: Address,
+        target: Address,
+        had_balance: U256,
+        status: SelfdestructionRevertStatus,
+    },
+    // 8 bytes vs revm's (address + key) = 52 bytes.
+    StorageWarmed {
+        hash: MemoryLocationHash,
+    },
+    StorageChanged {
+        address: Address,
+        key: StorageKey,
+        prev_value: StorageValue,
+    },
+    TransientStorageChanged {
+        address: Address,
+        key: StorageKey,
+        prev: StorageValue,
+    },
 }
 
-// ── Helpers called from multiple places ──────────────────────────────────────
-//
-// These inherent methods are kept because they are called from more than one
-// `JournalTr` method (or, in the case of `new`/`finalize`, from outside the
-// trait impl as well).  Everything that has exactly one caller has been inlined
-// directly into that caller inside the `JournalTr` impl below.
-impl<DB: Database> Journal<DB> {
+/// Writes extracted from `PevmJournal` after a transaction.
+#[allow(dead_code)]
+pub(crate) struct ExtractedWrites {
+    pub(crate) write_set: WriteSet,
+    pub(crate) logs: Vec<Log>,
+    pub(crate) new_bytecodes: SmallVec<[(B256, Bytecode); 1]>,
+}
+
+/// Pevm-native journal. Implements `JournalTr` with the same semantics as Journal<DB> but
+/// records writes in dirty (MvMemory-native form) at write time.
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct PevmJournal<DB: Database> {
+    pub(crate) database: DB,
+    /// Account map. Presence = warm; cleared on `set_tx()`.
+    pub(crate) accounts: EvmState,
+    /// Flat storage cache for all accounts. Presence = warm; cleared on `set_tx()`.
+    pub(crate) storage_slots: HashMap<MemoryLocationHash, EvmStorageSlot, BuildIdentityHasher>,
+    /// MvMemory-native write buffer. Drained by `extract()`.
+    pub(crate) dirty: HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>,
+    journal: Vec<PevmJournalEntry>,
+    new_bytecodes: SmallVec<[(B256, Bytecode); 1]>,
+    pub(crate) from_addr: Address,
+    pub(crate) from_hash: MemoryLocationHash,
+    pub(crate) to_addr: Option<Address>,
+    pub(crate) to_hash: Option<MemoryLocationHash>,
+    pub(crate) is_lazy: bool,
+    pub(crate) logs: Vec<Log>,
+    pub(crate) depth: usize,
+    pub(crate) cfg: JournalCfg,
+    pub(crate) warm_addresses: WarmAddresses,
+    pub(crate) transient_storage: TransientStorage,
+    pub(crate) selfdestructed_addresses: Vec<Address>,
+}
+
+// Compute the dirty write value for a basic (balance/nonce) location.
+// Free function to avoid borrow conflicts when holding an account reference.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn make_basic_dirty(
+    address: Address,
+    balance: U256,
+    nonce: u64,
+    from_addr: Address,
+    from_hash: MemoryLocationHash,
+    to_addr: Option<Address>,
+    to_hash: Option<MemoryLocationHash>,
+    is_lazy: bool,
+) -> (MemoryLocationHash, MemoryValue) {
+    let location = if address == from_addr {
+        from_hash
+    } else if to_addr == Some(address) {
+        to_hash.unwrap()
+    } else {
+        hash_deterministic(MemoryLocation::Basic(address))
+    };
+    let value = if is_lazy && location == from_hash {
+        MemoryValue::LazySender(U256::MAX - balance)
+    } else if is_lazy && Some(location) == to_hash {
+        // Use actual balance (net EVM-world addition since VmDb mocked to_addr with None/0).
+        MemoryValue::LazyRecipient(balance)
+    } else {
+        MemoryValue::Basic(AccountBasic { balance, nonce })
+    };
+    (location, value)
+}
+
+// After restoring account.info via revert, recompute dirty for the basic location.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn recompute_basic_dirty(
+    accounts: &EvmState,
+    dirty: &mut HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>,
+    address: Address,
+    from_addr: Address,
+    from_hash: MemoryLocationHash,
+    to_addr: Option<Address>,
+    to_hash: Option<MemoryLocationHash>,
+    is_lazy: bool,
+) {
+    let Some(account) = accounts.get(&address) else {
+        return;
+    };
+    let i = &account.info;
+    let o = &*account.original_info;
+    let location = if address == from_addr {
+        from_hash
+    } else if to_addr == Some(address) {
+        to_hash.unwrap()
+    } else {
+        hash_deterministic(MemoryLocation::Basic(address))
+    };
+    if i.balance == o.balance && i.nonce == o.nonce {
+        dirty.remove(&location);
+        return;
+    }
+    let (loc, value) = make_basic_dirty(
+        address, i.balance, i.nonce, from_addr, from_hash, to_addr, to_hash, is_lazy,
+    );
+    dirty.insert(loc, value);
+}
+
+// After restoring storage_slots[hash].present_value, recompute dirty[hash].
+#[inline]
+fn recompute_storage_dirty(
+    storage_slots: &HashMap<MemoryLocationHash, EvmStorageSlot, BuildIdentityHasher>,
+    dirty: &mut HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>,
+    hash: MemoryLocationHash,
+) {
+    if let Some(slot) = storage_slots.get(&hash) {
+        if slot.is_changed() {
+            dirty.insert(hash, MemoryValue::Storage(slot.present_value));
+        } else {
+            dirty.remove(&hash);
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl<DB: Database> PevmJournal<DB> {
     pub(crate) fn new(database: DB, cfg: JournalCfg) -> Self {
         Self {
             database,
-            state: EvmState::default(),
-            transient_storage: TransientStorage::default(),
+            accounts: EvmState::default(),
+            storage_slots: HashMap::with_hasher(BuildIdentityHasher::default()),
+            dirty: HashMap::with_hasher(BuildIdentityHasher::default()),
+            journal: Vec::new(),
+            new_bytecodes: SmallVec::new(),
+            from_addr: Address::ZERO,
+            from_hash: 0,
+            to_addr: None,
+            to_hash: None,
+            is_lazy: false,
             logs: Vec::new(),
             depth: 0,
-            journal: Vec::new(),
-            transaction_id: 0,
             cfg,
             warm_addresses: WarmAddresses::new(),
+            transient_storage: TransientStorage::default(),
             selfdestructed_addresses: Vec::new(),
         }
     }
 
-    fn finalize(&mut self) -> EvmState {
-        self.warm_addresses.clear_coinbase_and_access_list();
-        self.selfdestructed_addresses.clear();
+    /// Reset per-tx state and set new tx context. Retains allocations.
+    pub(crate) fn set_tx(
+        &mut self,
+        from_addr: Address,
+        from_hash: MemoryLocationHash,
+        to_addr: Option<Address>,
+        to_hash: Option<MemoryLocationHash>,
+        is_lazy: bool,
+    ) {
+        self.from_addr = from_addr;
+        self.from_hash = from_hash;
+        self.to_addr = to_addr;
+        self.to_hash = to_hash;
+        self.is_lazy = is_lazy;
+        self.accounts.clear();
+        self.storage_slots.clear();
+        self.dirty.clear();
+        self.journal.clear();
+        self.new_bytecodes.clear();
+    }
 
-        let mut state = mem::take(&mut self.state);
+    #[inline(never)]
+    fn load_account_optional(
+        &mut self,
+        address: Address,
+        load_code: bool,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<&Account>, JournalLoadError<DB::Error>> {
+        let mut load = self.load_account_mut_optional(address, skip_cold_load)?;
+        if load_code {
+            load.data.load_code_preserve_error()?;
+        }
+        Ok(load.map(|acc| acc.into_account()))
+    }
+
+    #[inline(never)]
+    fn load_account_mut_optional(
+        &mut self,
+        address: Address,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<PevmJournalAccount<'_, DB>>, JournalLoadError<DB::Error>> {
+        let (account, is_cold) = match self.accounts.entry(address) {
+            Entry::Occupied(occ) => (occ.into_mut(), false),
+            Entry::Vacant(vac) => {
+                let is_cold = self
+                    .warm_addresses
+                    .check_is_cold(&address, skip_cold_load)?;
+                let account = match self.database.basic(address)? {
+                    Some(info) => Account::from(info),
+                    None => Account::new_not_existing(0),
+                };
+                if is_cold {
+                    self.journal.push(PevmJournalEntry::AccountWarmed(address));
+                }
+                (vac.insert(account), is_cold)
+            }
+        };
+        Ok(StateLoad::new(
+            PevmJournalAccount {
+                address,
+                account,
+                journal: &mut self.journal,
+                storage_slots: &mut self.storage_slots,
+                dirty: &mut self.dirty,
+                db: &mut self.database,
+                access_list: self.warm_addresses.access_list(),
+                from_addr: self.from_addr,
+                from_hash: self.from_hash,
+                to_addr: self.to_addr,
+                to_hash: self.to_hash,
+                is_lazy: self.is_lazy,
+            },
+            is_cold,
+        ))
+    }
+
+    #[inline]
+    fn get_account_mut(&mut self, address: Address) -> Option<PevmJournalAccount<'_, DB>> {
+        let account = self.accounts.get_mut(&address)?;
+        Some(PevmJournalAccount {
+            address,
+            account,
+            journal: &mut self.journal,
+            storage_slots: &mut self.storage_slots,
+            dirty: &mut self.dirty,
+            db: &mut self.database,
+            access_list: self.warm_addresses.access_list(),
+            from_addr: self.from_addr,
+            from_hash: self.from_hash,
+            to_addr: self.to_addr,
+            to_hash: self.to_hash,
+            is_lazy: self.is_lazy,
+        })
+    }
+
+    fn revert_entry(&mut self, entry: PevmJournalEntry) {
+        let is_spurious = self.cfg.spec.is_enabled_in(SPURIOUS_DRAGON);
+        match entry {
+            PevmJournalEntry::AccountWarmed(address) => {
+                self.accounts.remove(&address);
+            }
+            PevmJournalEntry::AccountTouched(address) => {
+                if is_spurious && address == revm::primitives::PRECOMPILE3 {
+                    return;
+                }
+                if let Some(acc) = self.accounts.get_mut(&address) {
+                    acc.unmark_touch();
+                }
+            }
+            PevmJournalEntry::BalanceChange {
+                address,
+                old_balance,
+            } => {
+                if let Some(acc) = self.accounts.get_mut(&address) {
+                    acc.info.balance = old_balance;
+                }
+                recompute_basic_dirty(
+                    &self.accounts,
+                    &mut self.dirty,
+                    address,
+                    self.from_addr,
+                    self.from_hash,
+                    self.to_addr,
+                    self.to_hash,
+                    self.is_lazy,
+                );
+            }
+            PevmJournalEntry::BalanceTransfer { from, to, amount } => {
+                if let Some(acc) = self.accounts.get_mut(&from) {
+                    acc.info.balance += amount;
+                }
+                if let Some(acc) = self.accounts.get_mut(&to) {
+                    acc.info.balance = acc.info.balance.saturating_sub(amount);
+                }
+                for addr in [from, to] {
+                    recompute_basic_dirty(
+                        &self.accounts,
+                        &mut self.dirty,
+                        addr,
+                        self.from_addr,
+                        self.from_hash,
+                        self.to_addr,
+                        self.to_hash,
+                        self.is_lazy,
+                    );
+                }
+            }
+            PevmJournalEntry::NonceBump { address } => {
+                if let Some(acc) = self.accounts.get_mut(&address) {
+                    acc.info.nonce = acc.info.nonce.saturating_sub(1);
+                }
+                recompute_basic_dirty(
+                    &self.accounts,
+                    &mut self.dirty,
+                    address,
+                    self.from_addr,
+                    self.from_hash,
+                    self.to_addr,
+                    self.to_hash,
+                    self.is_lazy,
+                );
+            }
+            PevmJournalEntry::NonceChange {
+                address,
+                previous_nonce,
+            } => {
+                if let Some(acc) = self.accounts.get_mut(&address) {
+                    acc.info.nonce = previous_nonce;
+                }
+                recompute_basic_dirty(
+                    &self.accounts,
+                    &mut self.dirty,
+                    address,
+                    self.from_addr,
+                    self.from_hash,
+                    self.to_addr,
+                    self.to_hash,
+                    self.is_lazy,
+                );
+            }
+            PevmJournalEntry::CodeChange { address } => {
+                if let Some(acc) = self.accounts.get_mut(&address) {
+                    acc.info.code_hash = KECCAK_EMPTY;
+                    acc.info.code = None;
+                }
+                let loc = hash_deterministic(MemoryLocation::CodeHash(address));
+                self.dirty.remove(&loc);
+            }
+            PevmJournalEntry::AccountCreated { address, globally } => {
+                if let Some(acc) = self.accounts.get_mut(&address) {
+                    acc.unmark_created_locally();
+                    if globally {
+                        acc.unmark_created();
+                    }
+                    acc.info.nonce = 0;
+                }
+                recompute_basic_dirty(
+                    &self.accounts,
+                    &mut self.dirty,
+                    address,
+                    self.from_addr,
+                    self.from_hash,
+                    self.to_addr,
+                    self.to_hash,
+                    self.is_lazy,
+                );
+            }
+            PevmJournalEntry::AccountDestroyed {
+                address,
+                target,
+                had_balance,
+                status,
+            } => {
+                if let Some(acc) = self.accounts.get_mut(&address) {
+                    match status {
+                        SelfdestructionRevertStatus::GloballySelfdestroyed => {
+                            acc.unmark_selfdestruct();
+                            acc.unmark_selfdestructed_locally();
+                        }
+                        SelfdestructionRevertStatus::LocallySelfdestroyed => {
+                            acc.unmark_selfdestructed_locally();
+                        }
+                        SelfdestructionRevertStatus::RepeatedSelfdestruction => {}
+                    }
+                    acc.info.balance += had_balance;
+                }
+                if address != target
+                    && let Some(tgt) = self.accounts.get_mut(&target)
+                {
+                    tgt.info.balance = tgt.info.balance.saturating_sub(had_balance);
+                }
+                if status == SelfdestructionRevertStatus::GloballySelfdestroyed {
+                    self.dirty
+                        .remove(&hash_deterministic(MemoryLocation::CodeHash(address)));
+                }
+                recompute_basic_dirty(
+                    &self.accounts,
+                    &mut self.dirty,
+                    address,
+                    self.from_addr,
+                    self.from_hash,
+                    self.to_addr,
+                    self.to_hash,
+                    self.is_lazy,
+                );
+                if address != target {
+                    recompute_basic_dirty(
+                        &self.accounts,
+                        &mut self.dirty,
+                        target,
+                        self.from_addr,
+                        self.from_hash,
+                        self.to_addr,
+                        self.to_hash,
+                        self.is_lazy,
+                    );
+                }
+            }
+            PevmJournalEntry::StorageWarmed { hash } => {
+                self.storage_slots.remove(&hash);
+            }
+            PevmJournalEntry::StorageChanged {
+                address,
+                key,
+                prev_value,
+            } => {
+                let hash = hash_deterministic(MemoryLocation::Storage(address, key));
+                if let Some(slot) = self.storage_slots.get_mut(&hash) {
+                    slot.present_value = prev_value;
+                }
+                if let Some(account) = self.accounts.get_mut(&address)
+                    && let Some(slot) = account.storage.get_mut(&key)
+                {
+                    slot.present_value = prev_value;
+                }
+                recompute_storage_dirty(&self.storage_slots, &mut self.dirty, hash);
+            }
+            PevmJournalEntry::TransientStorageChanged { address, key, prev } => {
+                let tkey = (address, key);
+                if prev.is_zero() {
+                    self.transient_storage.remove(&tkey);
+                } else {
+                    self.transient_storage.insert(tkey, prev);
+                }
+            }
+        }
+    }
+
+    /// Build the final `EvmState`. Populates account.storage for net-changed slots,
+    /// applies pre-Spurious-Dragon normalization, then clears per-tx state.
+    pub(crate) fn finalize(&mut self) -> EvmState {
+        // account.storage is maintained live during execution (sstore_concrete_error +
+        // revert_entry for StorageChanged), so no journal scan is needed here.
 
         if !self.cfg.spec.is_enabled_in(SPURIOUS_DRAGON) {
-            for acc in state.values_mut() {
+            for acc in self.accounts.values_mut() {
                 if acc.is_touched()
                     && acc.is_empty()
                     && !acc.is_selfdestructed()
@@ -96,13 +560,53 @@ impl<DB: Database> Journal<DB> {
             }
         }
 
+        self.warm_addresses.clear_coinbase_and_access_list();
+        self.selfdestructed_addresses.clear();
         self.logs.clear();
         self.transient_storage.clear();
         self.journal.clear();
+        self.storage_slots.clear();
+        self.dirty.clear();
+        self.new_bytecodes.clear();
         self.depth = 0;
-        self.transaction_id = 0;
 
-        state
+        mem::take(&mut self.accounts)
+    }
+
+    /// Extract MvMemory-native writes from dirty. Drains dirty (no re-hashing).
+    /// Must be called BEFORE `finalize()` — `finalize()` clears dirty.
+    pub(crate) fn extract(&mut self) -> ExtractedWrites {
+        // For lazy txs, the recipient must always appear in the write_set so that
+        // pevm.rs's post-processing loop can read the recipient's actual storage balance
+        // and patch tx_result.state. We use 0 as the addition so that pevm.rs applies
+        // a net-zero balance delta — correct for zero-value transfers AND for cases
+        // where a non-zero value transfer was subsequently reverted (full revert makes
+        // recompute_basic_dirty remove to_hash from dirty; partial revert leaves the
+        // correct LazyRecipient(net_balance) from make_basic_dirty).
+        if self.is_lazy
+            && let Some(to_hash) = self.to_hash
+        {
+            self.dirty
+                .entry(to_hash)
+                .or_insert(MemoryValue::LazyRecipient(U256::ZERO));
+        }
+        let mut write_set = WriteSet::with_capacity(self.dirty.len());
+        for (location, value) in self.dirty.drain() {
+            write_set.push((location, value));
+        }
+        ExtractedWrites {
+            write_set,
+            logs: mem::take(&mut self.logs),
+            new_bytecodes: mem::take(&mut self.new_bytecodes),
+        }
+    }
+
+    #[inline]
+    fn touch_account(journal: &mut Vec<PevmJournalEntry>, address: Address, account: &mut Account) {
+        if !account.is_touched() {
+            account.mark_touch();
+            journal.push(PevmJournalEntry::AccountTouched(address));
+        }
     }
 
     #[inline]
@@ -113,22 +617,19 @@ impl<DB: Database> Journal<DB> {
         {
             return;
         }
-
-        let mut addresses_with_balance: Vec<(Address, U256)> = self
+        let mut addrs: Vec<(Address, U256)> = self
             .selfdestructed_addresses
             .iter()
-            .filter_map(|address| {
-                self.state
-                    .get(address)
-                    .filter(|account| !account.info.balance.is_zero())
-                    .map(|account| (*address, account.info.balance))
+            .filter_map(|addr| {
+                self.accounts
+                    .get(addr)
+                    .filter(|a| !a.info.balance.is_zero())
+                    .map(|a| (*addr, a.info.balance))
             })
             .collect();
-
-        addresses_with_balance.sort_unstable_by_key(|(addr, _)| *addr);
-
-        for (address, balance) in addresses_with_balance {
-            self.eip7708_burn_log(address, balance);
+        addrs.sort_unstable_by_key(|(a, _)| *a);
+        for (addr, bal) in addrs {
+            self.eip7708_burn_log(addr, bal);
         }
     }
 
@@ -138,7 +639,6 @@ impl<DB: Database> Journal<DB> {
         {
             return;
         }
-
         let topics = vec![
             ETH_TRANSFER_LOG_TOPIC,
             B256::left_padding_from(from.as_slice()),
@@ -151,15 +651,12 @@ impl<DB: Database> Journal<DB> {
         });
     }
 
-    /// Append an EIP-7708 burn log.  Called from `JournalTr::selfdestruct` and
-    /// `eip7708_emit_burn_remaining_balance_logs`.
     #[inline]
     fn eip7708_burn_log(&mut self, address: Address, balance: U256) {
         if !self.cfg.spec.is_enabled_in(AMSTERDAM) || self.cfg.eip7708_disabled || balance.is_zero()
         {
             return;
         }
-
         let topics = vec![BURN_LOG_TOPIC, B256::left_padding_from(address.as_slice())];
         let data = Bytes::copy_from_slice(&balance.to_be_bytes::<32>());
         self.logs.push(Log {
@@ -167,131 +664,15 @@ impl<DB: Database> Journal<DB> {
             data: LogData::new(topics, data).expect("2 topics is valid"),
         });
     }
-
-    /// Touch `account` at `address`, recording a journal entry only on the
-    /// first touch.  Called from `JournalTr::touch_account`,
-    /// `JournalTr::transfer_loaded`, `JournalTr::selfdestruct`,
-    /// `JournalTr::set_code_with_hash`, and
-    /// `JournalTr::create_account_checkpoint`.
-    #[inline]
-    fn touch_account(journal: &mut Vec<JournalEntry>, address: Address, account: &mut Account) {
-        if !account.is_touched() {
-            journal.push(JournalEntry::account_touched(address));
-            account.mark_touch();
-        }
-    }
-
-    /// Load an account (optionally with code), optionally skipping the cold
-    /// access penalty.  Returns a shared reference inside a `StateLoad`.
-    /// Called from `JournalTr::load_account`, `JournalTr::load_account_with_code`,
-    /// `JournalTr::load_account_delegated`, `JournalTr::selfdestruct`,
-    /// `JournalTr::load_account_mut_optional_code`, and
-    /// `JournalTr::load_account_info_skip_cold_load`.
-    #[inline(never)]
-    fn load_account_optional(
-        &mut self,
-        address: Address,
-        load_code: bool,
-        skip_cold_load: bool,
-    ) -> Result<StateLoad<&Account>, JournalLoadError<DB::Error>> {
-        let mut load = self.load_account_mut_optional(address, skip_cold_load)?;
-        if load_code {
-            load.data.load_code_preserve_error()?;
-        }
-        Ok(load.map(|i| i.into_account()))
-    }
-
-    /// Load a mutable journaled account, optionally skipping the cold access
-    /// penalty.  Called from `load_account_optional`,
-    /// `JournalTr::load_account_mut_skip_cold_load`,
-    /// `JournalTr::load_account_mut_optional_code`, and
-    /// `JournalTr::balance_incr`.
-    #[inline(never)]
-    fn load_account_mut_optional(
-        &mut self,
-        address: Address,
-        skip_cold_load: bool,
-    ) -> Result<StateLoad<JournaledAccount<'_, DB, JournalEntry>>, JournalLoadError<DB::Error>>
-    {
-        let (account, is_cold) = match self.state.entry(address) {
-            Entry::Occupied(entry) => {
-                let account = entry.into_mut();
-                let mut is_cold = account.is_cold_transaction_id(self.transaction_id);
-
-                if unlikely(is_cold) {
-                    is_cold = self
-                        .warm_addresses
-                        .check_is_cold(&address, skip_cold_load)?;
-                    account.mark_warm_with_transaction_id(self.transaction_id);
-
-                    if account.is_selfdestructed_locally() {
-                        account.selfdestruct();
-                        account.unmark_selfdestructed_locally();
-                    }
-                    *account.original_info = account.info.clone();
-                    account.unmark_created_locally();
-                    self.journal.push(JournalEntry::account_warmed(address));
-                }
-                (account, is_cold)
-            }
-            Entry::Vacant(vac) => {
-                let is_cold = self
-                    .warm_addresses
-                    .check_is_cold(&address, skip_cold_load)?;
-
-                let account = if let Some(account) = self.database.basic(address)? {
-                    let mut account: Account = account.into();
-                    account.transaction_id = self.transaction_id;
-                    account
-                } else {
-                    Account::new_not_existing(self.transaction_id)
-                };
-
-                if is_cold {
-                    self.journal.push(JournalEntry::account_warmed(address));
-                }
-
-                (vac.insert(account), is_cold)
-            }
-        };
-
-        Ok(StateLoad::new(
-            JournaledAccount::new(
-                address,
-                account,
-                &mut self.journal,
-                &mut self.database,
-                self.warm_addresses.access_list(),
-                self.transaction_id,
-            ),
-            is_cold,
-        ))
-    }
-
-    #[inline]
-    fn get_account_mut(
-        &mut self,
-        address: Address,
-    ) -> Option<JournaledAccount<'_, DB, JournalEntry>> {
-        let account = self.state.get_mut(&address)?;
-        Some(JournaledAccount::new(
-            address,
-            account,
-            &mut self.journal,
-            &mut self.database,
-            self.warm_addresses.access_list(),
-            self.transaction_id,
-        ))
-    }
 }
 
-// ── JournalTr implementation ─────────────────────────────────────────────────
+// ── JournalTr impl for PevmJournal ────────────────────────────────────────────
 
-impl<DB: Database> JournalTr for Journal<DB> {
+impl<DB: Database> JournalTr for PevmJournal<DB> {
     type Database = DB;
     type State = EvmState;
     type JournaledAccount<'a>
-        = JournaledAccount<'a, DB, JournalEntry>
+        = PevmJournalAccount<'a, DB>
     where
         DB: 'a;
 
@@ -325,21 +706,19 @@ impl<DB: Database> JournalTr for Journal<DB> {
         self.depth = 0;
         self.journal.clear();
         self.warm_addresses.clear_coinbase_and_access_list();
-        self.transaction_id += 1;
         self.logs.clear();
         self.selfdestructed_addresses.clear();
     }
 
     fn discard_tx(&mut self) {
-        let is_spurious_dragon_enabled = self.cfg.spec.is_enabled_in(SPURIOUS_DRAGON);
-        self.journal.drain(..).rev().for_each(|entry| {
-            entry.revert(&mut self.state, None, is_spurious_dragon_enabled);
-        });
+        let entries: Vec<_> = self.journal.drain(..).collect();
+        for entry in entries.into_iter().rev() {
+            self.revert_entry(entry);
+        }
         self.transient_storage.clear();
         self.depth = 0;
         self.logs.clear();
         self.selfdestructed_addresses.clear();
-        self.transaction_id += 1;
         self.warm_addresses.clear_coinbase_and_access_list();
     }
 
@@ -365,15 +744,15 @@ impl<DB: Database> JournalTr for Journal<DB> {
     }
 
     fn warm_access_list(&mut self, access_list: AddressMap<HashSet<StorageKey>>) {
-        self.warm_addresses.set_access_list(access_list)
+        self.warm_addresses.set_access_list(access_list);
     }
 
     fn warm_coinbase_account(&mut self, address: Address) {
-        self.warm_addresses.set_coinbase(address)
+        self.warm_addresses.set_coinbase(address);
     }
 
     fn warm_precompiles(&mut self, addresses: AddressSet) {
-        self.warm_addresses.set_precompile_addresses(addresses)
+        self.warm_addresses.set_precompile_addresses(addresses);
     }
 
     fn precompile_addresses(&self) -> &AddressSet {
@@ -381,7 +760,7 @@ impl<DB: Database> JournalTr for Journal<DB> {
     }
 
     fn touch_account(&mut self, address: Address) {
-        if let Some(account) = self.state.get_mut(&address) {
+        if let Some(account) = self.accounts.get_mut(&address) {
             Self::touch_account(&mut self.journal, address, account);
         }
     }
@@ -404,38 +783,54 @@ impl<DB: Database> JournalTr for Journal<DB> {
         balance: U256,
     ) -> Option<TransferError> {
         if from == to {
-            let from_balance = self.state.get_mut(&to).unwrap().info.balance;
+            let from_balance = self.accounts.get(&from).unwrap().info.balance;
             if balance > from_balance {
                 return Some(TransferError::OutOfFunds);
             }
             return None;
         }
-
         if balance.is_zero() {
-            Self::touch_account(&mut self.journal, to, self.state.get_mut(&to).unwrap());
+            let to_acc = self.accounts.get_mut(&to).unwrap();
+            Self::touch_account(&mut self.journal, to, to_acc);
             return None;
         }
-
-        let from_account = self.state.get_mut(&from).unwrap();
-        Self::touch_account(&mut self.journal, from, from_account);
-        let from_balance = &mut from_account.info.balance;
-        let Some(from_balance_decr) = from_balance.checked_sub(balance) else {
-            return Some(TransferError::OutOfFunds);
-        };
-        *from_balance = from_balance_decr;
-
-        let to_account = self.state.get_mut(&to).unwrap();
-        Self::touch_account(&mut self.journal, to, to_account);
-        let to_balance = &mut to_account.info.balance;
-        let Some(to_balance_incr) = to_balance.checked_add(balance) else {
-            return Some(TransferError::OverflowPayment);
-        };
-        *to_balance = to_balance_incr;
-
-        self.journal
-            .push(JournalEntry::balance_transfer(from, to, balance));
+        {
+            let from_acc = self.accounts.get_mut(&from).unwrap();
+            Self::touch_account(&mut self.journal, from, from_acc);
+            let Some(new_bal) = from_acc.info.balance.checked_sub(balance) else {
+                return Some(TransferError::OutOfFunds);
+            };
+            from_acc.info.balance = new_bal;
+        }
+        {
+            let to_acc = self.accounts.get_mut(&to).unwrap();
+            Self::touch_account(&mut self.journal, to, to_acc);
+            let Some(new_bal) = to_acc.info.balance.checked_add(balance) else {
+                return Some(TransferError::OverflowPayment);
+            };
+            to_acc.info.balance = new_bal;
+        }
+        self.journal.push(PevmJournalEntry::BalanceTransfer {
+            from,
+            to,
+            amount: balance,
+        });
         self.eip7708_transfer_log(from, to, balance);
-
+        // Update dirty for both accounts.
+        for addr in [from, to] {
+            let info = self.accounts.get(&addr).unwrap().info.clone();
+            let (loc, val) = make_basic_dirty(
+                addr,
+                info.balance,
+                info.nonce,
+                self.from_addr,
+                self.from_hash,
+                self.to_addr,
+                self.to_hash,
+                self.is_lazy,
+            );
+            self.dirty.insert(loc, val);
+        }
         None
     }
 
@@ -446,11 +841,27 @@ impl<DB: Database> JournalTr for Journal<DB> {
         old_balance: U256,
         bump_nonce: bool,
     ) {
-        self.journal
-            .push(JournalEntry::balance_changed(address, old_balance));
-        self.journal.push(JournalEntry::account_touched(address));
+        self.journal.push(PevmJournalEntry::BalanceChange {
+            address,
+            old_balance,
+        });
+        self.journal.push(PevmJournalEntry::AccountTouched(address));
         if bump_nonce {
-            self.journal.push(JournalEntry::nonce_bumped(address));
+            self.journal.push(PevmJournalEntry::NonceBump { address });
+        }
+        // Framework already modified the account; update dirty with current state.
+        if let Some(acc) = self.accounts.get(&address) {
+            let (loc, val) = make_basic_dirty(
+                address,
+                acc.info.balance,
+                acc.info.nonce,
+                self.from_addr,
+                self.from_hash,
+                self.to_addr,
+                self.to_hash,
+                self.is_lazy,
+            );
+            self.dirty.insert(loc, val);
         }
     }
 
@@ -465,15 +876,33 @@ impl<DB: Database> JournalTr for Journal<DB> {
 
     #[allow(deprecated)]
     fn nonce_bump_journal_entry(&mut self, address: Address) {
-        self.journal.push(JournalEntry::nonce_bumped(address));
+        self.journal.push(PevmJournalEntry::NonceBump { address });
+        if let Some(acc) = self.accounts.get(&address) {
+            let (loc, val) = make_basic_dirty(
+                address,
+                acc.info.balance,
+                acc.info.nonce,
+                self.from_addr,
+                self.from_hash,
+                self.to_addr,
+                self.to_hash,
+                self.is_lazy,
+            );
+            self.dirty.insert(loc, val);
+        }
     }
 
     fn set_code_with_hash(&mut self, address: Address, code: Bytecode, hash: B256) {
-        let account = self.state.get_mut(&address).unwrap();
+        let account = self.accounts.get_mut(&address).unwrap();
         Self::touch_account(&mut self.journal, address, account);
-        self.journal.push(JournalEntry::code_changed(address));
         account.info.code_hash = hash;
-        account.info.code = Some(code);
+        account.info.code = Some(code.clone());
+        self.journal.push(PevmJournalEntry::CodeChange { address });
+        if hash != KECCAK_EMPTY {
+            let loc = hash_deterministic(MemoryLocation::CodeHash(address));
+            self.dirty.insert(loc, MemoryValue::CodeHash(hash));
+            self.new_bytecodes.push((hash, code));
+        }
     }
 
     fn load_account(&mut self, address: Address) -> Result<StateLoad<&Account>, DB::Error> {
@@ -494,12 +923,11 @@ impl<DB: Database> JournalTr for Journal<DB> {
         address: Address,
     ) -> Result<StateLoad<AccountLoad>, DB::Error> {
         let spec = self.cfg.spec;
-        let is_eip7702_enabled = spec.is_enabled_in(SpecId::PRAGUE);
+        let is_eip7702 = spec.is_enabled_in(SpecId::PRAGUE);
         let account = self
-            .load_account_optional(address, is_eip7702_enabled, false)
+            .load_account_optional(address, is_eip7702, false)
             .map_err(JournalLoadError::unwrap_db_error)?;
         let is_empty = account.state_clear_aware_is_empty(spec);
-
         let mut account_load = StateLoad::new(
             AccountLoad {
                 is_delegate_account_cold: None,
@@ -507,20 +935,18 @@ impl<DB: Database> JournalTr for Journal<DB> {
             },
             account.is_cold,
         );
-
-        if let Some(address) = account
+        if let Some(delegate_addr) = account
             .data
             .info
             .code
             .as_ref()
             .and_then(Bytecode::eip7702_address)
         {
-            let delegate_account = self
-                .load_account_optional(address, true, false)
+            let delegate = self
+                .load_account_optional(delegate_addr, true, false)
                 .map_err(JournalLoadError::unwrap_db_error)?;
-            account_load.data.is_delegate_account_cold = Some(delegate_account.is_cold);
+            account_load.data.is_delegate_account_cold = Some(delegate.is_cold);
         }
-
         Ok(account_load)
     }
 
@@ -562,13 +988,13 @@ impl<DB: Database> JournalTr for Journal<DB> {
     }
 
     fn checkpoint(&mut self) -> JournalCheckpoint {
-        let checkpoint = JournalCheckpoint {
+        let cp = JournalCheckpoint {
             log_i: self.logs.len(),
             journal_i: self.journal.len(),
             selfdestructed_i: self.selfdestructed_addresses.len(),
         };
         self.depth += 1;
-        checkpoint
+        cp
     }
 
     fn checkpoint_commit(&mut self) {
@@ -576,20 +1002,13 @@ impl<DB: Database> JournalTr for Journal<DB> {
     }
 
     fn checkpoint_revert(&mut self, checkpoint: JournalCheckpoint) {
-        let is_spurious_dragon_enabled = self.cfg.spec.is_enabled_in(SPURIOUS_DRAGON);
-        let state = &mut self.state;
-        let transient_storage = &mut self.transient_storage;
         self.depth = self.depth.saturating_sub(1);
         self.logs.truncate(checkpoint.log_i);
         self.selfdestructed_addresses
             .truncate(checkpoint.selfdestructed_i);
-        if checkpoint.journal_i < self.journal.len() {
-            self.journal
-                .drain(checkpoint.journal_i..)
-                .rev()
-                .for_each(|entry| {
-                    entry.revert(state, Some(transient_storage), is_spurious_dragon_enabled);
-                });
+        let entries: Vec<_> = self.journal.drain(checkpoint.journal_i..).collect();
+        for entry in entries.into_iter().rev() {
+            self.revert_entry(entry);
         }
     }
 
@@ -602,38 +1021,78 @@ impl<DB: Database> JournalTr for Journal<DB> {
     ) -> Result<JournalCheckpoint, TransferError> {
         let checkpoint = self.checkpoint();
 
-        let target_acc = self.state.get_mut(&address).unwrap();
-        let last_journal = &mut self.journal;
-
+        let target_acc = self.accounts.get_mut(&address).unwrap();
         if target_acc.info.code_hash != KECCAK_EMPTY || target_acc.info.nonce != 0 {
             self.checkpoint_revert(checkpoint);
             return Err(TransferError::CreateCollision);
         }
 
-        let is_created_globally = target_acc.mark_created_locally();
-        last_journal.push(JournalEntry::account_created(address, is_created_globally));
+        let is_globally = target_acc.mark_created_locally();
+        self.journal.push(PevmJournalEntry::AccountCreated {
+            address,
+            globally: is_globally,
+        });
         target_acc.info.code = None;
         if spec_id.is_enabled_in(SPURIOUS_DRAGON) {
             target_acc.info.nonce = 1;
         }
+        Self::touch_account(&mut self.journal, address, target_acc);
 
-        Self::touch_account(last_journal, address, target_acc);
+        // Always write dirty for the new account so nonce=1 is visible in MvMemory.
+        {
+            let info = self.accounts.get(&address).unwrap().info.clone();
+            let (loc, val) = make_basic_dirty(
+                address,
+                info.balance,
+                info.nonce,
+                self.from_addr,
+                self.from_hash,
+                self.to_addr,
+                self.to_hash,
+                self.is_lazy,
+            );
+            self.dirty.insert(loc, val);
+        }
 
         if balance.is_zero() {
             return Ok(checkpoint);
         }
 
-        let Some(new_balance) = target_acc.info.balance.checked_add(balance) else {
+        let Some(new_target_bal) = self
+            .accounts
+            .get(&address)
+            .unwrap()
+            .info
+            .balance
+            .checked_add(balance)
+        else {
             self.checkpoint_revert(checkpoint);
             return Err(TransferError::OverflowPayment);
         };
-        target_acc.info.balance = new_balance;
+        self.accounts.get_mut(&address).unwrap().info.balance = new_target_bal;
+        self.accounts.get_mut(&caller).unwrap().info.balance -= balance;
 
-        let caller_account = self.state.get_mut(&caller).unwrap();
-        caller_account.info.balance -= balance;
-
-        last_journal.push(JournalEntry::balance_transfer(caller, address, balance));
+        self.journal.push(PevmJournalEntry::BalanceTransfer {
+            from: caller,
+            to: address,
+            amount: balance,
+        });
         self.eip7708_transfer_log(caller, address, balance);
+
+        for addr in [caller, address] {
+            let info = self.accounts.get(&addr).unwrap().info.clone();
+            let (loc, val) = make_basic_dirty(
+                addr,
+                info.balance,
+                info.nonce,
+                self.from_addr,
+                self.from_hash,
+                self.to_addr,
+                self.to_hash,
+                self.is_lazy,
+            );
+            self.dirty.insert(loc, val);
+        }
 
         Ok(checkpoint)
     }
@@ -650,15 +1109,26 @@ impl<DB: Database> JournalTr for Journal<DB> {
         let is_empty = account_load.state_clear_aware_is_empty(spec);
 
         if address != target {
-            let acc_balance = self.state.get(&address).unwrap().info.balance;
-            let target_account = self.state.get_mut(&target).unwrap();
-            Self::touch_account(&mut self.journal, target, target_account);
-            target_account.info.balance += acc_balance;
+            let acc_balance = self.accounts.get(&address).unwrap().info.balance;
+            let target_acc = self.accounts.get_mut(&target).unwrap();
+            Self::touch_account(&mut self.journal, target, target_acc);
+            target_acc.info.balance += acc_balance;
+            let info = target_acc.info.clone();
+            let (loc, val) = make_basic_dirty(
+                target,
+                info.balance,
+                info.nonce,
+                self.from_addr,
+                self.from_hash,
+                self.to_addr,
+                self.to_hash,
+                self.is_lazy,
+            );
+            self.dirty.insert(loc, val);
         }
 
-        let acc = self.state.get_mut(&address).unwrap();
+        let acc = self.accounts.get_mut(&address).unwrap();
         let balance = acc.info.balance;
-
         let destroyed_status = if !acc.is_selfdestructed() {
             SelfdestructionRevertStatus::GloballySelfdestroyed
         } else if !acc.is_selfdestructed_locally() {
@@ -667,33 +1137,52 @@ impl<DB: Database> JournalTr for Journal<DB> {
             SelfdestructionRevertStatus::RepeatedSelfdestruction
         };
 
-        let is_cancun_enabled = spec.is_enabled_in(CANCUN);
-
-        let journal_entry = if acc.is_created_locally() || !is_cancun_enabled {
+        let is_cancun = spec.is_enabled_in(CANCUN);
+        let journal_entry = if acc.is_created_locally() || !is_cancun {
             if destroyed_status == SelfdestructionRevertStatus::GloballySelfdestroyed
                 && !self.cfg.eip7708_delayed_burn_disabled
             {
                 self.selfdestructed_addresses.push(address);
             }
-
             acc.mark_selfdestructed_locally();
             acc.info.balance = U256::ZERO;
-
+            // CodeHash → SelfDestructed triggers sequential fallback for later reads.
+            // Basic is intentionally NOT written — matches old vm.rs extraction loop.
+            self.dirty.insert(
+                hash_deterministic(MemoryLocation::CodeHash(address)),
+                MemoryValue::SelfDestructed,
+            );
             if target == address {
                 self.eip7708_burn_log(address, balance);
             } else {
                 self.eip7708_transfer_log(address, target, balance);
             }
-            Some(JournalEntry::account_destroyed(
+            Some(PevmJournalEntry::AccountDestroyed {
                 address,
                 target,
-                destroyed_status,
-                balance,
-            ))
+                had_balance: balance,
+                status: destroyed_status,
+            })
         } else if address != target {
+            // Post-Cancun, not created locally: balance-only transfer, code not wiped.
             acc.info.balance = U256::ZERO;
+            let (loc, val) = make_basic_dirty(
+                address,
+                U256::ZERO,
+                acc.info.nonce,
+                self.from_addr,
+                self.from_hash,
+                self.to_addr,
+                self.to_hash,
+                self.is_lazy,
+            );
+            self.dirty.insert(loc, val);
             self.eip7708_transfer_log(address, target, balance);
-            Some(JournalEntry::balance_transfer(address, target, balance))
+            Some(PevmJournalEntry::BalanceTransfer {
+                from: address,
+                to: target,
+                amount: balance,
+            })
         } else {
             None
         };
@@ -751,17 +1240,307 @@ impl<DB: Database> JournalTr for Journal<DB> {
         let had_value = if value.is_zero() {
             self.transient_storage.remove(&(address, key))
         } else {
-            let previous_value = self
+            let prev = self
                 .transient_storage
                 .insert((address, key), value)
                 .unwrap_or_default();
-            (previous_value != value).then_some(previous_value)
+            (prev != value).then_some(prev)
         };
-
-        if let Some(had_value) = had_value {
-            self.journal.push(JournalEntry::transient_storage_changed(
-                address, key, had_value,
-            ));
+        if let Some(prev) = had_value {
+            self.journal
+                .push(PevmJournalEntry::TransientStorageChanged { address, key, prev });
         }
+    }
+}
+
+// ── PevmJournalAccount ────────────────────────────────────────────────────────
+
+#[allow(dead_code, missing_docs, missing_debug_implementations)]
+pub struct PevmJournalAccount<'a, DB: Database> {
+    pub(crate) address: Address,
+    pub(crate) account: &'a mut Account,
+    journal: &'a mut Vec<PevmJournalEntry>,
+    storage_slots: &'a mut HashMap<MemoryLocationHash, EvmStorageSlot, BuildIdentityHasher>,
+    dirty: &'a mut HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>,
+    db: &'a mut DB,
+    access_list: &'a AddressMap<HashSet<StorageKey>>,
+    from_addr: Address,
+    from_hash: MemoryLocationHash,
+    to_addr: Option<Address>,
+    to_hash: Option<MemoryLocationHash>,
+    is_lazy: bool,
+}
+
+#[allow(dead_code)]
+impl<'a, DB: Database> PevmJournalAccount<'a, DB> {
+    pub(crate) fn sload_concrete_error(
+        &mut self,
+        key: StorageKey,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<&mut EvmStorageSlot>, JournalLoadError<DB::Error>> {
+        let hash = hash_deterministic(MemoryLocation::Storage(self.address, key));
+        match self.storage_slots.entry(hash) {
+            Entry::Occupied(occ) => Ok(StateLoad::new(occ.into_mut(), false)),
+            Entry::Vacant(vac) => {
+                let is_cold = self
+                    .access_list
+                    .get(&self.address)
+                    .and_then(|s| s.get(&key))
+                    .is_none();
+                if is_cold && skip_cold_load {
+                    return Err(JournalLoadError::ColdLoadSkipped);
+                }
+                let value = if self.account.is_created() {
+                    StorageValue::ZERO
+                } else {
+                    self.db.storage(self.address, key)?
+                };
+                let slot = vac.insert(EvmStorageSlot::new(value, 0));
+                if is_cold {
+                    self.journal.push(PevmJournalEntry::StorageWarmed { hash });
+                }
+                Ok(StateLoad::new(slot, is_cold))
+            }
+        }
+    }
+
+    pub(crate) fn sstore_concrete_error(
+        &mut self,
+        key: StorageKey,
+        new: StorageValue,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<SStoreResult>, JournalLoadError<DB::Error>> {
+        self.touch();
+        let StateLoad {
+            data: slot,
+            is_cold,
+        } = self.sload_concrete_error(key, skip_cold_load)?;
+        let original_value = slot.original_value();
+        let present_value = slot.present_value();
+        let result = Ok(StateLoad::new(
+            SStoreResult {
+                original_value,
+                present_value,
+                new_value: new,
+            },
+            is_cold,
+        ));
+        if present_value != new {
+            slot.present_value = new; // last use of slot — borrow of storage_slots ends here
+            // Keep account.storage in sync so finalize()'s EvmState reflects net-changed slots.
+            // or_insert initializes with correct original_value on first write.
+            self.account
+                .storage
+                .entry(key)
+                .or_insert_with(|| EvmStorageSlot::new(original_value, 0))
+                .present_value = new;
+            self.journal.push(PevmJournalEntry::StorageChanged {
+                address: self.address,
+                key,
+                prev_value: present_value,
+            });
+            let hash = hash_deterministic(MemoryLocation::Storage(self.address, key));
+            if new == original_value {
+                self.dirty.remove(&hash);
+            } else {
+                self.dirty.insert(hash, MemoryValue::Storage(new));
+            }
+        }
+        result
+    }
+
+    pub(crate) fn load_code_preserve_error(
+        &mut self,
+    ) -> Result<&Bytecode, JournalLoadError<DB::Error>> {
+        if self.account.info.code.is_none() {
+            let hash = self.account.info.code_hash;
+            let code = if hash == KECCAK_EMPTY {
+                Bytecode::default()
+            } else {
+                self.db.code_by_hash(hash)?
+            };
+            self.account.info.code = Some(code);
+        }
+        Ok(self.account.info.code.as_ref().unwrap())
+    }
+
+    pub(crate) const fn into_account(self) -> &'a Account {
+        self.account
+    }
+
+    #[inline]
+    fn make_dirty(&self, balance: U256, nonce: u64) -> (MemoryLocationHash, MemoryValue) {
+        make_basic_dirty(
+            self.address,
+            balance,
+            nonce,
+            self.from_addr,
+            self.from_hash,
+            self.to_addr,
+            self.to_hash,
+            self.is_lazy,
+        )
+    }
+}
+
+impl<'a, DB: Database> JournaledAccountTr for PevmJournalAccount<'a, DB> {
+    fn account(&self) -> &Account {
+        self.account
+    }
+
+    fn balance(&self) -> &U256 {
+        &self.account.info.balance
+    }
+
+    fn nonce(&self) -> u64 {
+        self.account.info.nonce
+    }
+
+    fn code_hash(&self) -> &B256 {
+        &self.account.info.code_hash
+    }
+
+    fn code(&self) -> Option<&Bytecode> {
+        self.account.info.code.as_ref()
+    }
+
+    fn touch(&mut self) {
+        if !self.account.is_touched() {
+            self.account.mark_touch();
+            self.journal
+                .push(PevmJournalEntry::AccountTouched(self.address));
+        }
+    }
+
+    fn unsafe_mark_cold(&mut self) {
+        self.account.mark_cold();
+    }
+
+    fn set_balance(&mut self, balance: U256) {
+        self.touch();
+        if self.account.info.balance != balance {
+            let old = self.account.info.balance;
+            self.journal.push(PevmJournalEntry::BalanceChange {
+                address: self.address,
+                old_balance: old,
+            });
+            self.account.info.balance = balance;
+            let (loc, val) = self.make_dirty(balance, self.account.info.nonce);
+            self.dirty.insert(loc, val);
+        }
+    }
+
+    fn incr_balance(&mut self, balance: U256) -> bool {
+        self.touch();
+        let Some(new) = self.account.info.balance.checked_add(balance) else {
+            return false;
+        };
+        self.set_balance(new);
+        true
+    }
+
+    fn decr_balance(&mut self, balance: U256) -> bool {
+        self.touch();
+        let Some(new) = self.account.info.balance.checked_sub(balance) else {
+            return false;
+        };
+        self.set_balance(new);
+        true
+    }
+
+    fn bump_nonce(&mut self) -> bool {
+        self.touch();
+        let Some(nonce) = self.account.info.nonce.checked_add(1) else {
+            return false;
+        };
+        self.account.info.nonce = nonce;
+        self.journal.push(PevmJournalEntry::NonceBump {
+            address: self.address,
+        });
+        let (loc, val) = self.make_dirty(self.account.info.balance, nonce);
+        self.dirty.insert(loc, val);
+        true
+    }
+
+    fn set_nonce(&mut self, nonce: u64) {
+        self.touch();
+        let prev = self.account.info.nonce;
+        self.account.info.nonce = nonce;
+        self.journal.push(PevmJournalEntry::NonceChange {
+            address: self.address,
+            previous_nonce: prev,
+        });
+        let (loc, val) = self.make_dirty(self.account.info.balance, nonce);
+        self.dirty.insert(loc, val);
+    }
+
+    fn unsafe_set_nonce(&mut self, nonce: u64) {
+        self.account.info.nonce = nonce;
+    }
+
+    fn set_code(&mut self, code_hash: B256, code: Bytecode) {
+        self.touch();
+        self.account.info.code_hash = code_hash;
+        self.account.info.code = Some(code);
+        self.journal.push(PevmJournalEntry::CodeChange {
+            address: self.address,
+        });
+        if code_hash != KECCAK_EMPTY {
+            let loc = hash_deterministic(MemoryLocation::CodeHash(self.address));
+            self.dirty.insert(loc, MemoryValue::CodeHash(code_hash));
+        }
+    }
+
+    fn set_code_and_hash_slow(&mut self, code: Bytecode) {
+        let hash = code.hash_slow();
+        self.set_code(hash, code);
+    }
+
+    fn delegate(&mut self, address: Address) {
+        let (bytecode, hash) = if address.is_zero() {
+            (Bytecode::default(), KECCAK_EMPTY)
+        } else {
+            let bc = Bytecode::new_eip7702(address);
+            let h = bc.hash_slow();
+            (bc, h)
+        };
+        self.touch();
+        self.set_code(hash, bytecode);
+        self.bump_nonce();
+    }
+
+    fn sload(
+        &mut self,
+        key: StorageKey,
+        skip_cold_load: bool,
+    ) -> Result<
+        StateLoad<&mut EvmStorageSlot>,
+        revm::context_interface::journaled_state::JournalLoadErasedError,
+    > {
+        use revm::context_interface::ErasedError;
+        self.sload_concrete_error(key, skip_cold_load)
+            .map_err(|e| e.map(ErasedError::new))
+    }
+
+    fn sstore(
+        &mut self,
+        key: StorageKey,
+        new: StorageValue,
+        skip_cold_load: bool,
+    ) -> Result<
+        StateLoad<SStoreResult>,
+        revm::context_interface::journaled_state::JournalLoadErasedError,
+    > {
+        use revm::context_interface::ErasedError;
+        self.sstore_concrete_error(key, new, skip_cold_load)
+            .map_err(|e| e.map(ErasedError::new))
+    }
+
+    fn load_code(
+        &mut self,
+    ) -> Result<&Bytecode, revm::context_interface::journaled_state::JournalLoadErasedError> {
+        use revm::context_interface::ErasedError;
+        self.load_code_preserve_error()
+            .map_err(|e| e.map(ErasedError::new))
     }
 }
