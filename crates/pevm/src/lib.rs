@@ -175,7 +175,7 @@ type ReadSet = HashMap<MemoryLocationHash, ReadOrigins, BuildIdentityHasher>;
 
 // The updates made by this transaction incarnation, which is applied
 // to the multi-version data structure at the end of execution.
-type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
+type WriteSet = HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>;
 
 // A scheduled worker task
 // TODO: Add more useful work when there are idle workers like near

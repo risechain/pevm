@@ -44,22 +44,13 @@ use crate::{
     hash_deterministic,
 };
 
-// ── PevmJournal ──────────────────────────────────────────────────────────────
-//
-// Pevm-native journal that records writes in MvMemory-native form at write time,
-// eliminating the 80-line post-execution re-hashing loop in vm.rs.
-//
-// Key properties:
-// - `dirty`: write buffer keyed by MemoryLocationHash; drain → WriteSet with no re-hashing.
-// - `storage_slots`: flat cache for ALL accounts' storage; presence = warm, no transaction_id.
-// - `accounts`: account map; presence = warm; cleared on set_tx().
-// - Lazy values (LazySender / LazyRecipient) are written to dirty at write time.
-//
-// See PEVM_JOURNAL_SPEC.md for the full design.
+// WriteSet and dirty both use the workspace hashbrown (0.17). The alloy HashMap
+// (0.16) is only used for accounts/storage_slots which need Entry-variant
+// compatibility with EvmState.
+type DirtyMap = hashbrown::HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>;
 
 /// Undo log entry for `PevmJournal`. Used by `checkpoint_revert` to restore state.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) enum PevmJournalEntry {
     AccountWarmed(Address),
     AccountTouched(Address),
@@ -109,25 +100,22 @@ pub(crate) enum PevmJournalEntry {
 }
 
 /// Writes extracted from `PevmJournal` after a transaction.
-#[allow(dead_code)]
 pub(crate) struct ExtractedWrites {
     pub(crate) write_set: WriteSet,
-    pub(crate) logs: Vec<Log>,
     pub(crate) new_bytecodes: SmallVec<[(B256, Bytecode); 1]>,
 }
 
 /// Pevm-native journal. Implements `JournalTr` with the same semantics as Journal<DB> but
 /// records writes in dirty (MvMemory-native form) at write time.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct PevmJournal<DB: Database> {
     pub(crate) database: DB,
     /// Account map. Presence = warm; cleared on `set_tx()`.
     pub(crate) accounts: EvmState,
     /// Flat storage cache for all accounts. Presence = warm; cleared on `set_tx()`.
     pub(crate) storage_slots: HashMap<MemoryLocationHash, EvmStorageSlot, BuildIdentityHasher>,
-    /// MvMemory-native write buffer. Drained by `extract()`.
-    pub(crate) dirty: HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>,
+    /// MvMemory-native write buffer. Moved out by `extract()` via `mem::take`.
+    pub(crate) dirty: DirtyMap,
     journal: Vec<PevmJournalEntry>,
     new_bytecodes: SmallVec<[(B256, Bytecode); 1]>,
     pub(crate) from_addr: Address,
@@ -180,7 +168,7 @@ fn make_basic_dirty(
 #[allow(clippy::too_many_arguments)]
 fn recompute_basic_dirty(
     accounts: &EvmState,
-    dirty: &mut HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>,
+    dirty: &mut DirtyMap,
     address: Address,
     from_addr: Address,
     from_hash: MemoryLocationHash,
@@ -191,8 +179,6 @@ fn recompute_basic_dirty(
     let Some(account) = accounts.get(&address) else {
         return;
     };
-    let i = &account.info;
-    let o = &*account.original_info;
     let location = if address == from_addr {
         from_hash
     } else if to_addr == Some(address) {
@@ -200,12 +186,21 @@ fn recompute_basic_dirty(
     } else {
         hash_deterministic(MemoryLocation::Basic(address))
     };
-    if i.balance == o.balance && i.nonce == o.nonce {
+    let info = &account.info;
+    let original = &account.original_info;
+    if info.balance == original.balance && info.nonce == original.nonce {
         dirty.remove(&location);
         return;
     }
     let (loc, value) = make_basic_dirty(
-        address, i.balance, i.nonce, from_addr, from_hash, to_addr, to_hash, is_lazy,
+        address,
+        info.balance,
+        info.nonce,
+        from_addr,
+        from_hash,
+        to_addr,
+        to_hash,
+        is_lazy,
     );
     dirty.insert(loc, value);
 }
@@ -214,7 +209,7 @@ fn recompute_basic_dirty(
 #[inline]
 fn recompute_storage_dirty(
     storage_slots: &HashMap<MemoryLocationHash, EvmStorageSlot, BuildIdentityHasher>,
-    dirty: &mut HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>,
+    dirty: &mut DirtyMap,
     hash: MemoryLocationHash,
 ) {
     if let Some(slot) = storage_slots.get(&hash) {
@@ -226,14 +221,13 @@ fn recompute_storage_dirty(
     }
 }
 
-#[allow(dead_code)]
 impl<DB: Database> PevmJournal<DB> {
     pub(crate) fn new(database: DB, cfg: JournalCfg) -> Self {
         Self {
             database,
             accounts: EvmState::default(),
             storage_slots: HashMap::with_hasher(BuildIdentityHasher::default()),
-            dirty: HashMap::with_hasher(BuildIdentityHasher::default()),
+            dirty: DirtyMap::with_hasher(BuildIdentityHasher::default()),
             journal: Vec::new(),
             new_bytecodes: SmallVec::new(),
             from_addr: Address::ZERO,
@@ -590,13 +584,8 @@ impl<DB: Database> PevmJournal<DB> {
                 .entry(to_hash)
                 .or_insert(MemoryValue::LazyRecipient(U256::ZERO));
         }
-        let mut write_set = WriteSet::with_capacity(self.dirty.len());
-        for (location, value) in self.dirty.drain() {
-            write_set.push((location, value));
-        }
         ExtractedWrites {
-            write_set,
-            logs: mem::take(&mut self.logs),
+            write_set: mem::take(&mut self.dirty),
             new_bytecodes: mem::take(&mut self.new_bytecodes),
         }
     }
@@ -711,8 +700,7 @@ impl<DB: Database> JournalTr for PevmJournal<DB> {
     }
 
     fn discard_tx(&mut self) {
-        let entries: Vec<_> = self.journal.drain(..).collect();
-        for entry in entries.into_iter().rev() {
+        while let Some(entry) = self.journal.pop() {
             self.revert_entry(entry);
         }
         self.transient_storage.clear();
@@ -1006,8 +994,8 @@ impl<DB: Database> JournalTr for PevmJournal<DB> {
         self.logs.truncate(checkpoint.log_i);
         self.selfdestructed_addresses
             .truncate(checkpoint.selfdestructed_i);
-        let entries: Vec<_> = self.journal.drain(checkpoint.journal_i..).collect();
-        for entry in entries.into_iter().rev() {
+        while self.journal.len() > checkpoint.journal_i {
+            let entry = self.journal.pop().unwrap();
             self.revert_entry(entry);
         }
     }
@@ -1255,13 +1243,14 @@ impl<DB: Database> JournalTr for PevmJournal<DB> {
 
 // ── PevmJournalAccount ────────────────────────────────────────────────────────
 
-#[allow(dead_code, missing_docs, missing_debug_implementations)]
+/// Borrowed view into a single account within [`PevmJournal`], satisfying [`JournaledAccountTr`].
+#[allow(missing_debug_implementations)]
 pub struct PevmJournalAccount<'a, DB: Database> {
     pub(crate) address: Address,
     pub(crate) account: &'a mut Account,
     journal: &'a mut Vec<PevmJournalEntry>,
     storage_slots: &'a mut HashMap<MemoryLocationHash, EvmStorageSlot, BuildIdentityHasher>,
-    dirty: &'a mut HashMap<MemoryLocationHash, MemoryValue, BuildIdentityHasher>,
+    dirty: &'a mut DirtyMap,
     db: &'a mut DB,
     access_list: &'a AddressMap<HashSet<StorageKey>>,
     from_addr: Address,
@@ -1271,7 +1260,6 @@ pub struct PevmJournalAccount<'a, DB: Database> {
     is_lazy: bool,
 }
 
-#[allow(dead_code)]
 impl<'a, DB: Database> PevmJournalAccount<'a, DB> {
     pub(crate) fn sload_concrete_error(
         &mut self,

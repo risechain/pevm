@@ -590,6 +590,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 let ctx = self.evm.ctx();
 
                 // extract() must run before finalize() — finalize() clears dirty.
+                // extract() returns dirty via mem::take (zero-copy).
                 let crate::journal::ExtractedWrites {
                     mut write_set,
                     new_bytecodes,
@@ -622,11 +623,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     full_tx,
                 );
                 for (recipient, amount) in rewards {
-                    if let Some((_, value)) = write_set
-                        .iter_mut()
-                        .find(|(location, _)| location == &recipient)
-                    {
-                        match value {
+                    match write_set.entry(recipient) {
+                        hashbrown::hash_map::Entry::Occupied(mut e) => match e.get_mut() {
                             MemoryValue::Basic(basic) => {
                                 basic.balance = basic.balance.saturating_add(amount)
                             }
@@ -637,9 +635,10 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                 *addition = addition.saturating_add(amount)
                             }
                             _ => return Err(ReadError::InvalidMemoryValueType.into()),
+                        },
+                        hashbrown::hash_map::Entry::Vacant(e) => {
+                            e.insert(MemoryValue::LazyRecipient(amount));
                         }
-                    } else {
-                        write_set.push((recipient, MemoryValue::LazyRecipient(amount)));
                     }
                 }
 
