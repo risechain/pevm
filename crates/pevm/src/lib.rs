@@ -218,6 +218,7 @@ pub mod chain;
 mod compat;
 mod mv_memory;
 mod pevm;
+pub(crate) mod rise_revm;
 pub use pevm::{Pevm, PevmError, PevmResult, execute_revm_sequential};
 mod scheduler;
 mod storage;

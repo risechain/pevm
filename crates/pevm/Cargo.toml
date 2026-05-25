@@ -26,7 +26,6 @@ serde.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
 
-op-revm.workspace = true
 revm.workspace = true
 
 op-alloy-consensus.workspace = true

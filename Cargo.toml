@@ -54,10 +54,9 @@ alloy-transport = "2.0.1"
 alloy-trie = "0.9.5"
 
 # Will remove [revm] with https://github.com/risechain/pevm/issues/382.
-op-revm = "19.0.0"
-revm = { version = "38.0.0", features = ["serde"] }
-revm-statetest-types = "17.0.1"
-revme = "15.0.0"
+revm = { version = "39.0.0", features = ["serde"] }
+revm-statetest-types = "18.0.0"
+revme = "16.0.0"
 
 # OP
 op-alloy-consensus = "2.0.0"
@@ -88,3 +87,14 @@ smallvec = "1.15.1"
 thiserror = "2.0.18"
 tokio = { version = "1.52.1", features = ["rt-multi-thread"] }
 walkdir = "2.5.0"
+
+[patch.crates-io]
+# revm-database-interface 11.1.0 and several companion crates were yanked from crates.io.
+# The git source (tag v108) declares the same version numbers so cargo's semver resolver is
+# satisfied without any API change. We patch the whole set to avoid duplicate-crate ambiguities
+# that arise when mixing crates.io and git sources for interdependent revm subcrates.
+revm-bytecode = { git = "https://github.com/bluealloy/revm", tag = "v108" }
+revm-database = { git = "https://github.com/bluealloy/revm", tag = "v108" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", tag = "v108" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", tag = "v108" }
+revm-state = { git = "https://github.com/bluealloy/revm", tag = "v108" }
