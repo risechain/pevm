@@ -195,10 +195,10 @@ bitflags! {
         // scheduler, meaning a [false] here will still be validated if
         // there was a lower transaction that has broken the preprocessed
         // dependency chain and returned [true]
-        const NeedValidation = 0;
+        const NeedValidation = 1;
         // We need to validate from the next transaction if this execution
         // wrote to a new location.
-        const WroteNewLocation = 1;
+        const WroteNewLocation = 2;
     }
 }
 
