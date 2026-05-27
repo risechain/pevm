@@ -12,7 +12,11 @@
 import json
 import os
 
-CRITERION_PATH = "target/criterion"
+# By default it will get result from latest run in target/criterion
+# If you run benchmark with different CRITERION_HOME and/or `--save-baseline` flag
+#    Please set this ENV Var to correct value.
+CRITERION_HOME = os.getenv("CRITERION_HOME", "target/criterion")
+CRITERION_RUN = os.getenv("CRITERION_RUN", "new")
 
 
 def format_ms(ns):
@@ -20,7 +24,7 @@ def format_ms(ns):
 
 
 def read_estimate(block, exec_type):
-    with open(f"{CRITERION_PATH}/{block}/{exec_type}/new/estimates.json") as f:
+    with open(f"{CRITERION_HOME}/{block}/{exec_type}/{CRITERION_RUN}/estimates.json") as f:
         estimates = json.load(f)
         return (estimates["slope"] or estimates["mean"])["point_estimate"]
 
@@ -30,7 +34,7 @@ total_parallel = 0
 max_speed_up = 0
 min_speed_up = float("inf")
 
-for path in os.listdir(CRITERION_PATH):
+for path in os.listdir(CRITERION_HOME):
     if path.startswith("Block"):
         estimate_sequential = read_estimate(path, "Sequential")
         total_sequential += estimate_sequential
