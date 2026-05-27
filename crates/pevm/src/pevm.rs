@@ -1,11 +1,13 @@
 use std::{
+    cell::UnsafeCell,
     fmt::Debug,
     num::NonZeroUsize,
-    sync::{Mutex, OnceLock, mpsc},
+    sync::{OnceLock, mpsc},
     thread,
 };
 
 use alloy_primitives::{TxNonce, U256};
+use rayon::prelude::*;
 use alloy_rpc_types_eth::{Block, BlockTransactions};
 use hashbrown::HashMap;
 use revm::{
@@ -20,7 +22,7 @@ use crate::{
     chain::PevmChain,
     compat::get_block_env,
     hash_deterministic,
-    mv_memory::MvMemory,
+    mv_memory::{MvEntries, MvMemory},
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult},
@@ -100,11 +102,31 @@ impl<T> AsyncDropper<T> {
     }
 }
 
+// Per-tx slot for execution results. UnsafeCell allows worker threads to write through
+// a shared reference without taking a lock; the Block-STM scheduler guarantees at most
+// one writer per tx_idx at a time, so writes to different slots never race.
+#[derive(Debug, Default)]
+struct ExecutionResultSlot(UnsafeCell<Option<PevmTxExecutionResult>>);
+
+// SAFETY: see struct-level invariant.
+unsafe impl Sync for ExecutionResultSlot {}
+
+impl ExecutionResultSlot {
+    fn write(&self, value: PevmTxExecutionResult) {
+        // SAFETY: see struct-level invariant.
+        unsafe { *self.0.get() = Some(value) };
+    }
+
+    fn take(&mut self) -> Option<PevmTxExecutionResult> {
+        self.0.get_mut().take()
+    }
+}
+
 // TODO: Port more recyclable resources into here.
 #[derive(Debug, Default)]
 /// The main pevm struct that executes blocks.
 pub struct Pevm {
-    execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
+    execution_results: Vec<ExecutionResultSlot>,
     abort_reason: OnceLock<AbortReason>,
     dropper: AsyncDropper<(MvMemory, Scheduler)>,
 }
@@ -189,7 +211,7 @@ impl Pevm {
         if additional > 0 {
             self.execution_results.reserve(additional);
             for _ in 0..additional {
-                self.execution_results.push(Mutex::new(None));
+                self.execution_results.push(ExecutionResultSlot::default());
             }
         }
 
@@ -242,8 +264,10 @@ impl Pevm {
 
         let mut fully_evaluated_results = Vec::with_capacity(block_size);
         let mut cumulative_gas_used: u64 = 0;
-        for i in 0..block_size {
-            let mut execution_result = index_mutex!(self.execution_results, i).take().unwrap();
+        // After thread::scope returns we hold exclusive access to self.execution_results,
+        // so we can take() through &mut without any locking.
+        for slot in self.execution_results.iter_mut().take(block_size) {
+            let mut execution_result = slot.take().unwrap();
             cumulative_gas_used =
                 cumulative_gas_used.saturating_add(execution_result.receipt.cumulative_gas_used);
             execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
@@ -254,115 +278,125 @@ impl Pevm {
         // and raw transfer recipients that may have been atomically updated.
         for address in mv_memory.consume_lazy_addresses() {
             let location_hash = hash_deterministic(MemoryLocation::Basic(address));
-            if let Some(write_history) = mv_memory.data.get(&location_hash) {
-                let mut balance = U256::ZERO;
-                let mut nonce = 0;
-                // Read from storage if the first multi-version entry is not an absolute value.
-                if !matches!(
-                    write_history.first_key_value(),
-                    Some((_, MemoryEntry::Data(_, MemoryValue::Basic(_))))
-                ) && let Ok(Some(account)) = storage.basic(&address)
-                {
-                    balance = account.balance;
-                    nonce = account.nonce;
-                }
-                // Accounts that take implicit writes like the beneficiary account can be contract!
-                let code_hash = match storage.code_hash(&address) {
-                    Ok(code_hash) => code_hash,
-                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
-                };
-                let code = if let Some(code_hash) = &code_hash {
-                    match storage.code_by_hash(code_hash) {
-                        Ok(code) => code,
-                        Err(err) => return Err(PevmError::StorageError(err.to_string())),
-                    }
-                } else {
-                    None
-                };
 
-                for (tx_idx, memory_entry) in write_history.iter() {
-                    let tx = chain.tx_env(unsafe { txs.get_unchecked(*tx_idx) });
-                    match memory_entry {
-                        MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
-                            // We fall back to sequential execution when reading a self-destructed account,
-                            // so an empty account here would be a bug
-                            debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
-                            balance = info.balance;
-                            nonce = info.nonce;
-                        }
-                        MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
-                            balance = balance.saturating_add(*addition);
-                        }
-                        MemoryEntry::Data(_, MemoryValue::LazySender(subtraction)) => {
-                            // We must re-do extra sender balance checks as we mock
-                            // the max value in [Vm] during execution. Ideally we
-                            // can turn off these redundant checks in revm.
-                            // Ideally we would share these calculations with revm
-                            // (using their utility functions).
-                            let mut max_fee = U256::from(tx.gas_limit)
-                                .saturating_mul(U256::from(tx.gas_price))
-                                .saturating_add(tx.value);
-                            max_fee = max_fee.saturating_add(
-                                U256::from(tx.total_blob_gas())
-                                    .saturating_mul(U256::from(tx.max_fee_per_blob_gas)),
-                            );
-                            if balance < max_fee {
-                                Err(ExecutionError::Transaction(
-                                    InvalidTransaction::LackOfFundForMaxFee {
-                                        balance: Box::new(balance),
-                                        fee: Box::new(max_fee),
-                                    },
-                                ))?
-                            }
-                            balance = balance.saturating_sub(*subtraction);
-                            nonce += 1;
-                        }
-                        // TODO: Better error handling
-                        _ => unreachable!(),
-                    }
-                    // Assert that evaluated nonce is correct when address is caller.
-                    if tx.caller == address {
-                        let executed_nonce = if nonce == 0 {
-                            return Err(PevmError::UnreachableError);
-                        } else {
-                            nonce - 1
+            let Some(entries) = mv_memory.data.get(&location_hash) else {
+                continue;
+            };
+
+            // Load code once — lazy addresses can be contracts (e.g. fee recipient).
+            let code_hash = match storage.code_hash(&address) {
+                Ok(ch) => ch,
+                Err(err) => return Err(PevmError::StorageError(err.to_string())),
+            };
+            let code = if let Some(ch) = &code_hash {
+                match storage.code_by_hash(ch) {
+                    Ok(c) => c,
+                    Err(err) => return Err(PevmError::StorageError(err.to_string())),
+                }
+            } else {
+                None
+            };
+            let eip161 = chain.is_eip_161_enabled(spec_id);
+
+            match entries.value() {
+                MvEntries::Dense(_) => {
+                    // Dense path: all lazy addresses land here after add_lazy_addresses
+                    // upgrades them. Contiguous slice enables cache-friendly sequential
+                    // prefix-sum and a parallel rayon state update.
+                    let (mut balance, mut nonce) = storage
+                        .basic(&address)
+                        .ok()
+                        .flatten()
+                        .map(|acc| (acc.balance, acc.nonce))
+                        .unwrap_or_default();
+
+                    // Sequential pass: compute running (balance, nonce) after each tx.
+                    // Errors (insufficient balance) are returned immediately.
+                    let mut prefix_states: Vec<Option<(U256, u64)>> =
+                        Vec::with_capacity(block_size);
+                    for (tx_idx, entry_opt) in entries.dense_iter().enumerate() {
+                        let Some(entry) = entry_opt else {
+                            prefix_states.push(None);
+                            continue;
                         };
-                        if tx.nonce != executed_nonce {
-                            // TODO: Consider falling back to sequential instead
-                            return Err(PevmError::NonceMismatch {
-                                tx_idx: *tx_idx,
-                                tx_nonce: tx.nonce,
-                                executed_nonce,
-                            });
+                        match entry {
+                            MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
+                                // We fall back to sequential on self-destruct, so empty is a bug.
+                                debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
+                                balance = info.balance;
+                                nonce = info.nonce;
+                            }
+                            MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
+                                balance = balance.saturating_add(*addition);
+                            }
+                            MemoryEntry::Data(_, MemoryValue::LazySender(subtraction)) => {
+                                // Re-do sender balance checks: we mocked MAX balance during
+                                // execution so revm skipped these. Can't share revm's helpers.
+                                let tx = chain.tx_env(unsafe { txs.get_unchecked(tx_idx) });
+                                let mut max_fee = U256::from(tx.gas_limit)
+                                    .saturating_mul(U256::from(tx.gas_price))
+                                    .saturating_add(tx.value);
+                                max_fee = max_fee.saturating_add(
+                                    U256::from(tx.total_blob_gas())
+                                        .saturating_mul(U256::from(tx.max_fee_per_blob_gas)),
+                                );
+                                if balance < max_fee {
+                                    return Err(ExecutionError::Transaction(
+                                        InvalidTransaction::LackOfFundForMaxFee {
+                                            balance: Box::new(balance),
+                                            fee: Box::new(max_fee),
+                                        },
+                                    ))?;
+                                }
+                                balance = balance.saturating_sub(*subtraction);
+                                nonce += 1;
+                                if tx.caller == address {
+                                    let executed_nonce = if nonce == 0 {
+                                        return Err(PevmError::UnreachableError);
+                                    } else {
+                                        nonce - 1
+                                    };
+                                    if tx.nonce != executed_nonce {
+                                        return Err(PevmError::NonceMismatch {
+                                            tx_idx,
+                                            tx_nonce: tx.nonce,
+                                            executed_nonce,
+                                        });
+                                    }
+                                }
+                            }
+                            _ => unreachable!(),
                         }
+                        prefix_states.push(Some((balance, nonce)));
                     }
-                    // SAFETY: The multi-version data structure should not leak an index over block size.
-                    let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
-                    let account = tx_result.state.entry(address).or_default();
-                    // TODO: Deduplicate this logic with [PevmTxExecutionResult::from_revm]
-                    if chain.is_eip_161_enabled(spec_id)
-                        && code_hash.is_none()
-                        && nonce == 0
-                        && balance == U256::ZERO
-                    {
-                        *account = None;
-                    } else if let Some(account) = account {
-                        // Explicit write: only overwrite the account info in case there are storage changes
-                        // Code cannot change midblock here as we're falling back to sequential execution
-                        // on reading a self-destructed contract.
-                        account.balance = balance;
-                        account.nonce = nonce;
-                    } else {
-                        // Implicit write: e.g. gas payments to the beneficiary account,
-                        // which doesn't have explicit writes in [tx_result.state]
-                        *account = Some(EvmAccount {
-                            balance,
-                            nonce,
-                            code_hash,
-                            code: code.clone(),
-                            storage: HashMap::default(),
+
+                    // Parallel pass: apply (balance, nonce) to each tx_result's state.
+                    fully_evaluated_results
+                        .par_iter_mut()
+                        .zip(prefix_states.par_iter())
+                        .for_each(|(tx_result, state_opt)| {
+                            let Some(&(bal, nonce)) = state_opt.as_ref() else {
+                                return;
+                            };
+                            let account = tx_result.state.entry(address).or_default();
+                            if eip161 && code_hash.is_none() && nonce == 0 && bal == U256::ZERO {
+                                *account = None;
+                            } else if let Some(existing) = account {
+                                existing.balance = bal;
+                                existing.nonce = nonce;
+                            } else {
+                                *account = Some(EvmAccount {
+                                    balance: bal,
+                                    nonce,
+                                    code_hash,
+                                    code: code.clone(),
+                                    storage: HashMap::default(),
+                                });
+                            }
                         });
-                    }
+                }
+                MvEntries::Sparse(_) => {
+                    unreachable!("Lazy addresses should have been upgraded to dense entries in add_lazy_addresses, so we shouldn't have any sparse entries left. Found sparse entries for address {:?} with code hash {:?} and code {:?}.", address, code_hash, code);
                 }
             }
         }
@@ -412,8 +446,10 @@ impl Pevm {
                     execution_result,
                     flags,
                 }) => {
-                    *index_mutex!(self.execution_results, tx_version.tx_idx) =
-                        Some(execution_result);
+                    // SAFETY: scheduler ensures only one thread executes a given tx_idx
+                    // at a time, so this lockless write never races with another writer.
+                    unsafe { self.execution_results.get_unchecked(tx_version.tx_idx) }
+                        .write(execution_result);
                     scheduler.finish_execution(tx_version, flags)
                 }
             };
