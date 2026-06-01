@@ -15,9 +15,8 @@ pub(crate) use transaction::{RiseTransaction, RiseTransactionError};
 use revm::{
     Context, Journal,
     context::{BlockEnv, CfgEnv, TxEnv},
-    context_interface::{Cfg, ContextTr, JournalTr, result::HaltReason},
+    context_interface::result::HaltReason,
     primitives::{Address, address, hardfork::SpecId},
-    state::EvmState,
 };
 
 pub(crate) const L1_FEE_RECIPIENT: Address = address!("0x420000000000000000000000000000000000001A");
@@ -27,29 +26,8 @@ pub(crate) const BASE_FEE_RECIPIENT: Address =
     address!("0x4200000000000000000000000000000000000019");
 
 /// The default OP context type: mainnet context + [`RiseTransaction`] + unit chain (no L1 fees).
-pub(crate) type OpContext<DB> =
+pub(crate) type RiseContext<DB> =
     Context<BlockEnv, RiseTransaction<TxEnv>, CfgEnv<SpecId>, DB, Journal<DB>, ()>;
-
-/// Marker trait for OP-capable EVM contexts.
-pub(crate) trait OpContextTr:
-    ContextTr<
-        Journal: JournalTr<State = EvmState>,
-        Tx = RiseTransaction<TxEnv>,
-        Cfg: Cfg<Spec = SpecId>,
-        Chain = (),
-    >
-{
-}
-
-impl<T> OpContextTr for T where
-    T: ContextTr<
-            Journal: JournalTr<State = EvmState>,
-            Tx = RiseTransaction<TxEnv>,
-            Cfg: Cfg<Spec = SpecId>,
-            Chain = (),
-        >
-{
-}
 
 /// Halt reason for RISE/OP-Stack execution.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

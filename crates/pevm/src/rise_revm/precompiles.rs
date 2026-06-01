@@ -13,9 +13,9 @@ use std::string::String;
 
 /// Precompile provider for RISE — always uses the Jovian precompile set.
 #[derive(Debug, Clone)]
-pub struct OpPrecompiles(EthPrecompiles);
+pub struct RisePrecompiles(EthPrecompiles);
 
-impl Default for OpPrecompiles {
+impl Default for RisePrecompiles {
     fn default() -> Self {
         Self(EthPrecompiles {
             precompiles: rise_precompiles(),
@@ -24,7 +24,7 @@ impl Default for OpPrecompiles {
     }
 }
 
-impl<CTX> PrecompileProvider<CTX> for OpPrecompiles
+impl<CTX> PrecompileProvider<CTX> for RisePrecompiles
 where
     CTX: ContextTr<Cfg: Cfg<Spec = SpecId>>,
 {

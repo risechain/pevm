@@ -1,21 +1,21 @@
 use crate::rise_revm::{
-    BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT, OpContextTr, RiseHaltReason,
+    BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT, RiseHaltReason,
+    evm::RiseEvm,
     transaction::{DEPOSIT_TRANSACTION_TYPE, RiseTransactionError},
 };
 use revm::{
+    Database,
     context::{
         LocalContextTr,
         journaled_state::{JournalCheckpoint, account::JournaledAccountTr},
     },
     context_interface::{
-        Block, Cfg, ContextTr, JournalTr, Transaction,
+        Block, ContextTr, JournalTr, Transaction,
         context::take_error,
-        result::{EVMError, ExecutionResult, FromStringError, ResultGas},
+        result::{EVMError, ExecutionResult, ResultGas},
     },
     handler::{
-        EthFrame, EvmTr, Handler, MainnetHandler,
-        evm::FrameTr,
-        handler::EvmTrError,
+        EthFrame, EvmTr, FrameResult, Handler, MainnetHandler,
         post_execution::{self, reimburse_caller},
         pre_execution::{calculate_caller_fee, validate_account_nonce_and_code_with_components},
     },
@@ -24,35 +24,24 @@ use revm::{
 };
 use std::vec::Vec;
 
-/// Helper to identify transaction-level errors (used in `catch_error`).
-pub(crate) trait IsTxError {
-    fn is_tx_error(&self) -> bool;
-}
-
-impl<DB, TX> IsTxError for EVMError<DB, TX> {
-    fn is_tx_error(&self) -> bool {
-        matches!(self, Self::Transaction(_))
-    }
-}
+type RiseHandlerError<DB> = EVMError<<DB as Database>::Error, RiseTransactionError>;
 
 /// Wraps [`MainnetHandler`] and overrides the methods that differ for OP Stack chains:
 /// deposit transaction handling, gas accounting, and fee distribution.
 #[derive(Debug)]
-pub(crate) struct OpHandler<EVM, ERROR>(MainnetHandler<EVM, ERROR, EthFrame<EthInterpreter>>);
+pub(crate) struct RiseHandler<DB: Database>(
+    MainnetHandler<RiseEvm<DB>, RiseHandlerError<DB>, EthFrame<EthInterpreter>>,
+);
 
-impl<EVM, ERROR> Default for OpHandler<EVM, ERROR> {
+impl<DB: Database> Default for RiseHandler<DB> {
     fn default() -> Self {
         Self(MainnetHandler::default())
     }
 }
 
-impl<EVM, ERROR> Handler for OpHandler<EVM, ERROR>
-where
-    EVM: EvmTr<Context: OpContextTr, Frame = EthFrame<EthInterpreter>>,
-    ERROR: EvmTrError<EVM> + From<RiseTransactionError> + FromStringError + IsTxError,
-{
-    type Evm = EVM;
-    type Error = ERROR;
+impl<DB: Database> Handler for RiseHandler<DB> {
+    type Evm = RiseEvm<DB>;
+    type Error = RiseHandlerError<DB>;
     type HaltReason = RiseHaltReason;
 
     fn validate_env(&self, evm: &mut Self::Evm) -> Result<(), Self::Error> {
@@ -78,45 +67,35 @@ where
     fn validate_against_state_and_deduct_caller(
         &self,
         evm: &mut Self::Evm,
-        _init_and_floor_gas: &mut InitialAndFloorGas,
+        _: &mut InitialAndFloorGas,
     ) -> Result<(), Self::Error> {
         let (block, tx, cfg, journal, _, _) = evm.ctx().all_mut();
 
+        let mut caller = journal.load_account_with_code_mut(tx.caller())?.data;
+
         if tx.tx_type() == DEPOSIT_TRANSACTION_TYPE {
-            let basefee = block.basefee() as u128;
-            let blob_price = block.blob_gasprice().unwrap_or_default();
-            let mut caller = journal.load_account_with_code_mut(tx.caller())?.data;
-
-            // Deposits have gas_price=0, so effective_balance_spending = value; net deduction is 0.
-            // Compute explicitly to match op-revm behaviour.
-            let effective_balance_spending = tx
-                .effective_balance_spending(basefee, blob_price)
-                .expect("deposit effective balance spending overflow")
-                - tx.value();
-
-            let mut new_balance = caller
+            // Deposit balance update: new_balance = old_balance + mint.
+            // The general formula is: new_balance = old_balance + mint - effective_balance_spending + value,
+            // where effective_balance_spending = gas_limit * gas_price + blob_cost + value.
+            // Deposits enforce gas_price=0 and carry no blob hashes, so effective_balance_spending = value,
+            // and the net deduction is always zero — leaving only the mint credit.
+            let new_balance = caller
                 .balance()
-                .saturating_add(U256::from(tx.mint().unwrap_or_default()))
-                .saturating_sub(effective_balance_spending);
-
-            if cfg.is_balance_check_disabled() {
-                new_balance = new_balance.max(tx.value());
-            }
-
+                .saturating_add(U256::from(tx.mint().unwrap_or_default()));
             caller.set_balance(new_balance);
-            if tx.kind().is_call() {
-                caller.bump_nonce();
-            }
-            return Ok(());
+        } else {
+            validate_account_nonce_and_code_with_components(&caller.account().info, tx, cfg)?;
+            // L1 cost is always zero on RISE — no additional deduction needed.
+            caller.set_balance(calculate_caller_fee(
+                caller.account().info.balance,
+                tx,
+                block,
+                cfg,
+            )?);
         }
 
-        let mut caller_account = journal.load_account_with_code_mut(tx.caller())?.data;
-        validate_account_nonce_and_code_with_components(&caller_account.account().info, tx, cfg)?;
-        // L1 cost is always zero on RISE — no additional deduction needed.
-        let balance = calculate_caller_fee(caller_account.account().info.balance, tx, block, cfg)?;
-        caller_account.set_balance(balance);
         if tx.kind().is_call() {
-            caller_account.bump_nonce();
+            caller.bump_nonce();
         }
 
         Ok(())
@@ -125,20 +104,18 @@ where
     fn last_frame_result(
         &mut self,
         evm: &mut Self::Evm,
-        _original_reservoir: u64,
-        frame_result: &mut <<Self::Evm as EvmTr>::Frame as FrameTr>::FrameResult,
+        _: u64,
+        frame_result: &mut FrameResult,
     ) -> Result<(), Self::Error> {
-        let tx_gas_limit = evm.ctx().tx().gas_limit();
-
         let instruction_result = frame_result.interpreter_result().result;
         let gas = frame_result.gas_mut();
+
+        // Save fields that Gas::new_spent_with_reservoir overwrites, then reset to fully-spent.
         let remaining = gas.remaining();
         let refunded = gas.refunded();
         let reservoir = gas.reservoir();
         let state_gas_spent = gas.state_gas_spent();
-
-        // Spend the full gas limit; reservoir and state_gas_spent are saved above and restored below.
-        *gas = Gas::new_spent_with_reservoir(tx_gas_limit, 0);
+        *gas = Gas::new_spent_with_reservoir(evm.ctx().tx().gas_limit(), 0);
 
         // RISE is always post-Regolith: return unused gas on success/revert for all tx types.
         if instruction_result.is_ok() {
@@ -148,7 +125,6 @@ where
             gas.erase_cost(remaining);
         }
 
-        // Restore fields that Gas::new_spent_with_reservoir overwrites.
         gas.set_state_gas_spent(state_gas_spent);
         gas.set_reservoir(reservoir);
 
@@ -158,28 +134,22 @@ where
     fn reimburse_caller(
         &self,
         evm: &mut Self::Evm,
-        frame_result: &mut <<Self::Evm as EvmTr>::Frame as FrameTr>::FrameResult,
+        frame_result: &mut FrameResult,
     ) -> Result<(), Self::Error> {
         // Operator fee refund — always zero on RISE.
         reimburse_caller(evm.ctx(), frame_result.gas(), U256::ZERO).map_err(From::from)
     }
 
-    fn refund(
-        &self,
-        evm: &mut Self::Evm,
-        frame_result: &mut <<Self::Evm as EvmTr>::Frame as FrameTr>::FrameResult,
-        eip7702_refund: i64,
-    ) {
+    fn refund(&self, _: &mut Self::Evm, frame_result: &mut FrameResult, eip7702_refund: i64) {
         frame_result.gas_mut().record_refund(eip7702_refund);
         // Always post-Regolith and post-London: apply EIP-3529 capped refund for all tx types.
-        let _ = evm;
         frame_result.gas_mut().set_final_refund(true);
     }
 
     fn reward_beneficiary(
         &self,
         evm: &mut Self::Evm,
-        frame_result: &mut <<Self::Evm as EvmTr>::Frame as FrameTr>::FrameResult,
+        frame_result: &mut FrameResult,
     ) -> Result<(), Self::Error> {
         if evm.ctx().tx().tx_type() == DEPOSIT_TRANSACTION_TYPE {
             return Ok(());
@@ -212,7 +182,7 @@ where
     fn execution_result(
         &mut self,
         evm: &mut Self::Evm,
-        frame_result: <<Self::Evm as EvmTr>::Frame as FrameTr>::FrameResult,
+        frame_result: FrameResult,
         result_gas: ResultGas,
     ) -> Result<ExecutionResult<Self::HaltReason>, Self::Error> {
         take_error::<Self::Error, _>(evm.ctx().error())?;
@@ -222,7 +192,7 @@ where
 
         // RISE is always post-Regolith: a halted deposit is always a fatal error.
         if exec_result.is_halt() && evm.ctx().tx().tx_type() == DEPOSIT_TRANSACTION_TYPE {
-            return Err(ERROR::from(RiseTransactionError::HaltedDepositPostRegolith));
+            return Err(RiseTransactionError::HaltedDepositPostRegolith.into());
         }
         evm.ctx().journal_mut().commit_tx();
         evm.ctx().local_mut().clear();
@@ -236,32 +206,31 @@ where
         evm: &mut Self::Evm,
         error: Self::Error,
     ) -> Result<ExecutionResult<Self::HaltReason>, Self::Error> {
-        let is_deposit = evm.ctx().tx().tx_type() == DEPOSIT_TRANSACTION_TYPE;
-        let is_tx_error = error.is_tx_error();
-        let mut output = Err(error);
-
-        if is_tx_error && is_deposit {
+        let output = if matches!(error, EVMError::Transaction(_))
+            && evm.ctx().tx().tx_type() == DEPOSIT_TRANSACTION_TYPE
+        {
             let caller = evm.ctx().tx().caller();
             let mint = evm.ctx().tx().mint();
-            let gas_limit = evm.ctx().tx().gas_limit();
-            let journal = evm.ctx().journal_mut();
 
-            journal.checkpoint_revert(JournalCheckpoint::default());
+            evm.ctx()
+                .journal_mut()
+                .checkpoint_revert(JournalCheckpoint::default());
 
-            let mut acc = journal.load_account_mut(caller)?;
+            let mut acc = evm.ctx().journal_mut().load_account_mut(caller)?;
             acc.bump_nonce();
             acc.incr_balance(U256::from(mint.unwrap_or_default()));
-            drop(acc); // release borrow before commit_tx
 
-            journal.commit_tx();
+            evm.ctx().journal_mut().commit_tx();
 
             // RISE is always post-Regolith: failed deposits always consume their full gas.
-            output = Ok(ExecutionResult::Halt {
+            Ok(ExecutionResult::Halt {
                 reason: RiseHaltReason::FailedDeposit,
-                gas: ResultGas::default().with_total_gas_spent(gas_limit),
+                gas: ResultGas::default().with_total_gas_spent(evm.ctx().tx().gas_limit()),
                 logs: Vec::new(),
-            });
-        }
+            })
+        } else {
+            Err(error)
+        };
 
         evm.ctx().local_mut().clear();
         evm.frame_stack().clear();

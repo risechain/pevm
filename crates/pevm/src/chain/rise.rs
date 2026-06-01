@@ -2,8 +2,8 @@
 use std::sync::LazyLock;
 
 use crate::rise_revm::{
-    BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT, OpContext, RiseEvm,
-    RiseHaltReason, RiseTransaction, RiseTransactionError, transaction::DepositTransactionParts,
+    BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT, RiseEvm, RiseHaltReason,
+    RiseTransaction, RiseTransactionError, transaction::DepositTransactionParts,
 };
 use alloy_consensus::Transaction;
 use alloy_primitives::{Address, B256, ChainId, U256};
@@ -64,7 +64,7 @@ impl PevmChain for PevmRise {
     type Network = op_alloy_network::Optimism;
     type Transaction = op_alloy_rpc_types::Transaction;
     type Envelope = OpTxEnvelope;
-    type Evm<DB: Database> = RiseEvm<OpContext<DB>>;
+    type Evm<DB: Database> = RiseEvm<DB>;
     type EvmSpecId = SpecId;
     type EvmTx = RiseTransaction<TxEnv>;
     type EvmHaltReason = RiseHaltReason;
