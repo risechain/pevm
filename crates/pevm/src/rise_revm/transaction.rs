@@ -1,5 +1,3 @@
-use core::fmt;
-
 use revm::{
     context::{
         TxEnv,
@@ -20,16 +18,6 @@ pub struct DepositTransactionParts {
     pub source_hash: B256,
     pub mint: Option<u128>,
     pub is_system_transaction: bool,
-}
-
-impl DepositTransactionParts {
-    pub const fn new(source_hash: B256, mint: Option<u128>, is_system_transaction: bool) -> Self {
-        Self {
-            source_hash,
-            mint,
-            is_system_transaction,
-        }
-    }
 }
 
 /// Optimism transaction: wraps [`TxEnv`] with deposit-specific fields.
@@ -156,34 +144,21 @@ impl Transaction for RiseTransaction {
 }
 
 /// Optimism transaction validation error.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum RiseTransactionError {
-    Base(revm::context::result::InvalidTransaction),
+    #[error(transparent)]
+    Base(InvalidTransaction),
+    #[error("deposit system transactions post regolith hardfork are not supported")]
     DepositSystemTxPostRegolith,
+    #[error(
+        "deposit transaction halted post-regolith; error will be bubbled up to main return handler"
+    )]
     HaltedDepositPostRegolith,
+    #[error("missing enveloped transaction bytes for non-deposit transaction")]
     MissingEnvelopedTx,
 }
 
 impl TransactionError for RiseTransactionError {}
-
-impl fmt::Display for RiseTransactionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Base(e) => e.fmt(f),
-            Self::DepositSystemTxPostRegolith => f.write_str(
-                "deposit system transactions post regolith hardfork are not supported",
-            ),
-            Self::HaltedDepositPostRegolith => f.write_str(
-                "deposit transaction halted post-regolith; error will be bubbled up to main return handler",
-            ),
-            Self::MissingEnvelopedTx => f.write_str(
-                "missing enveloped transaction bytes for non-deposit transaction",
-            ),
-        }
-    }
-}
-
-impl core::error::Error for RiseTransactionError {}
 
 impl From<InvalidTransaction> for RiseTransactionError {
     fn from(value: InvalidTransaction) -> Self {

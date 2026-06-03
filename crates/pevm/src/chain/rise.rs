@@ -234,11 +234,11 @@ impl PevmChain for PevmRise {
                 Some(tx.inner.inner.encoded_2718().into())
             },
             deposit: if let Some(deposit) = tx.inner.inner.as_deposit() {
-                DepositTransactionParts::new(
-                    deposit.source_hash,
-                    Some(deposit.mint),
-                    deposit.is_system_transaction,
-                )
+                DepositTransactionParts {
+                    source_hash: deposit.source_hash,
+                    mint: Some(deposit.mint),
+                    is_system_transaction: deposit.is_system_transaction,
+                }
             } else {
                 DepositTransactionParts::default()
             },
