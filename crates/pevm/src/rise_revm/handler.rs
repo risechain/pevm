@@ -1,5 +1,5 @@
 use crate::rise_revm::{
-    BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT, RiseHaltReason,
+    BASE_FEE_RECIPIENT, RiseHaltReason,
     evm::RiseEvm,
     transaction::{DEPOSIT_TRANSACTION_TYPE, RiseTransactionError},
 };
@@ -165,16 +165,9 @@ impl<DB: Database> Handler for RiseHandler<DB> {
             .saturating_sub(frame_result.gas().reservoir());
         let base_fee_amount = U256::from(basefee.saturating_mul(effective_used as u128));
 
-        // RISE disables DA footprint and operator fees. Still touch these accounts
-        // to match revm's sequential execution state.
-        let journal = evm.ctx().journal_mut();
-        for (recipient, amount) in [
-            (L1_FEE_RECIPIENT, U256::ZERO),
-            (BASE_FEE_RECIPIENT, base_fee_amount),
-            (OPERATOR_FEE_RECIPIENT, U256::ZERO),
-        ] {
-            journal.balance_incr(recipient, amount)?;
-        }
+        evm.ctx()
+            .journal_mut()
+            .balance_incr(BASE_FEE_RECIPIENT, base_fee_amount)?;
 
         Ok(())
     }
@@ -190,7 +183,7 @@ impl<DB: Database> Handler for RiseHandler<DB> {
         let exec_result = post_execution::output(evm.ctx(), frame_result, result_gas)
             .map_haltreason(RiseHaltReason::Base);
 
-        // RISE is always post-Regolith: a halted deposit is always a fatal error.
+        // RISE: halted deposit is always a fatal error.
         if exec_result.is_halt() && evm.ctx().tx().tx_type() == DEPOSIT_TRANSACTION_TYPE {
             return Err(RiseTransactionError::HaltedDepositPostRegolith.into());
         }
@@ -206,6 +199,10 @@ impl<DB: Database> Handler for RiseHandler<DB> {
         evm: &mut Self::Evm,
         error: Self::Error,
     ) -> Result<ExecutionResult<Self::HaltReason>, Self::Error> {
+        // Post-Regolith: a deposit that fails *validation* (tx error) must not propagate the
+        // error. Instead, revert all execution side-effects, apply only the mint and nonce
+        // increment, then return a FailedDeposit halt. DB errors and non-deposit tx errors
+        // propagate normally.
         let output = if matches!(error, EVMError::Transaction(_))
             && evm.ctx().tx().tx_type() == DEPOSIT_TRANSACTION_TYPE
         {
@@ -222,7 +219,6 @@ impl<DB: Database> Handler for RiseHandler<DB> {
 
             evm.ctx().journal_mut().commit_tx();
 
-            // RISE is always post-Regolith: failed deposits always consume their full gas.
             Ok(ExecutionResult::Halt {
                 reason: RiseHaltReason::FailedDeposit,
                 gas: ResultGas::default().with_total_gas_spent(evm.ctx().tx().gas_limit()),

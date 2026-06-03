@@ -2,8 +2,8 @@
 use std::sync::LazyLock;
 
 use crate::rise_revm::{
-    BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT, RiseEvm, RiseHaltReason,
-    RiseTransaction, RiseTransactionError, transaction::DepositTransactionParts,
+    BASE_FEE_RECIPIENT, RiseEvm, RiseHaltReason, RiseTransaction, RiseTransactionError,
+    transaction::DepositTransactionParts,
 };
 use alloy_consensus::Transaction;
 use alloy_primitives::{Address, B256, ChainId, U256};
@@ -31,12 +31,6 @@ const RISE_CHAIN_ID: ChainId = 4153; // Mainnet
 
 static BASE_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
     LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(BASE_FEE_RECIPIENT)));
-
-static L1_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
-    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(L1_FEE_RECIPIENT)));
-
-static OPERATOR_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
-    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(OPERATOR_FEE_RECIPIENT)));
 
 /// Implementation of [`PevmChain`] for RISE
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +60,7 @@ impl PevmChain for PevmRise {
     type Envelope = OpTxEnvelope;
     type Evm<DB: Database> = RiseEvm<DB>;
     type EvmSpecId = SpecId;
-    type EvmTx = RiseTransaction<TxEnv>;
+    type EvmTx = RiseTransaction;
     type EvmHaltReason = RiseHaltReason;
     type EvmErrorType = RiseTransactionError;
     type BlockSpecError = std::convert::Infallible;
@@ -104,7 +98,7 @@ impl PevmChain for PevmRise {
         )
     }
 
-    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[RiseTransaction<TxEnv>]) -> MvMemory {
+    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[RiseTransaction]) -> MvMemory {
         let beneficiary_location_hash =
             hash_deterministic(MemoryLocation::Basic(block_env.beneficiary));
 
@@ -124,26 +118,13 @@ impl PevmChain for PevmRise {
                     .entry(*BASE_FEE_RECIPIENT_LOCATION_HASH)
                     .or_insert_with(|| Vec::with_capacity(txs.len()))
                     .push(index);
-                estimated_locations
-                    .entry(*L1_FEE_RECIPIENT_LOCATION_HASH)
-                    .or_insert_with(|| Vec::with_capacity(txs.len()))
-                    .push(index);
-                estimated_locations
-                    .entry(*OPERATOR_FEE_RECIPIENT_LOCATION_HASH)
-                    .or_insert_with(|| Vec::with_capacity(txs.len()))
-                    .push(index);
             }
         }
 
         MvMemory::new(
             txs.len(),
             estimated_locations,
-            [
-                block_env.beneficiary,
-                BASE_FEE_RECIPIENT,
-                L1_FEE_RECIPIENT,
-                OPERATOR_FEE_RECIPIENT,
-            ],
+            [block_env.beneficiary, BASE_FEE_RECIPIENT],
         )
     }
 
@@ -167,11 +148,6 @@ impl PevmChain for PevmRise {
                     *BASE_FEE_RECIPIENT_LOCATION_HASH,
                     U256::from(basefee).saturating_mul(gas_used),
                 ),
-                // RISE disables DA footprint and operator fees. Annoyingly, we still
-                // need to touch these to match revm's sequential execution for now.
-                // Will remove once we rewrite our own EVM implementation.
-                (*L1_FEE_RECIPIENT_LOCATION_HASH, U256::ZERO),
-                (*OPERATOR_FEE_RECIPIENT_LOCATION_HASH, U256::ZERO),
             ]
         }
     }
@@ -231,7 +207,7 @@ impl PevmChain for PevmRise {
     fn get_tx_env(
         &self,
         tx: &Self::Transaction,
-    ) -> Result<RiseTransaction<TxEnv>, RiseTransactionParsingError> {
+    ) -> Result<RiseTransaction, RiseTransactionParsingError> {
         Ok(RiseTransaction {
             base: TxEnv {
                 tx_type: tx.inner.inner.tx_type().into(),
@@ -264,12 +240,12 @@ impl PevmChain for PevmRise {
                     deposit.is_system_transaction,
                 )
             } else {
-                DepositTransactionParts::new(B256::ZERO, None, false)
+                DepositTransactionParts::default()
             },
         })
     }
 
-    fn tx_env<'a>(&self, tx: &'a RiseTransaction<TxEnv>) -> &'a TxEnv {
+    fn tx_env<'a>(&self, tx: &'a RiseTransaction) -> &'a TxEnv {
         &tx.base
     }
 

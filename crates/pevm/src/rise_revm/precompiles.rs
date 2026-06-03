@@ -1,6 +1,5 @@
 use revm::{
-    context::Cfg,
-    context_interface::ContextTr,
+    Database,
     handler::{EthPrecompiles, PrecompileProvider},
     interpreter::{CallInputs, InterpreterResult},
     precompile::{
@@ -10,6 +9,8 @@ use revm::{
     primitives::{AddressSet, OnceLock, hardfork::SpecId},
 };
 use std::string::String;
+
+use super::RiseContext;
 
 /// Precompile provider for RISE — always uses the Jovian precompile set.
 #[derive(Debug, Clone)]
@@ -24,10 +25,7 @@ impl Default for RisePrecompiles {
     }
 }
 
-impl<CTX> PrecompileProvider<CTX> for RisePrecompiles
-where
-    CTX: ContextTr<Cfg: Cfg<Spec = SpecId>>,
-{
+impl<DB: Database> PrecompileProvider<RiseContext<DB>> for RisePrecompiles {
     type Output = InterpreterResult;
 
     #[inline]
@@ -38,7 +36,7 @@ where
     #[inline]
     fn run(
         &mut self,
-        context: &mut CTX,
+        context: &mut RiseContext<DB>,
         inputs: &CallInputs,
     ) -> Result<Option<Self::Output>, String> {
         self.0.run(context, inputs)

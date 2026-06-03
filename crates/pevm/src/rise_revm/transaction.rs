@@ -1,5 +1,11 @@
+use core::fmt;
+
 use revm::{
-    context::TxEnv,
+    context::{
+        TxEnv,
+        result::{EVMError, InvalidTransaction},
+        transaction::TransactionError,
+    },
     context_interface::transaction::Transaction,
     handler::SystemCallTx,
     primitives::{Address, B256, Bytes, TxKind, U256},
@@ -26,24 +32,16 @@ impl DepositTransactionParts {
     }
 }
 
-/// Optimism transaction: wraps a base transaction with deposit-specific fields.
+/// Optimism transaction: wraps [`TxEnv`] with deposit-specific fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RiseTransaction<T: Transaction> {
-    pub base: T,
+pub struct RiseTransaction {
+    pub base: TxEnv,
     /// Enveloped EIP-2718 bytes, required for L1 cost computation on non-deposits.
     pub enveloped_tx: Option<Bytes>,
     pub deposit: DepositTransactionParts,
 }
 
-impl<T: Transaction> RiseTransaction<T> {
-    pub fn new(base: T) -> Self {
-        Self {
-            base,
-            enveloped_tx: None,
-            deposit: DepositTransactionParts::default(),
-        }
-    }
-
+impl RiseTransaction {
     pub const fn enveloped_tx(&self) -> Option<&Bytes> {
         self.enveloped_tx.as_ref()
     }
@@ -61,13 +59,7 @@ impl<T: Transaction> RiseTransaction<T> {
     }
 }
 
-impl<T: Transaction> AsRef<T> for RiseTransaction<T> {
-    fn as_ref(&self) -> &T {
-        &self.base
-    }
-}
-
-impl Default for RiseTransaction<TxEnv> {
+impl Default for RiseTransaction {
     fn default() -> Self {
         Self {
             base: TxEnv::default(),
@@ -79,31 +71,23 @@ impl Default for RiseTransaction<TxEnv> {
     }
 }
 
-impl<TX: Transaction + SystemCallTx> SystemCallTx for RiseTransaction<TX> {
+impl SystemCallTx for RiseTransaction {
     fn new_system_tx_with_caller(
         caller: Address,
         system_contract_address: Address,
         data: Bytes,
     ) -> Self {
-        let mut tx = Self::new(TX::new_system_tx_with_caller(
-            caller,
-            system_contract_address,
-            data,
-        ));
-        tx.enveloped_tx = Some(Bytes::default());
-        tx
+        Self {
+            base: TxEnv::new_system_tx_with_caller(caller, system_contract_address, data),
+            enveloped_tx: Some(Bytes::default()),
+            deposit: DepositTransactionParts::default(),
+        }
     }
 }
 
-impl<T: Transaction> Transaction for RiseTransaction<T> {
-    type AccessListItem<'a>
-        = T::AccessListItem<'a>
-    where
-        T: 'a;
-    type Authorization<'a>
-        = T::Authorization<'a>
-    where
-        T: 'a;
+impl Transaction for RiseTransaction {
+    type AccessListItem<'a> = <TxEnv as Transaction>::AccessListItem<'a>;
+    type Authorization<'a> = <TxEnv as Transaction>::Authorization<'a>;
 
     fn tx_type(&self) -> u8 {
         // Deposits are identified by a non-zero source_hash.
@@ -180,10 +164,10 @@ pub enum RiseTransactionError {
     MissingEnvelopedTx,
 }
 
-impl revm::context_interface::transaction::TransactionError for RiseTransactionError {}
+impl TransactionError for RiseTransactionError {}
 
-impl core::fmt::Display for RiseTransactionError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl fmt::Display for RiseTransactionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Base(e) => e.fmt(f),
             Self::DepositSystemTxPostRegolith => f.write_str(
@@ -201,15 +185,13 @@ impl core::fmt::Display for RiseTransactionError {
 
 impl core::error::Error for RiseTransactionError {}
 
-impl From<revm::context::result::InvalidTransaction> for RiseTransactionError {
-    fn from(value: revm::context::result::InvalidTransaction) -> Self {
+impl From<InvalidTransaction> for RiseTransactionError {
+    fn from(value: InvalidTransaction) -> Self {
         Self::Base(value)
     }
 }
 
-impl<DBError> From<RiseTransactionError>
-    for revm::context_interface::result::EVMError<DBError, RiseTransactionError>
-{
+impl<DBError> From<RiseTransactionError> for EVMError<DBError, RiseTransactionError> {
     fn from(value: RiseTransactionError) -> Self {
         Self::Transaction(value)
     }

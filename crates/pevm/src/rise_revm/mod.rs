@@ -14,20 +14,17 @@ pub(crate) use transaction::{RiseTransaction, RiseTransactionError};
 
 use revm::{
     Context, Journal,
-    context::{BlockEnv, CfgEnv, TxEnv},
+    context::{BlockEnv, CfgEnv},
     context_interface::result::HaltReason,
     primitives::{Address, address, hardfork::SpecId},
 };
 
-pub(crate) const L1_FEE_RECIPIENT: Address = address!("0x420000000000000000000000000000000000001A");
-pub(crate) const OPERATOR_FEE_RECIPIENT: Address =
-    address!("0x420000000000000000000000000000000000001B");
 pub(crate) const BASE_FEE_RECIPIENT: Address =
     address!("0x4200000000000000000000000000000000000019");
 
 /// The default OP context type: mainnet context + [`RiseTransaction`] + unit chain (no L1 fees).
 pub(crate) type RiseContext<DB> =
-    Context<BlockEnv, RiseTransaction<TxEnv>, CfgEnv<SpecId>, DB, Journal<DB>, ()>;
+    Context<BlockEnv, RiseTransaction, CfgEnv<SpecId>, DB, Journal<DB>, ()>;
 
 /// Halt reason for RISE/OP-Stack execution.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

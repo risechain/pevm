@@ -4,7 +4,7 @@ use super::{
 };
 use revm::{
     Database, ExecuteEvm,
-    context::{BlockEnv, ContextError, ContextSetters, Evm, FrameStack, TxEnv},
+    context::{BlockEnv, ContextError, ContextSetters, Evm, FrameStack},
     context_interface::{
         ContextTr,
         result::{EVMError, ExecResultAndState, ExecutionResult},
@@ -93,7 +93,7 @@ impl<DB: Database> EvmTr for RiseEvm<DB> {
 }
 
 impl<DB: Database> ExecuteEvm for RiseEvm<DB> {
-    type Tx = RiseTransaction<TxEnv>;
+    type Tx = RiseTransaction;
     type Block = BlockEnv;
     type State = EvmState;
     type Error = RiseError<DB>;
