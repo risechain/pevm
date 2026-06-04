@@ -4,25 +4,457 @@ use core::mem;
 
 use revm::{
     Database,
-    context::journal::{JournalCfg, JournalEntry, JournalEntryTr, warm_addresses::WarmAddresses},
+    context::journal::{JournalCfg, warm_addresses::WarmAddresses},
     context_interface::{
+        ErasedError,
         context::{SStoreResult, SelfDestructResult},
         journaled_state::{
-            AccountInfoLoad, AccountLoad, JournalCheckpoint, JournalLoadError, JournalTr,
-            StateLoad, TransferError,
-            account::{JournaledAccount, JournaledAccountTr},
-            entry::SelfdestructionRevertStatus,
+            AccountInfoLoad, AccountLoad, JournalCheckpoint, JournalLoadErasedError,
+            JournalLoadError, JournalTr, StateLoad, TransferError, account::JournaledAccountTr,
         },
     },
     primitives::{
-        Address, AddressMap, AddressSet, B256, HashSet, KECCAK_EMPTY, Log, StorageKey,
+        Address, AddressMap, AddressSet, B256, HashSet, KECCAK_EMPTY, Log, PRECOMPILE3, StorageKey,
         StorageValue, U256,
         hardfork::SpecId::{self, *},
         hints_util::unlikely,
         map::Entry,
     },
-    state::{Account, Bytecode, EvmState, TransientStorage},
+    state::{Account, Bytecode, EvmState, EvmStorageSlot, TransientStorage},
 };
+
+/// Status of selfdestruction revert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(missing_docs)]
+pub enum SelfdestructionRevertStatus {
+    GloballySelfdestroyed,
+    LocallySelfdestroyed,
+    RepeatedSelfdestruction,
+}
+
+/// Journal entries tracking state changes for checkpoint revert.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(missing_docs)]
+pub enum JournalEntry {
+    AccountWarmed {
+        address: Address,
+    },
+    AccountDestroyed {
+        had_balance: U256,
+        address: Address,
+        target: Address,
+        destroyed_status: SelfdestructionRevertStatus,
+    },
+    AccountTouched {
+        address: Address,
+    },
+    BalanceChange {
+        old_balance: U256,
+        address: Address,
+    },
+    BalanceTransfer {
+        balance: U256,
+        from: Address,
+        to: Address,
+    },
+    NonceChange {
+        address: Address,
+        previous_nonce: u64,
+    },
+    NonceBump {
+        address: Address,
+    },
+    AccountCreated {
+        address: Address,
+        is_created_globally: bool,
+    },
+    StorageChanged {
+        key: StorageKey,
+        had_value: StorageValue,
+        address: Address,
+    },
+    StorageWarmed {
+        key: StorageKey,
+        address: Address,
+    },
+    TransientStorageChange {
+        key: StorageKey,
+        had_value: StorageValue,
+        address: Address,
+    },
+    CodeChange {
+        address: Address,
+    },
+}
+
+impl JournalEntry {
+    fn revert(
+        self,
+        state: &mut EvmState,
+        transient_storage: Option<&mut TransientStorage>,
+        is_spurious_dragon_enabled: bool,
+    ) {
+        match self {
+            Self::AccountWarmed { address } => {
+                state.get_mut(&address).unwrap().mark_cold();
+            }
+            Self::AccountTouched { address } => {
+                if is_spurious_dragon_enabled && address == PRECOMPILE3 {
+                    return;
+                }
+                state.get_mut(&address).unwrap().unmark_touch();
+            }
+            Self::AccountDestroyed {
+                address,
+                target,
+                destroyed_status,
+                had_balance,
+            } => {
+                let account = state.get_mut(&address).unwrap();
+                match destroyed_status {
+                    SelfdestructionRevertStatus::GloballySelfdestroyed => {
+                        account.unmark_selfdestruct();
+                        account.unmark_selfdestructed_locally();
+                    }
+                    SelfdestructionRevertStatus::LocallySelfdestroyed => {
+                        account.unmark_selfdestructed_locally();
+                    }
+                    SelfdestructionRevertStatus::RepeatedSelfdestruction => (),
+                }
+                account.info.balance += had_balance;
+                if address != target {
+                    state.get_mut(&target).unwrap().info.balance -= had_balance;
+                }
+            }
+            Self::BalanceChange {
+                address,
+                old_balance,
+            } => {
+                state.get_mut(&address).unwrap().info.balance = old_balance;
+            }
+            Self::BalanceTransfer { from, to, balance } => {
+                state.get_mut(&from).unwrap().info.balance += balance;
+                state.get_mut(&to).unwrap().info.balance -= balance;
+            }
+            Self::NonceChange {
+                address,
+                previous_nonce,
+            } => {
+                state.get_mut(&address).unwrap().info.nonce = previous_nonce;
+            }
+            Self::NonceBump { address } => {
+                let nonce = &mut state.get_mut(&address).unwrap().info.nonce;
+                *nonce = nonce.saturating_sub(1);
+            }
+            Self::AccountCreated {
+                address,
+                is_created_globally,
+            } => {
+                let account = state.get_mut(&address).unwrap();
+                account.unmark_created_locally();
+                if is_created_globally {
+                    account.unmark_created();
+                }
+                account.info.nonce = 0;
+            }
+            Self::StorageWarmed { address, key } => {
+                state
+                    .get_mut(&address)
+                    .unwrap()
+                    .storage
+                    .get_mut(&key)
+                    .unwrap()
+                    .mark_cold();
+            }
+            Self::StorageChanged {
+                address,
+                key,
+                had_value,
+            } => {
+                state
+                    .get_mut(&address)
+                    .unwrap()
+                    .storage
+                    .get_mut(&key)
+                    .unwrap()
+                    .present_value = had_value;
+            }
+            Self::TransientStorageChange {
+                address,
+                key,
+                had_value,
+            } => {
+                let Some(ts) = transient_storage else { return };
+                let tkey = (address, key);
+                if had_value.is_zero() {
+                    ts.remove(&tkey);
+                } else {
+                    ts.insert(tkey, had_value);
+                }
+            }
+            Self::CodeChange { address } => {
+                let acc = state.get_mut(&address).unwrap();
+                acc.info.code_hash = KECCAK_EMPTY;
+                acc.info.code = None;
+            }
+        }
+    }
+}
+
+/// Wraps a mutable account and journal vec so writes can be done with automatic journal recording.
+#[derive(Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub struct JournaledAccount<'a, DB> {
+    address: Address,
+    account: &'a mut Account,
+    journal_entries: &'a mut Vec<JournalEntry>,
+    access_list: &'a AddressMap<HashSet<StorageKey>>,
+    transaction_id: usize,
+    db: &'a mut DB,
+}
+
+#[allow(missing_docs)]
+impl<'a, DB: Database> JournaledAccount<'a, DB> {
+    #[inline(never)]
+    pub fn sload_concrete_error(
+        &mut self,
+        key: StorageKey,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<&mut EvmStorageSlot>, JournalLoadError<DB::Error>> {
+        let is_newly_created = self.account.is_created();
+        let (slot, is_cold) = match self.account.storage.entry(key) {
+            Entry::Occupied(occ) => {
+                let slot = occ.into_mut();
+                let mut is_cold = false;
+                if slot.is_cold_transaction_id(self.transaction_id) {
+                    is_cold = self
+                        .access_list
+                        .get(&self.address)
+                        .and_then(|v| v.get(&key))
+                        .is_none();
+                    if is_cold && skip_cold_load {
+                        return Err(JournalLoadError::ColdLoadSkipped);
+                    }
+                }
+                slot.mark_warm_with_transaction_id(self.transaction_id);
+                (slot, is_cold)
+            }
+            Entry::Vacant(vac) => {
+                let is_cold = self
+                    .access_list
+                    .get(&self.address)
+                    .and_then(|v| v.get(&key))
+                    .is_none();
+                if is_cold && skip_cold_load {
+                    return Err(JournalLoadError::ColdLoadSkipped);
+                }
+                let value = if is_newly_created {
+                    StorageValue::ZERO
+                } else {
+                    self.db.storage(self.address, key)?
+                };
+                let slot = vac.insert(EvmStorageSlot::new(value, self.transaction_id));
+                (slot, is_cold)
+            }
+        };
+        if is_cold {
+            self.journal_entries.push(JournalEntry::StorageWarmed {
+                address: self.address,
+                key,
+            });
+        }
+        Ok(StateLoad::new(slot, is_cold))
+    }
+
+    #[inline]
+    pub fn sstore_concrete_error(
+        &mut self,
+        key: StorageKey,
+        new: StorageValue,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<SStoreResult>, JournalLoadError<DB::Error>> {
+        self.touch();
+        let slot = self.sload_concrete_error(key, skip_cold_load)?;
+        let ret = Ok(StateLoad::new(
+            SStoreResult {
+                original_value: slot.original_value(),
+                present_value: slot.present_value(),
+                new_value: new,
+            },
+            slot.is_cold,
+        ));
+        if slot.present_value != new {
+            let previous_value = slot.present_value;
+            slot.data.present_value = new;
+            self.journal_entries.push(JournalEntry::StorageChanged {
+                address: self.address,
+                key,
+                had_value: previous_value,
+            });
+        }
+        ret
+    }
+
+    #[inline]
+    pub fn load_code_preserve_error(&mut self) -> Result<&Bytecode, JournalLoadError<DB::Error>> {
+        if self.account.info.code.is_none() {
+            let hash = *self.code_hash();
+            let code = if hash == KECCAK_EMPTY {
+                Bytecode::default()
+            } else {
+                self.db.code_by_hash(hash)?
+            };
+            self.account.info.code = Some(code);
+        }
+        Ok(self.account.info.code.as_ref().unwrap())
+    }
+
+    #[inline]
+    pub const fn into_account(self) -> &'a Account {
+        self.account
+    }
+}
+
+impl<'a, DB: Database> JournaledAccountTr for JournaledAccount<'a, DB> {
+    #[inline]
+    fn account(&self) -> &Account {
+        self.account
+    }
+    #[inline]
+    fn balance(&self) -> &U256 {
+        &self.account.info.balance
+    }
+    #[inline]
+    fn nonce(&self) -> u64 {
+        self.account.info.nonce
+    }
+    #[inline]
+    fn code_hash(&self) -> &B256 {
+        &self.account.info.code_hash
+    }
+    #[inline]
+    fn code(&self) -> Option<&Bytecode> {
+        self.account.info.code.as_ref()
+    }
+    #[inline]
+    fn touch(&mut self) {
+        if !self.account.status.is_touched() {
+            self.account.mark_touch();
+            self.journal_entries.push(JournalEntry::AccountTouched {
+                address: self.address,
+            });
+        }
+    }
+    #[inline]
+    fn unsafe_mark_cold(&mut self) {
+        self.account.mark_cold();
+    }
+    #[inline]
+    fn set_balance(&mut self, balance: U256) {
+        self.touch();
+        if self.account.info.balance != balance {
+            self.journal_entries.push(JournalEntry::BalanceChange {
+                address: self.address,
+                old_balance: self.account.info.balance,
+            });
+            self.account.info.set_balance(balance);
+        }
+    }
+    #[inline]
+    fn incr_balance(&mut self, balance: U256) -> bool {
+        self.touch();
+        let Some(balance) = self.account.info.balance.checked_add(balance) else {
+            return false;
+        };
+        self.set_balance(balance);
+        true
+    }
+    #[inline]
+    fn decr_balance(&mut self, balance: U256) -> bool {
+        self.touch();
+        let Some(balance) = self.account.info.balance.checked_sub(balance) else {
+            return false;
+        };
+        self.set_balance(balance);
+        true
+    }
+    #[inline]
+    fn bump_nonce(&mut self) -> bool {
+        self.touch();
+        let Some(nonce) = self.account.info.nonce.checked_add(1) else {
+            return false;
+        };
+        self.account.info.set_nonce(nonce);
+        self.journal_entries.push(JournalEntry::NonceBump {
+            address: self.address,
+        });
+        true
+    }
+    #[inline]
+    fn set_nonce(&mut self, nonce: u64) {
+        self.touch();
+        let previous_nonce = self.account.info.nonce;
+        self.account.info.set_nonce(nonce);
+        self.journal_entries.push(JournalEntry::NonceChange {
+            address: self.address,
+            previous_nonce,
+        });
+    }
+    #[inline]
+    fn unsafe_set_nonce(&mut self, nonce: u64) {
+        self.account.info.set_nonce(nonce);
+    }
+    #[inline]
+    fn set_code(&mut self, code_hash: B256, code: Bytecode) {
+        self.touch();
+        self.account.info.set_code_and_hash(code, code_hash);
+        self.journal_entries.push(JournalEntry::CodeChange {
+            address: self.address,
+        });
+    }
+    #[inline]
+    fn set_code_and_hash_slow(&mut self, code: Bytecode) {
+        let code_hash = code.hash_slow();
+        self.set_code(code_hash, code);
+    }
+    #[inline]
+    fn delegate(&mut self, address: Address) {
+        let (bytecode, hash) = if address.is_zero() {
+            (Bytecode::default(), KECCAK_EMPTY)
+        } else {
+            let bytecode = Bytecode::new_eip7702(address);
+            let hash = bytecode.hash_slow();
+            (bytecode, hash)
+        };
+        self.touch();
+        self.set_code(hash, bytecode);
+        self.bump_nonce();
+    }
+    #[inline]
+    fn sload(
+        &mut self,
+        key: StorageKey,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<&mut EvmStorageSlot>, JournalLoadErasedError> {
+        self.sload_concrete_error(key, skip_cold_load)
+            .map_err(|i| i.map(ErasedError::new))
+    }
+    #[inline]
+    fn sstore(
+        &mut self,
+        key: StorageKey,
+        new: StorageValue,
+        skip_cold_load: bool,
+    ) -> Result<StateLoad<SStoreResult>, JournalLoadErasedError> {
+        self.sstore_concrete_error(key, new, skip_cold_load)
+            .map_err(|i| i.map(ErasedError::new))
+    }
+    #[inline]
+    fn load_code(&mut self) -> Result<&Bytecode, JournalLoadErasedError> {
+        self.load_code_preserve_error()
+            .map_err(|i| i.map(ErasedError::new))
+    }
+}
 
 /// Forked from revm's `JournalInner` + `Journal` with fields flattened onto one struct.
 /// EIP-7708 (Amsterdam) is omitted — neither Ethereum (CANCUN) nor RISE (JOVIAN=Prague) needs it.
@@ -90,7 +522,7 @@ impl<DB: Database> Journal<DB> {
     #[inline]
     fn touch_account(journal: &mut Vec<JournalEntry>, address: Address, account: &mut Account) {
         if !account.is_touched() {
-            journal.push(JournalEntry::account_touched(address));
+            journal.push(JournalEntry::AccountTouched { address });
             account.mark_touch();
         }
     }
@@ -114,8 +546,7 @@ impl<DB: Database> Journal<DB> {
         &mut self,
         address: Address,
         skip_cold_load: bool,
-    ) -> Result<StateLoad<JournaledAccount<'_, DB, JournalEntry>>, JournalLoadError<DB::Error>>
-    {
+    ) -> Result<StateLoad<JournaledAccount<'_, DB>>, JournalLoadError<DB::Error>> {
         let (account, is_cold) = match self.state.entry(address) {
             Entry::Occupied(entry) => {
                 let account = entry.into_mut();
@@ -133,7 +564,7 @@ impl<DB: Database> Journal<DB> {
                     }
                     *account.original_info = account.info.clone();
                     account.unmark_created_locally();
-                    self.journal.push(JournalEntry::account_warmed(address));
+                    self.journal.push(JournalEntry::AccountWarmed { address });
                 }
                 (account, is_cold)
             }
@@ -151,7 +582,7 @@ impl<DB: Database> Journal<DB> {
                 };
 
                 if is_cold {
-                    self.journal.push(JournalEntry::account_warmed(address));
+                    self.journal.push(JournalEntry::AccountWarmed { address });
                 }
 
                 (vac.insert(account), is_cold)
@@ -159,42 +590,37 @@ impl<DB: Database> Journal<DB> {
         };
 
         Ok(StateLoad::new(
-            JournaledAccount::new(
+            JournaledAccount {
                 address,
                 account,
-                &mut self.journal,
-                &mut self.database,
-                self.warm_addresses.access_list(),
-                self.transaction_id,
-            ),
+                journal_entries: &mut self.journal,
+                db: &mut self.database,
+                access_list: self.warm_addresses.access_list(),
+                transaction_id: self.transaction_id,
+            },
             is_cold,
         ))
     }
 
     #[inline]
-    fn get_account_mut(
-        &mut self,
-        address: Address,
-    ) -> Option<JournaledAccount<'_, DB, JournalEntry>> {
+    fn get_account_mut(&mut self, address: Address) -> Option<JournaledAccount<'_, DB>> {
         let account = self.state.get_mut(&address)?;
-        Some(JournaledAccount::new(
+        Some(JournaledAccount {
             address,
             account,
-            &mut self.journal,
-            &mut self.database,
-            self.warm_addresses.access_list(),
-            self.transaction_id,
-        ))
+            journal_entries: &mut self.journal,
+            db: &mut self.database,
+            access_list: self.warm_addresses.access_list(),
+            transaction_id: self.transaction_id,
+        })
     }
 }
-
-// ── JournalTr implementation ─────────────────────────────────────────────────
 
 impl<DB: Database> JournalTr for Journal<DB> {
     type Database = DB;
     type State = EvmState;
     type JournaledAccount<'a>
-        = JournaledAccount<'a, DB, JournalEntry>
+        = JournaledAccount<'a, DB>
     where
         DB: 'a;
 
@@ -333,7 +759,7 @@ impl<DB: Database> JournalTr for Journal<DB> {
         *to_balance = to_balance_incr;
 
         self.journal
-            .push(JournalEntry::balance_transfer(from, to, balance));
+            .push(JournalEntry::BalanceTransfer { from, to, balance });
 
         None
     }
@@ -345,11 +771,13 @@ impl<DB: Database> JournalTr for Journal<DB> {
         old_balance: U256,
         bump_nonce: bool,
     ) {
-        self.journal
-            .push(JournalEntry::balance_changed(address, old_balance));
-        self.journal.push(JournalEntry::account_touched(address));
+        self.journal.push(JournalEntry::BalanceChange {
+            address,
+            old_balance,
+        });
+        self.journal.push(JournalEntry::AccountTouched { address });
         if bump_nonce {
-            self.journal.push(JournalEntry::nonce_bumped(address));
+            self.journal.push(JournalEntry::NonceBump { address });
         }
     }
 
@@ -364,13 +792,13 @@ impl<DB: Database> JournalTr for Journal<DB> {
 
     #[allow(deprecated)]
     fn nonce_bump_journal_entry(&mut self, address: Address) {
-        self.journal.push(JournalEntry::nonce_bumped(address));
+        self.journal.push(JournalEntry::NonceBump { address });
     }
 
     fn set_code_with_hash(&mut self, address: Address, code: Bytecode, hash: B256) {
         let account = self.state.get_mut(&address).unwrap();
         Self::touch_account(&mut self.journal, address, account);
-        self.journal.push(JournalEntry::code_changed(address));
+        self.journal.push(JournalEntry::CodeChange { address });
         account.info.code_hash = hash;
         account.info.code = Some(code);
     }
@@ -508,7 +936,10 @@ impl<DB: Database> JournalTr for Journal<DB> {
         }
 
         let is_created_globally = target_acc.mark_created_locally();
-        last_journal.push(JournalEntry::account_created(address, is_created_globally));
+        last_journal.push(JournalEntry::AccountCreated {
+            address,
+            is_created_globally,
+        });
         target_acc.info.code = None;
         if spec_id.is_enabled_in(SPURIOUS_DRAGON) {
             target_acc.info.nonce = 1;
@@ -529,7 +960,11 @@ impl<DB: Database> JournalTr for Journal<DB> {
         let caller_account = self.state.get_mut(&caller).unwrap();
         caller_account.info.balance -= balance;
 
-        last_journal.push(JournalEntry::balance_transfer(caller, address, balance));
+        last_journal.push(JournalEntry::BalanceTransfer {
+            from: caller,
+            to: address,
+            balance,
+        });
 
         Ok(checkpoint)
     }
@@ -568,15 +1003,19 @@ impl<DB: Database> JournalTr for Journal<DB> {
         let journal_entry = if acc.is_created_locally() || !is_cancun_enabled {
             acc.mark_selfdestructed_locally();
             acc.info.balance = U256::ZERO;
-            Some(JournalEntry::account_destroyed(
+            Some(JournalEntry::AccountDestroyed {
                 address,
                 target,
                 destroyed_status,
-                balance,
-            ))
+                had_balance: balance,
+            })
         } else if address != target {
             acc.info.balance = U256::ZERO;
-            Some(JournalEntry::balance_transfer(address, target, balance))
+            Some(JournalEntry::BalanceTransfer {
+                from: address,
+                to: target,
+                balance,
+            })
         } else {
             None
         };
@@ -642,9 +1081,11 @@ impl<DB: Database> JournalTr for Journal<DB> {
         };
 
         if let Some(had_value) = had_value {
-            self.journal.push(JournalEntry::transient_storage_changed(
-                address, key, had_value,
-            ));
+            self.journal.push(JournalEntry::TransientStorageChange {
+                address,
+                key,
+                had_value,
+            });
         }
     }
 }
