@@ -95,7 +95,7 @@ impl<DB: Database> Journal<DB> {
         }
     }
 
-    #[inline(never)]
+    #[inline]
     fn load_account_optional(
         &mut self,
         address: Address,
