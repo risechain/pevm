@@ -15,9 +15,8 @@ use revm::{
         },
     },
     primitives::{
-        Address, AddressMap, AddressSet, B256, Bytes, HashSet, KECCAK_EMPTY, Log, LogData,
-        StorageKey, StorageValue, U256,
-        eip7708::{BURN_LOG_TOPIC, ETH_TRANSFER_LOG_ADDRESS, ETH_TRANSFER_LOG_TOPIC},
+        Address, AddressMap, AddressSet, B256, HashSet, KECCAK_EMPTY, Log, StorageKey,
+        StorageValue, U256,
         hardfork::SpecId::{self, *},
         hints_util::unlikely,
         map::Entry,
@@ -25,39 +24,24 @@ use revm::{
     state::{Account, Bytecode, EvmState, TransientStorage},
 };
 
-/// All fields from revm's `JournalInner` flattened directly onto this struct,
-/// alongside `database`. Implements `JournalTr` with identical behavior to
-/// `revm::context::Journal<DB>` — no extra wrapping layer.
+/// Forked from revm's `JournalInner` + `Journal` with fields flattened onto one struct.
+/// EIP-7708 (Amsterdam) is omitted — neither Ethereum (CANCUN) nor RISE (JOVIAN=Prague) needs it.
+#[allow(missing_docs)]
 #[derive(Debug)]
 pub struct Journal<DB: Database> {
-    /// Database for state access.
     pub database: DB,
-    /// The current state.
     pub state: EvmState,
-    /// Transient storage (EIP-1153), discarded after every transaction.
+    /// EIP-1153 transient storage, cleared after every transaction.
     pub transient_storage: TransientStorage,
-    /// Emitted logs.
     pub logs: Vec<Log>,
-    /// Current call depth.
     pub depth: usize,
-    /// Journal of state changes for checkpoint-based revert.
     pub journal: Vec<JournalEntry>,
-    /// Number of transactions executed (including reverted).
+    /// Incremented on commit/discard so the same journal can serve multiple txs.
     pub transaction_id: usize,
-    /// Spec ID and EIP-7708 flags.
     pub cfg: JournalCfg,
-    /// Warm address tracking (coinbase, precompiles, access list).
     pub warm_addresses: WarmAddresses,
-    /// Addresses self-destructed for the first time in this transaction (EIP-7708).
-    pub selfdestructed_addresses: Vec<Address>,
 }
 
-// ── Helpers called from multiple places ──────────────────────────────────────
-//
-// These inherent methods are kept because they are called from more than one
-// `JournalTr` method (or, in the case of `new`/`finalize`, from outside the
-// trait impl as well).  Everything that has exactly one caller has been inlined
-// directly into that caller inside the `JournalTr` impl below.
 impl<DB: Database> Journal<DB> {
     pub(crate) fn new(database: DB, cfg: JournalCfg) -> Self {
         Self {
@@ -70,13 +54,11 @@ impl<DB: Database> Journal<DB> {
             transaction_id: 0,
             cfg,
             warm_addresses: WarmAddresses::new(),
-            selfdestructed_addresses: Vec::new(),
         }
     }
 
     fn finalize(&mut self) -> EvmState {
         self.warm_addresses.clear_coinbase_and_access_list();
-        self.selfdestructed_addresses.clear();
 
         let mut state = mem::take(&mut self.state);
 
@@ -106,74 +88,6 @@ impl<DB: Database> Journal<DB> {
     }
 
     #[inline]
-    fn eip7708_emit_burn_remaining_balance_logs(&mut self) {
-        if !self.cfg.spec.is_enabled_in(AMSTERDAM)
-            || self.cfg.eip7708_disabled
-            || self.cfg.eip7708_delayed_burn_disabled
-        {
-            return;
-        }
-
-        let mut addresses_with_balance: Vec<(Address, U256)> = self
-            .selfdestructed_addresses
-            .iter()
-            .filter_map(|address| {
-                self.state
-                    .get(address)
-                    .filter(|account| !account.info.balance.is_zero())
-                    .map(|account| (*address, account.info.balance))
-            })
-            .collect();
-
-        addresses_with_balance.sort_unstable_by_key(|(addr, _)| *addr);
-
-        for (address, balance) in addresses_with_balance {
-            self.eip7708_burn_log(address, balance);
-        }
-    }
-
-    #[inline]
-    fn eip7708_transfer_log(&mut self, from: Address, to: Address, balance: U256) {
-        if !self.cfg.spec.is_enabled_in(AMSTERDAM) || self.cfg.eip7708_disabled || balance.is_zero()
-        {
-            return;
-        }
-
-        let topics = vec![
-            ETH_TRANSFER_LOG_TOPIC,
-            B256::left_padding_from(from.as_slice()),
-            B256::left_padding_from(to.as_slice()),
-        ];
-        let data = Bytes::copy_from_slice(&balance.to_be_bytes::<32>());
-        self.logs.push(Log {
-            address: ETH_TRANSFER_LOG_ADDRESS,
-            data: LogData::new(topics, data).expect("3 topics is valid"),
-        });
-    }
-
-    /// Append an EIP-7708 burn log.  Called from `JournalTr::selfdestruct` and
-    /// `eip7708_emit_burn_remaining_balance_logs`.
-    #[inline]
-    fn eip7708_burn_log(&mut self, address: Address, balance: U256) {
-        if !self.cfg.spec.is_enabled_in(AMSTERDAM) || self.cfg.eip7708_disabled || balance.is_zero()
-        {
-            return;
-        }
-
-        let topics = vec![BURN_LOG_TOPIC, B256::left_padding_from(address.as_slice())];
-        let data = Bytes::copy_from_slice(&balance.to_be_bytes::<32>());
-        self.logs.push(Log {
-            address: ETH_TRANSFER_LOG_ADDRESS,
-            data: LogData::new(topics, data).expect("2 topics is valid"),
-        });
-    }
-
-    /// Touch `account` at `address`, recording a journal entry only on the
-    /// first touch.  Called from `JournalTr::touch_account`,
-    /// `JournalTr::transfer_loaded`, `JournalTr::selfdestruct`,
-    /// `JournalTr::set_code_with_hash`, and
-    /// `JournalTr::create_account_checkpoint`.
-    #[inline]
     fn touch_account(journal: &mut Vec<JournalEntry>, address: Address, account: &mut Account) {
         if !account.is_touched() {
             journal.push(JournalEntry::account_touched(address));
@@ -181,12 +95,6 @@ impl<DB: Database> Journal<DB> {
         }
     }
 
-    /// Load an account (optionally with code), optionally skipping the cold
-    /// access penalty.  Returns a shared reference inside a `StateLoad`.
-    /// Called from `JournalTr::load_account`, `JournalTr::load_account_with_code`,
-    /// `JournalTr::load_account_delegated`, `JournalTr::selfdestruct`,
-    /// `JournalTr::load_account_mut_optional_code`, and
-    /// `JournalTr::load_account_info_skip_cold_load`.
     #[inline(never)]
     fn load_account_optional(
         &mut self,
@@ -201,11 +109,6 @@ impl<DB: Database> Journal<DB> {
         Ok(load.map(|i| i.into_account()))
     }
 
-    /// Load a mutable journaled account, optionally skipping the cold access
-    /// penalty.  Called from `load_account_optional`,
-    /// `JournalTr::load_account_mut_skip_cold_load`,
-    /// `JournalTr::load_account_mut_optional_code`, and
-    /// `JournalTr::balance_incr`.
     #[inline(never)]
     fn load_account_mut_optional(
         &mut self,
@@ -308,7 +211,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
     }
 
     fn take_logs(&mut self) -> Vec<Log> {
-        self.eip7708_emit_burn_remaining_balance_logs();
         mem::take(&mut self.logs)
     }
 
@@ -327,7 +229,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
         self.warm_addresses.clear_coinbase_and_access_list();
         self.transaction_id += 1;
         self.logs.clear();
-        self.selfdestructed_addresses.clear();
     }
 
     fn discard_tx(&mut self) {
@@ -338,7 +239,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
         self.transient_storage.clear();
         self.depth = 0;
         self.logs.clear();
-        self.selfdestructed_addresses.clear();
         self.transaction_id += 1;
         self.warm_addresses.clear_coinbase_and_access_list();
     }
@@ -434,7 +334,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
 
         self.journal
             .push(JournalEntry::balance_transfer(from, to, balance));
-        self.eip7708_transfer_log(from, to, balance);
 
         None
     }
@@ -565,7 +464,7 @@ impl<DB: Database> JournalTr for Journal<DB> {
         let checkpoint = JournalCheckpoint {
             log_i: self.logs.len(),
             journal_i: self.journal.len(),
-            selfdestructed_i: self.selfdestructed_addresses.len(),
+            selfdestructed_i: 0,
         };
         self.depth += 1;
         checkpoint
@@ -581,8 +480,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
         let transient_storage = &mut self.transient_storage;
         self.depth = self.depth.saturating_sub(1);
         self.logs.truncate(checkpoint.log_i);
-        self.selfdestructed_addresses
-            .truncate(checkpoint.selfdestructed_i);
         if checkpoint.journal_i < self.journal.len() {
             self.journal
                 .drain(checkpoint.journal_i..)
@@ -633,7 +530,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
         caller_account.info.balance -= balance;
 
         last_journal.push(JournalEntry::balance_transfer(caller, address, balance));
-        self.eip7708_transfer_log(caller, address, balance);
 
         Ok(checkpoint)
     }
@@ -670,20 +566,8 @@ impl<DB: Database> JournalTr for Journal<DB> {
         let is_cancun_enabled = spec.is_enabled_in(CANCUN);
 
         let journal_entry = if acc.is_created_locally() || !is_cancun_enabled {
-            if destroyed_status == SelfdestructionRevertStatus::GloballySelfdestroyed
-                && !self.cfg.eip7708_delayed_burn_disabled
-            {
-                self.selfdestructed_addresses.push(address);
-            }
-
             acc.mark_selfdestructed_locally();
             acc.info.balance = U256::ZERO;
-
-            if target == address {
-                self.eip7708_burn_log(address, balance);
-            } else {
-                self.eip7708_transfer_log(address, target, balance);
-            }
             Some(JournalEntry::account_destroyed(
                 address,
                 target,
@@ -692,7 +576,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
             ))
         } else if address != target {
             acc.info.balance = U256::ZERO;
-            self.eip7708_transfer_log(address, target, balance);
             Some(JournalEntry::balance_transfer(address, target, balance))
         } else {
             None
