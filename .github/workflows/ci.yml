@@ -16,13 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TODO: Tighter cache control.
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo
-            ./target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: Swatinem/rust-cache@v2
 
       - uses: bnjbvr/cargo-machete@main
 
