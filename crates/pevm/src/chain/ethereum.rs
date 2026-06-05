@@ -63,8 +63,8 @@ impl PevmChain for PevmEthereum {
     type Network = alloy_provider::network::Ethereum;
     type Transaction = alloy_rpc_types_eth::Transaction;
     type Envelope = TxEnvelope;
-    type Evm<DB: Database> =
-        MainnetEvm<Context<BlockEnv, TxEnv, CfgEnv, DB, crate::journal::Journal<DB>, ()>>;
+    type PevmEvm<DB: Database> =
+        MainnetEvm<Context<BlockEnv, TxEnv, CfgEnv, DB, crate::journal::Journal<DB, true>, ()>>;
     type EvmSpecId = SpecId;
     type EvmTx = TxEnv;
     type EvmHaltReason = HaltReason;
@@ -116,12 +116,12 @@ impl PevmChain for PevmEthereum {
         })
     }
 
-    fn build_evm<DB: Database>(
+    fn build_pevm_evm<DB: Database>(
         &self,
         spec_id: Self::EvmSpecId,
         block_env: BlockEnv,
         db: DB,
-    ) -> Self::Evm<DB> {
+    ) -> Self::PevmEvm<DB> {
         let mut cfg = CfgEnv::new_with_spec(spec_id).with_chain_id(self.id);
         if spec_id >= SpecId::PRAGUE {
             cfg = cfg.with_max_blobs_per_tx(MAX_BLOB_NUMBER_PER_BLOCK_PRAGUE);
@@ -137,7 +137,7 @@ impl PevmChain for PevmEthereum {
             block: block_env,
             tx: TxEnv::default(),
             cfg,
-            journaled_state: crate::journal::Journal::new(db, journal_cfg),
+            journaled_state: crate::journal::Journal::<DB, true>::new(db, journal_cfg),
             chain: (),
             local: LocalContext::default(),
             error: Ok(()),

@@ -52,21 +52,22 @@ pub trait PevmChain: Debug {
     // TODO: Support more tx conversions
     type Envelope: Debug + From<Signed<TxLegacy>>;
 
-    /// The EVM type
-    type Evm<DB: Database>: EvmTr<
+    /// The EVM type for PEVM parallel execution — uses `Journal<DB, true>` to eliminate
+    /// dead cross-transaction warm-tracking in the Occupied account/storage paths.
+    type PevmEvm<DB: Database>: EvmTr<
             Context: ContextTr<
                 Db = DB,
                 Tx = Self::EvmTx,
-                Journal = crate::journal::Journal<DB>,
+                Journal = crate::journal::Journal<DB, true>,
                 Local: LocalContextTr,
             > + ContextSetters,
             Frame: FrameTr<FrameInit = FrameInit, FrameResult = FrameResult>,
             Precompiles: PrecompileProvider<
-                <Self::Evm<DB> as EvmTr>::Context,
+                <Self::PevmEvm<DB> as EvmTr>::Context,
                 Output = InterpreterResult,
             >,
             Instructions: InstructionProvider<
-                Context = <Self::Evm<DB> as EvmTr>::Context,
+                Context = <Self::PevmEvm<DB> as EvmTr>::Context,
                 InterpreterTypes = EthInterpreter,
             >,
         > + ExecuteEvm<
@@ -115,13 +116,13 @@ pub trait PevmChain: Debug {
     /// Get block's spec id
     fn get_block_spec(&self, header: &Header) -> Result<Self::EvmSpecId, Self::BlockSpecError>;
 
-    /// Get `Self::Evm`
-    fn build_evm<DB: Database>(
+    /// Get `Self::PevmEvm`
+    fn build_pevm_evm<DB: Database>(
         &self,
         spec_id: Self::EvmSpecId,
         block_env: BlockEnv,
         db: DB,
-    ) -> Self::Evm<DB>;
+    ) -> Self::PevmEvm<DB>;
 
     /// Get `Self::EvmTx`
     fn get_tx_env(
@@ -135,7 +136,7 @@ pub trait PevmChain: Debug {
     /// Whether this transaction has a nonce. Return false for types that have no nonce
     /// (e.g. OP deposits) so pevm's sender-nonce ordering check is skipped. Implementations
     /// may also adjust EVM cfg as a side effect (e.g. setting `disable_nonce_check`).
-    fn has_nonce<DB: Database>(&self, _: &mut Self::Evm<DB>, _: &Self::EvmTx) -> bool {
+    fn has_nonce<DB: Database>(&self, _: &mut Self::PevmEvm<DB>, _: &Self::EvmTx) -> bool {
         true
     }
 

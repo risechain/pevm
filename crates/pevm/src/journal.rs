@@ -462,7 +462,7 @@ impl<'a, DB: Database> JournaledAccountTr for JournaledAccount<'a, DB> {
 /// EIP-7708 (Amsterdam) is omitted — neither Ethereum (CANCUN) nor RISE (JOVIAN=Prague) needs it.
 #[allow(missing_docs)]
 #[derive(Debug)]
-pub struct Journal<DB: Database> {
+pub struct Journal<DB: Database, const IS_PEVM: bool = false> {
     pub database: DB,
     pub state: EvmState,
     /// EIP-1153 transient storage, cleared after every transaction.
@@ -474,11 +474,9 @@ pub struct Journal<DB: Database> {
     pub transaction_id: usize,
     pub cfg: JournalCfg,
     pub warm_addresses: WarmAddresses,
-    /// True when running inside pevm's parallel execution path.
-    pub is_pevm: bool,
 }
 
-impl<DB: Database> Journal<DB> {
+impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
     pub(crate) fn new(database: DB, cfg: JournalCfg) -> Self {
         Self {
             database,
@@ -490,7 +488,6 @@ impl<DB: Database> Journal<DB> {
             transaction_id: 0,
             cfg,
             warm_addresses: WarmAddresses::new(),
-            is_pevm: false,
         }
     }
 
@@ -621,7 +618,7 @@ impl<DB: Database> Journal<DB> {
     }
 }
 
-impl<DB: Database> JournalTr for Journal<DB> {
+impl<DB: Database, const IS_PEVM: bool> JournalTr for Journal<DB, IS_PEVM> {
     type Database = DB;
     type State = EvmState;
     type JournaledAccount<'a>
@@ -679,7 +676,20 @@ impl<DB: Database> JournalTr for Journal<DB> {
     }
 
     fn clear(&mut self) {
-        self.finalize();
+        if IS_PEVM {
+            // State is either already empty (taken by finalize on success) or leftover from
+            // a failed tx. Either way, clear in-place to retain heap allocations for reuse.
+            // Pre-Spurious-Dragon fixup in finalize() is irrelevant — state is being discarded.
+            self.state.clear();
+            self.warm_addresses.clear_coinbase_and_access_list();
+            self.logs.clear();
+            self.transient_storage.clear();
+            self.journal.clear();
+            self.depth = 0;
+            self.transaction_id = 0;
+        } else {
+            self.finalize();
+        }
     }
 
     fn depth(&self) -> usize {
