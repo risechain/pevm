@@ -1,0 +1,46 @@
+[package]
+edition = "2021"
+name = "revm-handler"
+version = "18.1.0"
+
+[features]
+default = ["std"]
+serde = [
+  "dep:serde",
+  "primitives/serde",
+  "state/serde",
+  "context-interface/serde",
+  "bytecode/serde",
+  "context/serde",
+  "database-interface/serde",
+  "interpreter/serde",
+  "derive-where/serde",
+]
+std = [
+  "serde?/std",
+  "bytecode/std",
+  "context/std",
+  "context-interface/std",
+  "database-interface/std",
+  "interpreter/std",
+  "precompile/std",
+  "primitives/std",
+  "state/std",
+]
+
+[dependencies]
+auto_impl = "1.3.0"
+bytecode = { package = "revm-bytecode", version = "10.0.0", default-features = false }
+context = { package = "revm-context", version = "16.0.1", default-features = false }
+context-interface = { package = "revm-context-interface", version = "17.0.1", default-features = false }
+database-interface = { package = "revm-database-interface", version = "11.0.1", default-features = false }
+derive-where = { version = "1.6", default-features = false }
+interpreter = { package = "revm-interpreter", version = "35.0.1", default-features = false }
+precompile = { package = "revm-precompile", version = "34.0.0", default-features = false }
+primitives = { package = "revm-primitives", version = "23.0.0", default-features = false }
+state = { package = "revm-state", version = "11.0.1", default-features = false }
+
+serde = { version = "1.0", default-features = false, features = [
+  "derive",
+  "rc",
+], optional = true }

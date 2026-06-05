@@ -215,10 +215,14 @@ macro_rules! index_mutex {
 }
 
 /// Address-keyed map using alloy's fixed-size hasher optimized for 20-byte keys.
-pub type AddressMap<V> = std::collections::HashMap<alloy_primitives::Address, V, alloy_primitives::map::FbBuildHasher<20>>;
+pub type AddressMap<V> = std::collections::HashMap<
+    alloy_primitives::Address,
+    V,
+    alloy_primitives::map::FbBuildHasher<20>,
+>;
 
 /// EVM state after execution: mapping from addresses to accounts.
-/// Cannot be a newtype — revm's EVM builder traits require JournalTr::State = AddressMap<Account>.
+/// Cannot be a newtype — revm's EVM builder traits require `JournalTr::State` = `AddressMap`<Account>.
 pub type EvmState = AddressMap<revm::state::Account>;
 
 pub mod chain;

@@ -3,6 +3,7 @@
 use std::fmt::Debug;
 use std::{error::Error as StdError, fmt::Display};
 
+use crate::EvmState;
 use alloy_consensus::{Signed, TxLegacy, transaction::Recovered};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header, Transaction};
@@ -15,7 +16,6 @@ use revm::interpreter::InterpreterResult;
 use revm::interpreter::interpreter::EthInterpreter;
 use revm::interpreter::interpreter_action::FrameInit;
 use revm::primitives::hardfork::SpecId;
-use crate::EvmState;
 use revm::{
     Database, ExecuteEvm,
     context::{
