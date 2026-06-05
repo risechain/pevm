@@ -15,7 +15,7 @@ use revm::interpreter::InterpreterResult;
 use revm::interpreter::interpreter::EthInterpreter;
 use revm::interpreter::interpreter_action::FrameInit;
 use revm::primitives::hardfork::SpecId;
-use revm::state::EvmState;
+use crate::EvmState;
 use revm::{
     Database, ExecuteEvm,
     context::{

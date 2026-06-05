@@ -14,14 +14,16 @@ use revm::{
         },
     },
     primitives::{
-        Address, AddressMap, AddressSet, B256, HashSet, KECCAK_EMPTY, Log, PRECOMPILE3, StorageKey,
+        Address, AddressSet, B256, HashSet, KECCAK_EMPTY, Log, PRECOMPILE3, StorageKey,
         StorageValue, U256,
         hardfork::SpecId::{self, *},
         hints_util::unlikely,
         map::Entry,
     },
-    state::{Account, Bytecode, EvmState, EvmStorageSlot, TransientStorage},
+    state::{Account, Bytecode, EvmStorageSlot, TransientStorage},
 };
+
+use crate::{AddressMap, EvmState};
 
 /// Status of selfdestruction revert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
