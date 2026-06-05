@@ -8,7 +8,7 @@ use alloy_consensus::{Signed, TxLegacy, transaction::Recovered};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header, Transaction};
 use revm::context::result::HaltReason;
-use revm::context::{ContextSetters, JournalTr, TxEnv};
+use revm::context::{ContextSetters, TxEnv};
 use revm::context_interface::LocalContextTr;
 use revm::handler::instructions::InstructionProvider;
 use revm::handler::{EvmTr, FrameResult, FrameTr, PrecompileProvider};
@@ -57,7 +57,7 @@ pub trait PevmChain: Debug {
             Context: ContextTr<
                 Db = DB,
                 Tx = Self::EvmTx,
-                Journal: JournalTr<State = EvmState>,
+                Journal = crate::journal::Journal<DB>,
                 Local: LocalContextTr,
             > + ContextSetters,
             Frame: FrameTr<FrameInit = FrameInit, FrameResult = FrameResult>,

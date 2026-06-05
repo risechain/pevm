@@ -516,7 +516,11 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             beneficiary_location_hash: hash_deterministic(MemoryLocation::Basic(
                 block_env.beneficiary,
             )),
-            evm: chain.build_evm(spec_id, block_env.clone(), db),
+            evm: {
+                let mut evm = chain.build_evm(spec_id, block_env.clone(), db);
+                evm.ctx_mut().journal_mut().is_pevm = true;
+                evm
+            },
         }
     }
 

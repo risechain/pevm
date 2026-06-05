@@ -474,6 +474,8 @@ pub struct Journal<DB: Database> {
     pub transaction_id: usize,
     pub cfg: JournalCfg,
     pub warm_addresses: WarmAddresses,
+    /// True when running inside pevm's parallel execution path.
+    pub is_pevm: bool,
 }
 
 impl<DB: Database> Journal<DB> {
@@ -488,6 +490,7 @@ impl<DB: Database> Journal<DB> {
             transaction_id: 0,
             cfg,
             warm_addresses: WarmAddresses::new(),
+            is_pevm: false,
         }
     }
 
