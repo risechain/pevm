@@ -40,6 +40,12 @@ use crate::{FinishExecFlags, IncarnationStatus, Task, TxIdx, TxStatus, TxVersion
 pub(crate) struct Scheduler {
     // The number of transactions in this block.
     block_size: usize,
+    // Total worker threads; used to compute how many are still active.
+    num_threads: usize,
+    // Threads that have exited next_task. A thread may exit early only
+    // when at least `remaining` threads will still be alive after it leaves,
+    // so a cascade re-execution has enough parallelism to resolve.
+    exited_threads: AtomicUsize,
     // The most up-to-date incarnation number (initially 0) and
     // the status of this incarnation.
     // TODO: Consider packing [TxStatus]s into atomics instead of
@@ -65,9 +71,11 @@ pub(crate) struct Scheduler {
 // TODO: Better error handling.
 // Like returning errors instead of panicking on [unreachable]s.
 impl Scheduler {
-    pub(crate) fn new(block_size: usize) -> Self {
+    pub(crate) fn new(block_size: usize, num_threads: usize) -> Self {
         Self {
             block_size,
+            num_threads,
+            exited_threads: AtomicUsize::new(0),
             execution_idx: AtomicUsize::new(0),
             transactions_status: (0..block_size)
                 .map(|_| {
@@ -110,8 +118,20 @@ impl Scheduler {
             let execution_idx = self.execution_idx.load(Ordering::Relaxed);
             let validation_idx = self.validation_idx.load(Ordering::Relaxed);
             if execution_idx >= self.block_size && validation_idx >= self.block_size {
-                if self.num_validated.load(Ordering::Relaxed)
-                    >= self.block_size - self.min_validation_idx.load(Ordering::Relaxed)
+                let remaining = self
+                    .block_size
+                    .saturating_sub(self.num_validated.load(Ordering::Relaxed));
+
+                // Allow early exit only if enough threads stay alive for the
+                // remaining work. A re-execution cascade can drive validation_idx
+                // below block_size, which re-wakes any still-spinning threads.
+                if remaining == 0
+                    || self
+                        .exited_threads
+                        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |exited| {
+                            (self.num_threads - exited > remaining).then_some(exited + 1)
+                        })
+                        .is_ok()
                 {
                     break;
                 }

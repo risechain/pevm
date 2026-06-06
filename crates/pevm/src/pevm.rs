@@ -222,7 +222,7 @@ impl Pevm {
         }
 
         let block_size = txs.len();
-        let scheduler = Scheduler::new(block_size);
+        let scheduler = Scheduler::new(block_size, concurrency_level.into());
 
         let mv_memory = chain.build_mv_memory(&block_env, &txs);
 
