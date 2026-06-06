@@ -139,18 +139,21 @@ pub trait PevmChain: Debug {
         true
     }
 
-    /// Build [`MvMemory`]
-    fn build_mv_memory(&self, _block_env: &BlockEnv, txs: &[Self::EvmTx]) -> MvMemory {
-        MvMemory::new(txs.len(), [], [])
+    /// Build [`MvMemory`]. `seed` is the per-execution random seed that must be
+    /// mixed into every location hash & tag (see [`crate::hash_deterministic`]).
+    fn build_mv_memory(&self, _block_env: &BlockEnv, txs: &[Self::EvmTx], seed: u64) -> MvMemory {
+        MvMemory::new(seed, txs.len(), [], [])
     }
 
-    /// Get rewards (balance increments) to beneficiary accounts, etc.
+    /// Get rewards (balance increments) to beneficiary accounts, etc. `seed` is
+    /// needed to derive the hash of any chain-specific fee recipients.
     fn get_rewards(
         &self,
-        beneficiary_location_hash: u64,
+        beneficiary_location_hash: MemoryLocationHash,
         gas_used: U256,
         gas_price: U256,
         basefee: u64,
+        seed: u64,
         tx: &Self::EvmTx,
     ) -> SmallVec<[(MemoryLocationHash, U256); 1]>;
 

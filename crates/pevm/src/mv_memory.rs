@@ -39,10 +39,14 @@ pub struct MvMemory {
     lazy_addresses: Mutex<LazyAddresses>,
     /// New bytecodes deployed in this block
     pub(crate) new_bytecodes: DashMap<B256, Bytecode, BuildSuffixHasher>,
+    /// Per-execution random seed mixed into every location hash & tag. Unknown to
+    /// transaction submitters until the block runs, so collisions cannot be aimed at.
+    pub(crate) seed: u64,
 }
 
 impl MvMemory {
     pub(crate) fn new(
+        seed: u64,
         block_size: usize,
         estimated_locations: impl IntoIterator<Item = (MemoryLocationHash, Vec<TxIdx>)>,
         lazy_addresses: impl IntoIterator<Item = Address>,
@@ -70,6 +74,7 @@ impl MvMemory {
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DashMap::default(),
+            seed,
         }
     }
 

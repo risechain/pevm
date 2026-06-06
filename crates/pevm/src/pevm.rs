@@ -1,6 +1,7 @@
 use std::{
     cell::UnsafeCell,
     fmt::Debug,
+    hash::{BuildHasher, RandomState},
     num::NonZeroUsize,
     sync::{OnceLock, mpsc},
     thread,
@@ -224,7 +225,13 @@ impl Pevm {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
 
-        let mv_memory = chain.build_mv_memory(&block_env, &txs);
+        // A per-execution random seed mixed into every location hash & tag. It is
+        // unknown to transaction submitters until the block runs, so hash collisions
+        // cannot be crafted to target this block. The seed never escapes into the
+        // results (state is keyed by real addresses), so output is identical for any
+        // seed. We derive a u64 from the OS-seeded [RandomState] to avoid a dependency.
+        let seed = RandomState::new().hash_one(0u8);
+        let mv_memory = chain.build_mv_memory(&block_env, &txs, seed);
 
         self.execution_results.grow_to(block_size);
 
@@ -288,7 +295,7 @@ impl Pevm {
         // We fully evaluate (the balance and nonce of) the beneficiary account
         // and raw transfer recipients that may have been atomically updated.
         for address in mv_memory.consume_lazy_addresses() {
-            let location_hash = hash_deterministic(MemoryLocation::Basic(address));
+            let location_hash = hash_deterministic(MemoryLocation::Basic(address), mv_memory.seed);
             if let Some(write_history) = mv_memory.data.get(&location_hash) {
                 let mut balance = U256::ZERO;
                 let mut nonce = 0;

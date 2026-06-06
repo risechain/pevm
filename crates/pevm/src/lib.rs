@@ -41,7 +41,13 @@ enum MemoryLocation {
 // We then identify the locations with its hash in the multi-version
 // data, write and read sets, which is much faster than rehashing
 // on every single lookup & validation.
-type MemoryLocationHash = u64;
+//
+// This is 128 bits wide so that distinct locations practically never collide
+// (birthday bound ~2^64). Because this hash is also the key of the multi-version
+// data, a collision would silently merge two locations into one entry; a 128-bit
+// key makes the map's own key comparison a reliable identity check. See
+// [hash_deterministic] for how the two halves are derived.
+type MemoryLocationHash = u128;
 
 /// This is primarily used for memory location hash, but can also be used for
 /// transaction indexes, etc.
@@ -50,6 +56,11 @@ pub struct IdentityHasher(u64);
 impl Hasher for IdentityHasher {
     fn write_u64(&mut self, id: u64) {
         self.0 = id;
+    }
+    fn write_u128(&mut self, id: u128) {
+        // Use the low 64 bits as the bucket hash. The full 128-bit key is still
+        // compared for equality by the map, so this only affects bucket spread.
+        self.0 = id as u64;
     }
     fn write_usize(&mut self, id: usize) {
         self.0 = id as u64;
@@ -65,11 +76,17 @@ impl Hasher for IdentityHasher {
 /// Build an identity hasher
 pub type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 
-// TODO: Ensure it's not easy to hand-craft transactions and storage slots
-// that can cause a lot of collisions that destroys pevm's performance.
+// Hash a memory location into a 128-bit value, mixed with a per-execution random
+// [seed]. The result is built from two FxHash passes over the same location with
+// decorrelated seeds (`seed` and `!seed`) forming the low and high 64 bits, so the
+// two halves collide independently and the full 128-bit value only collides at
+// ~2^-128. The seed also makes collisions impossible for an attacker to aim at, as
+// it is unknown until the block runs.
 #[inline(always)]
-fn hash_deterministic<T: Hash>(x: T) -> u64 {
-    FxBuildHasher.hash_one(x)
+fn hash_deterministic<T: Hash>(x: T, seed: u64) -> MemoryLocationHash {
+    let low = FxBuildHasher.hash_one((seed, &x));
+    let high = FxBuildHasher.hash_one((!seed, &x));
+    (u128::from(high) << 64) | u128::from(low)
 }
 
 // TODO: It would be nice if we could tie the different cases of

@@ -163,10 +163,10 @@ impl PevmChain for PevmEthereum {
         tx
     }
 
-    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
+    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv], seed: u64) -> MvMemory {
         let block_size = txs.len();
         let beneficiary_location_hash =
-            hash_deterministic(MemoryLocation::Basic(block_env.beneficiary));
+            hash_deterministic(MemoryLocation::Basic(block_env.beneficiary), seed);
 
         // TODO: Estimate more locations based on sender, to, etc.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
@@ -175,14 +175,20 @@ impl PevmChain for PevmEthereum {
             (0..block_size).collect::<Vec<TxIdx>>(),
         );
 
-        MvMemory::new(block_size, estimated_locations, [block_env.beneficiary])
+        MvMemory::new(
+            seed,
+            block_size,
+            estimated_locations,
+            [block_env.beneficiary],
+        )
     }
 
     fn get_rewards(
         &self,
-        beneficiary_location_hash: u64,
+        beneficiary_location_hash: MemoryLocationHash,
         gas_used: U256,
         gas_price: U256,
+        _: u64,
         _: u64,
         _: &Self::EvmTx,
     ) -> SmallVec<[(MemoryLocationHash, U256); 1]> {
