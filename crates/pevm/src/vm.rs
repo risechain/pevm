@@ -14,9 +14,10 @@ use revm::{
 use smallvec::SmallVec;
 
 use crate::{
-    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
-    MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
-    TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
+    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, LocationTag,
+    MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet,
+    Storage, TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
+    tag_deterministic,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -182,7 +183,7 @@ impl<'a, S: Storage> VmDb<'a, S> {
         {
             return self.to_hash.unwrap();
         }
-        hash_deterministic(MemoryLocation::Basic(*address))
+        hash_deterministic(MemoryLocation::Basic(*address), self.mv_memory.seed)
     }
 
     // Push a new read origin. Return an error when there's already
@@ -199,15 +200,20 @@ impl<'a, S: Storage> VmDb<'a, S> {
     }
 
     fn get_code_hash(&mut self, address: Address) -> Result<Option<B256>, ReadError> {
-        let location_hash = hash_deterministic(MemoryLocation::CodeHash(address));
+        let seed = self.mv_memory.seed;
+        let location_hash = hash_deterministic(MemoryLocation::CodeHash(address), seed);
+        let location_tag = tag_deterministic(MemoryLocation::CodeHash(address), seed);
         let read_origins = self.read_set.entry(location_hash).or_default();
 
         // Try to read the latest code hash in [MvMemory]
         // TODO: Memoize read locations (expected to be small) here in [Vm] to avoid
         // contention in [MvMemory]
         if let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
-            && let Some((tx_idx, MemoryEntry::Data(tx_incarnation, value))) =
-                written_transactions.range(..self.tx_idx).next_back()
+            && let Some((tx_idx, MemoryEntry::Data(tx_incarnation, _, value))) =
+                written_transactions
+                    .range(..self.tx_idx)
+                    .rev()
+                    .find(|(_, entry)| entry.tag() == location_tag)
         {
             match value {
                 MemoryValue::SelfDestructed => {
@@ -240,6 +246,7 @@ impl<S: Storage> Database for VmDb<'_, S> {
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let location_hash = self.hash_basic(&address);
+        let location_tag = tag_deterministic(MemoryLocation::Basic(address), self.mv_memory.seed);
 
         // We return a mock for non-contract addresses (for lazy updates) to avoid
         // unnecessarily evaluating its balance here.
@@ -279,10 +286,12 @@ impl<S: Storage> Database for VmDb<'_, S> {
             // Fully evaluate lazy updates
             loop {
                 match iter.next_back() {
-                    Some((blocking_idx, MemoryEntry::Estimate)) => {
+                    // Skip entries belonging to a colliding neighbor location.
+                    Some((_, entry)) if entry.tag() != location_tag => continue,
+                    Some((blocking_idx, MemoryEntry::Estimate(_))) => {
                         return Err(ReadError::Blocking(*blocking_idx));
                     }
-                    Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                    Some((closest_idx, MemoryEntry::Data(tx_incarnation, _, value))) => {
                         // About to push a new origin
                         // Inconsistent: new origin will be longer than the previous!
                         if has_prev_origins && read_origins.len() == new_origins.len() {
@@ -427,18 +436,22 @@ impl<S: Storage> Database for VmDb<'_, S> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        let location_hash = hash_deterministic(MemoryLocation::Storage(address, index));
+        let seed = self.mv_memory.seed;
+        let location_hash = hash_deterministic(MemoryLocation::Storage(address, index), seed);
+        let location_tag = tag_deterministic(MemoryLocation::Storage(address, index), seed);
 
         let read_origins = self.read_set.entry(location_hash).or_default();
 
         // Try reading from multi-version data
         if self.tx_idx > 0
             && let Some(written_transactions) = self.mv_memory.data.get(&location_hash)
-            && let Some((closest_idx, entry)) =
-                written_transactions.range(..self.tx_idx).next_back()
+            && let Some((closest_idx, entry)) = written_transactions
+                .range(..self.tx_idx)
+                .rev()
+                .find(|(_, entry)| entry.tag() == location_tag)
         {
             match entry {
-                MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
+                MemoryEntry::Data(tx_incarnation, _, MemoryValue::Storage(value)) => {
                     Self::push_origin(
                         read_origins,
                         ReadOrigin::MvMemory(TxVersion {
@@ -448,7 +461,7 @@ impl<S: Storage> Database for VmDb<'_, S> {
                     )?;
                     return Ok(*value);
                 }
-                MemoryEntry::Estimate => return Err(ReadError::Blocking(*closest_idx)),
+                MemoryEntry::Estimate(_) => return Err(ReadError::Blocking(*closest_idx)),
                 _ => return Err(ReadError::InvalidMemoryValueType),
             }
         }
@@ -476,6 +489,7 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     txs: &'a [C::EvmTx],
     mv_memory: &'a MvMemory,
     beneficiary_location_hash: MemoryLocationHash,
+    beneficiary_location_tag: LocationTag,
     // Dedicated EVM for the worker, reset before each transaction exectution.
     evm: C::Evm<VmDb<'a, S>>,
 }
@@ -513,9 +527,14 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             block_env,
             txs,
             mv_memory,
-            beneficiary_location_hash: hash_deterministic(MemoryLocation::Basic(
-                block_env.beneficiary,
-            )),
+            beneficiary_location_hash: hash_deterministic(
+                MemoryLocation::Basic(block_env.beneficiary),
+                mv_memory.seed,
+            ),
+            beneficiary_location_tag: tag_deterministic(
+                MemoryLocation::Basic(block_env.beneficiary),
+                mv_memory.seed,
+            ),
             evm: chain.build_evm(spec_id, block_env.clone(), db),
         }
     }
@@ -545,11 +564,12 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         let full_tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
         let tx = self.chain.tx_env(full_tx);
 
-        let from_hash = hash_deterministic(MemoryLocation::Basic(tx.caller));
+        let seed = self.mv_memory.seed;
+        let from_hash = hash_deterministic(MemoryLocation::Basic(tx.caller), seed);
         let to_hash = tx
             .kind
             .to()
-            .map(|to| hash_deterministic(MemoryLocation::Basic(*to)));
+            .map(|to| hash_deterministic(MemoryLocation::Basic(*to), seed));
 
         let has_nonce = self.chain.has_nonce(&mut self.evm, full_tx);
 
@@ -584,7 +604,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         // For now we are betting on [code_hash] triggering the sequential
                         // fallback when we read a self-destructed contract.
                         write_set.push((
-                            hash_deterministic(MemoryLocation::CodeHash(*address)),
+                            hash_deterministic(MemoryLocation::CodeHash(*address), seed),
+                            tag_deterministic(MemoryLocation::CodeHash(*address), seed),
                             MemoryValue::SelfDestructed,
                         ));
                         continue;
@@ -592,7 +613,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
                     if account.is_touched() {
                         let account_location_hash =
-                            hash_deterministic(MemoryLocation::Basic(*address));
+                            hash_deterministic(MemoryLocation::Basic(*address), seed);
+                        let account_location_tag =
+                            tag_deterministic(MemoryLocation::Basic(*address), seed);
                         let read_account = ctx.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
@@ -611,11 +634,13 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                 if account_location_hash == from_hash {
                                     write_set.push((
                                         account_location_hash,
+                                        account_location_tag,
                                         MemoryValue::LazySender(U256::MAX - account.info.balance),
                                     ));
                                 } else if Some(account_location_hash) == to_hash {
                                     write_set.push((
                                         account_location_hash,
+                                        account_location_tag,
                                         MemoryValue::LazyRecipient(tx.value),
                                     ));
                                 }
@@ -631,6 +656,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             else if !self.is_eip_161_enabled || !account.is_empty() {
                                 write_set.push((
                                     account_location_hash,
+                                    account_location_tag,
                                     MemoryValue::Basic(AccountBasic {
                                         balance: account.info.balance,
                                         nonce: account.info.nonce,
@@ -642,7 +668,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         // Write new contract
                         if is_new_code {
                             write_set.push((
-                                hash_deterministic(MemoryLocation::CodeHash(*address)),
+                                hash_deterministic(MemoryLocation::CodeHash(*address), seed),
+                                tag_deterministic(MemoryLocation::CodeHash(*address), seed),
                                 MemoryValue::CodeHash(account.info.code_hash),
                             ));
                             self.mv_memory
@@ -655,7 +682,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     // TODO: We should move this changed check to our read set like for account info?
                     for (slot, value) in account.changed_storage_slots() {
                         write_set.push((
-                            hash_deterministic(MemoryLocation::Storage(*address, *slot)),
+                            hash_deterministic(MemoryLocation::Storage(*address, *slot), seed),
+                            tag_deterministic(MemoryLocation::Storage(*address, *slot), seed),
                             MemoryValue::Storage(value.present_value),
                         ));
                     }
@@ -674,16 +702,20 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     gas_price = gas_price.saturating_sub(self.block_env.basefee as u128);
                 }
                 let rewards = self.chain.get_rewards(
-                    self.beneficiary_location_hash,
+                    (
+                        self.beneficiary_location_hash,
+                        self.beneficiary_location_tag,
+                    ),
                     U256::from(exec_result.tx_gas_used()),
                     U256::from(gas_price),
                     self.block_env.basefee,
+                    seed,
                     full_tx,
                 );
-                for (recipient, amount) in rewards {
-                    if let Some((_, value)) = write_set
+                for (recipient, recipient_tag, amount) in rewards {
+                    if let Some((_, _, value)) = write_set
                         .iter_mut()
-                        .find(|(location, _)| location == &recipient)
+                        .find(|(location, _, _)| *location == recipient)
                     {
                         match value {
                             MemoryValue::Basic(basic) => {
@@ -698,7 +730,11 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             _ => return Err(ReadError::InvalidMemoryValueType.into()),
                         }
                     } else {
-                        write_set.push((recipient, MemoryValue::LazyRecipient(amount)));
+                        write_set.push((
+                            recipient,
+                            recipient_tag,
+                            MemoryValue::LazyRecipient(amount),
+                        ));
                     }
                 }
 

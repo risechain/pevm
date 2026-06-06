@@ -8,15 +8,16 @@ use dashmap::DashMap;
 use revm::state::Bytecode;
 
 use crate::{
-    BuildIdentityHasher, BuildSuffixHasher, MemoryEntry, MemoryLocationHash, ReadOrigin, ReadSet,
-    TxIdx, TxVersion, WriteSet,
+    BuildIdentityHasher, BuildSuffixHasher, LocationTag, MemoryEntry, MemoryLocationHash,
+    ReadOrigin, ReadSet, TxIdx, TxVersion, WriteSet,
 };
 
 #[derive(Default, Debug)]
 struct LastLocations {
     read: ReadSet,
+    // The hash (map key) and tag of each location this transaction last wrote to.
     // Consider [SmallVec] since most transactions explicitly write to 2 locations!
-    write: Vec<MemoryLocationHash>,
+    write: Vec<(MemoryLocationHash, LocationTag)>,
 }
 
 type LazyAddresses = HashSet<Address, BuildSuffixHasher>;
@@ -39,12 +40,16 @@ pub struct MvMemory {
     lazy_addresses: Mutex<LazyAddresses>,
     /// New bytecodes deployed in this block
     pub(crate) new_bytecodes: DashMap<B256, Bytecode, BuildSuffixHasher>,
+    /// Per-execution random seed mixed into every location hash & tag. Unknown to
+    /// transaction submitters until the block runs, so collisions cannot be aimed at.
+    pub(crate) seed: u64,
 }
 
 impl MvMemory {
     pub(crate) fn new(
+        seed: u64,
         block_size: usize,
-        estimated_locations: impl IntoIterator<Item = (MemoryLocationHash, Vec<TxIdx>)>,
+        estimated_locations: impl IntoIterator<Item = (MemoryLocationHash, LocationTag, Vec<TxIdx>)>,
         lazy_addresses: impl IntoIterator<Item = Address>,
     ) -> Self {
         // TODO: Fine-tune the number of shards, like to the next number of two from the
@@ -54,12 +59,12 @@ impl MvMemory {
         // while holding a write lock. Ideally [dashmap] would have a lock-free
         // construction API. This is acceptable for now as it's a non-congested one-time
         // cost.
-        for (location_hash, estimated_tx_idxs) in estimated_locations {
+        for (location_hash, location_tag, estimated_tx_idxs) in estimated_locations {
             data.insert(
                 location_hash,
                 estimated_tx_idxs
                     .into_iter()
-                    .map(|tx_idx| (tx_idx, MemoryEntry::Estimate))
+                    .map(|tx_idx| (tx_idx, MemoryEntry::Estimate(location_tag)))
                     .collect(),
             );
         }
@@ -70,6 +75,7 @@ impl MvMemory {
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DashMap::default(),
+            seed,
         }
     }
 
@@ -97,9 +103,9 @@ impl MvMemory {
         // Remove old locations that aren't written to anymore.
         let mut last_location_idx = 0;
         while last_location_idx < last_locations.write.len() {
-            let prev_location = unsafe { last_locations.write.get_unchecked(last_location_idx) };
-            if write_set.iter().all(|(l, _)| l != prev_location) {
-                if let Some(mut written_transactions) = self.data.get_mut(prev_location) {
+            let prev_location = unsafe { *last_locations.write.get_unchecked(last_location_idx) };
+            if write_set.iter().all(|(l, t, _)| (*l, *t) != prev_location) {
+                if let Some(mut written_transactions) = self.data.get_mut(&prev_location.0) {
                     written_transactions.remove(&tx_version.tx_idx);
                 }
                 last_locations.write.swap_remove(last_location_idx);
@@ -111,13 +117,17 @@ impl MvMemory {
         // Register new writes.
         let mut wrote_new_location = false;
 
-        for (location, value) in write_set {
+        for (location, tag, value) in write_set {
             self.data.entry(location).or_default().insert(
                 tx_version.tx_idx,
-                MemoryEntry::Data(tx_version.tx_incarnation, value),
+                MemoryEntry::Data(tx_version.tx_incarnation, tag, value),
             );
-            if !last_locations.write.contains(&location) {
-                last_locations.write.push(location);
+            if !last_locations
+                .write
+                .iter()
+                .any(|(l, t)| *l == location && *t == tag)
+            {
+                last_locations.write.push((location, tag));
                 wrote_new_location = true;
             }
         }
@@ -179,9 +189,9 @@ impl MvMemory {
     // structure with special ESTIMATE markers to quickly abort higher transactions
     // that read them.
     pub(crate) fn convert_writes_to_estimates(&self, tx_idx: TxIdx) {
-        for location in &index_mutex!(self.last_locations, tx_idx).write {
+        for (location, tag) in &index_mutex!(self.last_locations, tx_idx).write {
             if let Some(mut written_transactions) = self.data.get_mut(location) {
-                written_transactions.insert(tx_idx, MemoryEntry::Estimate);
+                written_transactions.insert(tx_idx, MemoryEntry::Estimate(*tag));
             }
         }
     }

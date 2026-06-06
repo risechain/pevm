@@ -1,6 +1,7 @@
 use std::{
     cell::UnsafeCell,
     fmt::Debug,
+    hash::{BuildHasher, RandomState},
     num::NonZeroUsize,
     sync::{OnceLock, mpsc},
     thread,
@@ -27,6 +28,7 @@ use crate::{
     mv_memory::MvMemory,
     scheduler::Scheduler,
     storage::StorageWrapper,
+    tag_deterministic,
     vm::{
         ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, receipt_from_revm,
         state_transitions_from_revm,
@@ -224,7 +226,13 @@ impl Pevm {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
 
-        let mv_memory = chain.build_mv_memory(&block_env, &txs);
+        // A per-execution random seed mixed into every location hash & tag. It is
+        // unknown to transaction submitters until the block runs, so hash collisions
+        // cannot be crafted to target this block. The seed never escapes into the
+        // results (state is keyed by real addresses), so output is identical for any
+        // seed. We derive a u64 from the OS-seeded [RandomState] to avoid a dependency.
+        let seed = RandomState::new().hash_one(0u8);
+        let mv_memory = chain.build_mv_memory(&block_env, &txs, seed);
 
         self.execution_results.grow_to(block_size);
 
@@ -288,14 +296,16 @@ impl Pevm {
         // We fully evaluate (the balance and nonce of) the beneficiary account
         // and raw transfer recipients that may have been atomically updated.
         for address in mv_memory.consume_lazy_addresses() {
-            let location_hash = hash_deterministic(MemoryLocation::Basic(address));
+            let location_hash = hash_deterministic(MemoryLocation::Basic(address), mv_memory.seed);
+            let location_tag = tag_deterministic(MemoryLocation::Basic(address), mv_memory.seed);
             if let Some(write_history) = mv_memory.data.get(&location_hash) {
                 let mut balance = U256::ZERO;
                 let mut nonce = 0;
-                // Read from storage if the first multi-version entry is not an absolute value.
+                // Read from storage if the first multi-version entry of this location
+                // (skipping any colliding neighbor) is not an absolute value.
                 if !matches!(
-                    write_history.first_key_value(),
-                    Some((_, MemoryEntry::Data(_, MemoryValue::Basic(_))))
+                    write_history.iter().find(|(_, e)| e.tag() == location_tag),
+                    Some((_, MemoryEntry::Data(_, _, MemoryValue::Basic(_))))
                 ) && let Ok(Some(account)) = storage.basic(&address)
                 {
                     balance = account.balance;
@@ -316,19 +326,23 @@ impl Pevm {
                 };
 
                 for (tx_idx, memory_entry) in write_history.iter() {
+                    // Skip entries belonging to a colliding neighbor location.
+                    if memory_entry.tag() != location_tag {
+                        continue;
+                    }
                     let tx = chain.tx_env(unsafe { txs.get_unchecked(*tx_idx) });
                     match memory_entry {
-                        MemoryEntry::Data(_, MemoryValue::Basic(info)) => {
+                        MemoryEntry::Data(_, _, MemoryValue::Basic(info)) => {
                             // We fall back to sequential execution when reading a self-destructed account,
                             // so an empty account here would be a bug
                             debug_assert!(!(info.balance.is_zero() && info.nonce == 0));
                             balance = info.balance;
                             nonce = info.nonce;
                         }
-                        MemoryEntry::Data(_, MemoryValue::LazyRecipient(addition)) => {
+                        MemoryEntry::Data(_, _, MemoryValue::LazyRecipient(addition)) => {
                             balance = balance.saturating_add(*addition);
                         }
-                        MemoryEntry::Data(_, MemoryValue::LazySender(subtraction)) => {
+                        MemoryEntry::Data(_, _, MemoryValue::LazySender(subtraction)) => {
                             // We must re-do extra sender balance checks as we mock
                             // the max value in [Vm] during execution. Ideally we
                             // can turn off these redundant checks in revm.

@@ -22,8 +22,8 @@ use smallvec::SmallVec;
 
 use super::{CalculateReceiptRootError, PevmChain};
 use crate::{
-    BuildIdentityHasher, MemoryLocation, MemoryLocationHash, PevmTxExecutionResult, TxIdx,
-    hash_deterministic, mv_memory::MvMemory,
+    BuildIdentityHasher, LocationTag, MemoryLocation, MemoryLocationHash, PevmTxExecutionResult,
+    TxIdx, hash_deterministic, mv_memory::MvMemory, tag_deterministic,
 };
 
 /// Implementation of [`PevmChain`] for Ethereum
@@ -163,31 +163,44 @@ impl PevmChain for PevmEthereum {
         tx
     }
 
-    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv]) -> MvMemory {
+    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[TxEnv], seed: u64) -> MvMemory {
         let block_size = txs.len();
-        let beneficiary_location_hash =
-            hash_deterministic(MemoryLocation::Basic(block_env.beneficiary));
+        let beneficiary = MemoryLocation::Basic(block_env.beneficiary);
+        let beneficiary_location_hash = hash_deterministic(beneficiary.clone(), seed);
+        let beneficiary_location_tag = tag_deterministic(beneficiary, seed);
 
         // TODO: Estimate more locations based on sender, to, etc.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
         estimated_locations.insert(
             beneficiary_location_hash,
-            (0..block_size).collect::<Vec<TxIdx>>(),
+            (
+                beneficiary_location_tag,
+                (0..block_size).collect::<Vec<TxIdx>>(),
+            ),
         );
 
-        MvMemory::new(block_size, estimated_locations, [block_env.beneficiary])
+        MvMemory::new(
+            seed,
+            block_size,
+            estimated_locations
+                .into_iter()
+                .map(|(hash, (tag, tx_idxs))| (hash, tag, tx_idxs)),
+            [block_env.beneficiary],
+        )
     }
 
     fn get_rewards(
         &self,
-        beneficiary_location_hash: u64,
+        beneficiary: (MemoryLocationHash, LocationTag),
         gas_used: U256,
         gas_price: U256,
         _: u64,
+        _: u64,
         _: &Self::EvmTx,
-    ) -> SmallVec<[(MemoryLocationHash, U256); 1]> {
+    ) -> SmallVec<[(MemoryLocationHash, LocationTag, U256); 1]> {
         smallvec::smallvec![(
-            beneficiary_location_hash,
+            beneficiary.0,
+            beneficiary.1,
             gas_price.saturating_mul(gas_used)
         )]
     }

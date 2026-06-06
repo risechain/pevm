@@ -43,6 +43,14 @@ enum MemoryLocation {
 // on every single lookup & validation.
 type MemoryLocationHash = u64;
 
+// A second, independently seeded fingerprint of a memory location, stored
+// alongside each value in the multi-version data. Because [MemoryLocationHash]
+// is also the map key, two distinct locations that collide in the hash would
+// otherwise share an entry; comparing this tag on read disambiguates them, so
+// a collision is only harmful if both the hash AND the tag collide at once
+// (~2^-128). See [tag_deterministic].
+type LocationTag = u64;
+
 /// This is primarily used for memory location hash, but can also be used for
 /// transaction indexes, etc.
 #[derive(Debug, Default)]
@@ -65,11 +73,22 @@ impl Hasher for IdentityHasher {
 /// Build an identity hasher
 pub type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 
-// TODO: Ensure it's not easy to hand-craft transactions and storage slots
-// that can cause a lot of collisions that destroys pevm's performance.
+// Memory locations are hashed into two independent fingerprints, both mixed
+// with a per-execution random [seed]. The [hash_deterministic] output keys the
+// multi-version data; the [tag_deterministic] output is stored in each entry and
+// compared on read. The seed makes collisions impossible for an attacker to aim
+// at (it is unknown until the block runs), and the second fingerprint makes any
+// collision that still occurs at random harmless unless both halves collide
+// (~2^-128). The two passes use decorrelated seeds (`seed` and `!seed`) so that
+// colliding in one does not imply colliding in the other.
 #[inline(always)]
-fn hash_deterministic<T: Hash>(x: T) -> u64 {
-    FxBuildHasher.hash_one(x)
+fn hash_deterministic<T: Hash>(x: T, seed: u64) -> MemoryLocationHash {
+    FxBuildHasher.hash_one((seed, x))
+}
+
+#[inline(always)]
+fn tag_deterministic<T: Hash>(x: T, seed: u64) -> LocationTag {
+    FxBuildHasher.hash_one((!seed, x))
 }
 
 // TODO: It would be nice if we could tie the different cases of
@@ -96,7 +115,10 @@ enum MemoryValue {
 
 #[derive(Debug)]
 enum MemoryEntry {
-    Data(TxIncarnation, MemoryValue),
+    // Both variants carry the [LocationTag] of the location they belong to, so a
+    // reader scanning a hash bucket can skip entries written by a colliding
+    // neighbor location instead of mistaking them for its own.
+    Data(TxIncarnation, LocationTag, MemoryValue),
     // When an incarnation is aborted due to a validation failure, the
     // entries in the multi-version data structure corresponding to its
     // write set are replaced with this special ESTIMATE marker.
@@ -107,7 +129,18 @@ enum MemoryEntry {
     // and aborting during validation.
     // The ESTIMATE markers that are not overwritten are removed by the next
     // incarnation.
-    Estimate,
+    Estimate(LocationTag),
+}
+
+impl MemoryEntry {
+    // The verification tag of the location this entry belongs to. A reader skips
+    // entries whose tag differs from the location it is reading.
+    #[inline(always)]
+    const fn tag(&self) -> LocationTag {
+        match self {
+            Self::Data(_, tag, _) | Self::Estimate(tag) => *tag,
+        }
+    }
 }
 
 // The index of the transaction in the block.
@@ -174,8 +207,9 @@ type ReadOrigins = SmallVec<[ReadOrigin; 1]>;
 type ReadSet = HashMap<MemoryLocationHash, ReadOrigins, BuildIdentityHasher>;
 
 // The updates made by this transaction incarnation, which is applied
-// to the multi-version data structure at the end of execution.
-type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
+// to the multi-version data structure at the end of execution. Each entry
+// carries the location's hash (map key), its verification tag, and the value.
+type WriteSet = Vec<(MemoryLocationHash, LocationTag, MemoryValue)>;
 
 // A scheduled worker task
 // TODO: Add more useful work when there are idle workers like near

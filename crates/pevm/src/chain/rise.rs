@@ -1,6 +1,4 @@
 //! RISE
-use std::sync::LazyLock;
-
 use alloy_consensus::Transaction;
 use alloy_primitives::{Address, B256, ChainId, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header};
@@ -22,22 +20,24 @@ use revm::{
 use smallvec::SmallVec;
 
 use crate::{
-    BuildIdentityHasher, MemoryLocation, MemoryLocationHash, PevmTxExecutionResult,
-    hash_deterministic, mv_memory::MvMemory,
+    BuildIdentityHasher, LocationTag, MemoryLocation, MemoryLocationHash, PevmTxExecutionResult,
+    hash_deterministic, mv_memory::MvMemory, tag_deterministic,
 };
 
 use super::{CalculateReceiptRootError, PevmChain};
 
 const RISE_CHAIN_ID: ChainId = 4153; // Mainnet
 
-static BASE_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
-    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(BASE_FEE_RECIPIENT)));
-
-static L1_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
-    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(L1_FEE_RECIPIENT)));
-
-static OPERATOR_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
-    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(OPERATOR_FEE_RECIPIENT)));
+// Compute the (hash, tag) pair of a basic-account location under the per-block seed.
+// The fee recipients are fixed addresses, but a per-execution seed means their
+// fingerprints cannot be precomputed once, so we derive them per block here.
+#[inline]
+fn basic_hash_and_tag(address: Address, seed: u64) -> (MemoryLocationHash, LocationTag) {
+    (
+        hash_deterministic(MemoryLocation::Basic(address), seed),
+        tag_deterministic(MemoryLocation::Basic(address), seed),
+    )
+}
 
 /// Implementation of [`PevmChain`] for RISE
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,74 +105,81 @@ impl PevmChain for PevmRise {
             .build_op()
     }
 
-    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[OpTransaction<TxEnv>]) -> MvMemory {
-        let beneficiary_location_hash =
-            hash_deterministic(MemoryLocation::Basic(block_env.beneficiary));
+    fn build_mv_memory(
+        &self,
+        block_env: &BlockEnv,
+        txs: &[OpTransaction<TxEnv>],
+        seed: u64,
+    ) -> MvMemory {
+        // The beneficiary and the three fee recipients are written by every
+        // non-deposit transaction, so we pre-seed them as estimates.
+        let recipients = [
+            block_env.beneficiary,
+            BASE_FEE_RECIPIENT,
+            L1_FEE_RECIPIENT,
+            OPERATOR_FEE_RECIPIENT,
+        ];
 
         // TODO: Estimate more locations based on sender, to, etc.
         // TODO: Benchmark to check whether adding these estimated
         // locations helps or harms the performance.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
-
         for (index, tx) in txs.iter().enumerate() {
             // Deposit transactions pay no fees so they write nothing to these fee recipients.
             if !tx.is_deposit() {
-                estimated_locations
-                    .entry(beneficiary_location_hash)
-                    .or_insert_with(|| Vec::with_capacity(txs.len()))
-                    .push(index);
-                estimated_locations
-                    .entry(*BASE_FEE_RECIPIENT_LOCATION_HASH)
-                    .or_insert_with(|| Vec::with_capacity(txs.len()))
-                    .push(index);
-                estimated_locations
-                    .entry(*L1_FEE_RECIPIENT_LOCATION_HASH)
-                    .or_insert_with(|| Vec::with_capacity(txs.len()))
-                    .push(index);
-                estimated_locations
-                    .entry(*OPERATOR_FEE_RECIPIENT_LOCATION_HASH)
-                    .or_insert_with(|| Vec::with_capacity(txs.len()))
-                    .push(index);
+                for address in recipients {
+                    let (hash, tag) = basic_hash_and_tag(address, seed);
+                    estimated_locations
+                        .entry(hash)
+                        .or_insert_with(|| (tag, Vec::with_capacity(txs.len())))
+                        .1
+                        .push(index);
+                }
             }
         }
 
         MvMemory::new(
+            seed,
             txs.len(),
-            estimated_locations,
-            [
-                block_env.beneficiary,
-                BASE_FEE_RECIPIENT,
-                L1_FEE_RECIPIENT,
-                OPERATOR_FEE_RECIPIENT,
-            ],
+            estimated_locations
+                .into_iter()
+                .map(|(hash, (tag, tx_idxs))| (hash, tag, tx_idxs)),
+            recipients,
         )
     }
 
     fn get_rewards(
         &self,
-        beneficiary_location_hash: u64,
+        beneficiary: (MemoryLocationHash, LocationTag),
         gas_used: U256,
         gas_price: U256,
         basefee: u64,
+        seed: u64,
         tx: &Self::EvmTx,
-    ) -> SmallVec<[(MemoryLocationHash, U256); 1]> {
+    ) -> SmallVec<[(MemoryLocationHash, LocationTag, U256); 1]> {
         if tx.is_deposit() {
             SmallVec::new()
         } else {
+            let (base_fee_hash, base_fee_tag) = basic_hash_and_tag(BASE_FEE_RECIPIENT, seed);
+            let (l1_fee_hash, l1_fee_tag) = basic_hash_and_tag(L1_FEE_RECIPIENT, seed);
+            let (operator_fee_hash, operator_fee_tag) =
+                basic_hash_and_tag(OPERATOR_FEE_RECIPIENT, seed);
             smallvec::smallvec![
                 (
-                    beneficiary_location_hash,
+                    beneficiary.0,
+                    beneficiary.1,
                     gas_price.saturating_mul(gas_used)
                 ),
                 (
-                    *BASE_FEE_RECIPIENT_LOCATION_HASH,
+                    base_fee_hash,
+                    base_fee_tag,
                     U256::from(basefee).saturating_mul(gas_used),
                 ),
                 // RISE disables DA footprint and operator fees. Annoyingly, we still
                 // need to touch these to match revm's sequential execution for now.
                 // Will remove once we rewrite our own EVM implementation.
-                (*L1_FEE_RECIPIENT_LOCATION_HASH, U256::ZERO),
-                (*OPERATOR_FEE_RECIPIENT_LOCATION_HASH, U256::ZERO),
+                (l1_fee_hash, l1_fee_tag, U256::ZERO),
+                (operator_fee_hash, operator_fee_tag, U256::ZERO),
             ]
         }
     }
