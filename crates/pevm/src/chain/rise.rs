@@ -1,23 +1,22 @@
 //! RISE
 use std::sync::LazyLock;
 
+use crate::rise_revm::{
+    BASE_FEE_RECIPIENT, RiseEvm, RiseHaltReason, RiseTransaction, RiseTransactionError,
+    transaction::DepositTransactionParts,
+};
 use alloy_consensus::Transaction;
 use alloy_primitives::{Address, B256, ChainId, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header};
 use hashbrown::HashMap;
 use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType};
 use op_alloy_network::eip2718::Encodable2718;
-use op_revm::{
-    L1BlockInfo, OpBuilder, OpContext, OpEvm, OpHaltReason, OpSpecId, OpTransaction,
-    OpTransactionError,
-    constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT},
-    transaction::{OpTxTr, deposit::DepositTransactionParts},
-};
 use revm::{
     Context, Database, MainContext,
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::either::Either,
     handler::EvmTr,
+    primitives::hardfork::SpecId,
 };
 use smallvec::SmallVec;
 
@@ -32,12 +31,6 @@ const RISE_CHAIN_ID: ChainId = 4153; // Mainnet
 
 static BASE_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
     LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(BASE_FEE_RECIPIENT)));
-
-static L1_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
-    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(L1_FEE_RECIPIENT)));
-
-static OPERATOR_FEE_RECIPIENT_LOCATION_HASH: LazyLock<MemoryLocationHash> =
-    LazyLock::new(|| hash_deterministic(MemoryLocation::Basic(OPERATOR_FEE_RECIPIENT)));
 
 /// Implementation of [`PevmChain`] for RISE
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,11 +58,11 @@ impl PevmChain for PevmRise {
     type Network = op_alloy_network::Optimism;
     type Transaction = op_alloy_rpc_types::Transaction;
     type Envelope = OpTxEnvelope;
-    type Evm<DB: Database> = OpEvm<OpContext<DB>, ()>;
-    type EvmSpecId = OpSpecId;
-    type EvmTx = OpTransaction<TxEnv>;
-    type EvmHaltReason = OpHaltReason;
-    type EvmErrorType = OpTransactionError;
+    type Evm<DB: Database> = RiseEvm<DB>;
+    type EvmSpecId = SpecId;
+    type EvmTx = RiseTransaction;
+    type EvmHaltReason = RiseHaltReason;
+    type EvmErrorType = RiseTransactionError;
     type BlockSpecError = std::convert::Infallible;
     type TransactionParsingError = RiseTransactionParsingError;
 
@@ -85,9 +78,8 @@ impl PevmChain for PevmRise {
         }
     }
 
-    fn get_block_spec(&self, _header: &Header) -> Result<OpSpecId, Self::BlockSpecError> {
-        // RISE Mainnet launched as JOVIAN; currently all blocks use this spec.
-        Ok(OpSpecId::JOVIAN)
+    fn get_block_spec(&self, _header: &Header) -> Result<SpecId, Self::BlockSpecError> {
+        Ok(SpecId::PRAGUE)
     }
 
     fn build_evm<DB: Database>(
@@ -96,16 +88,17 @@ impl PevmChain for PevmRise {
         block_env: BlockEnv,
         db: DB,
     ) -> Self::Evm<DB> {
-        Context::mainnet()
-            .with_cfg(CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID))
-            .with_block(block_env)
-            .with_db(db)
-            .with_tx(OpTransaction::default())
-            .with_chain(L1BlockInfo::default())
-            .build_op()
+        RiseEvm::new(
+            Context::mainnet()
+                .with_cfg(CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID))
+                .with_block(block_env)
+                .with_db(db)
+                .with_tx(RiseTransaction::default())
+                .with_chain(()),
+        )
     }
 
-    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[OpTransaction<TxEnv>]) -> MvMemory {
+    fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[RiseTransaction]) -> MvMemory {
         let beneficiary_location_hash =
             hash_deterministic(MemoryLocation::Basic(block_env.beneficiary));
 
@@ -125,26 +118,13 @@ impl PevmChain for PevmRise {
                     .entry(*BASE_FEE_RECIPIENT_LOCATION_HASH)
                     .or_insert_with(|| Vec::with_capacity(txs.len()))
                     .push(index);
-                estimated_locations
-                    .entry(*L1_FEE_RECIPIENT_LOCATION_HASH)
-                    .or_insert_with(|| Vec::with_capacity(txs.len()))
-                    .push(index);
-                estimated_locations
-                    .entry(*OPERATOR_FEE_RECIPIENT_LOCATION_HASH)
-                    .or_insert_with(|| Vec::with_capacity(txs.len()))
-                    .push(index);
             }
         }
 
         MvMemory::new(
             txs.len(),
             estimated_locations,
-            [
-                block_env.beneficiary,
-                BASE_FEE_RECIPIENT,
-                L1_FEE_RECIPIENT,
-                OPERATOR_FEE_RECIPIENT,
-            ],
+            [block_env.beneficiary, BASE_FEE_RECIPIENT],
         )
     }
 
@@ -168,11 +148,6 @@ impl PevmChain for PevmRise {
                     *BASE_FEE_RECIPIENT_LOCATION_HASH,
                     U256::from(basefee).saturating_mul(gas_used),
                 ),
-                // RISE disables DA footprint and operator fees. Annoyingly, we still
-                // need to touch these to match revm's sequential execution for now.
-                // Will remove once we rewrite our own EVM implementation.
-                (*L1_FEE_RECIPIENT_LOCATION_HASH, U256::ZERO),
-                (*OPERATOR_FEE_RECIPIENT_LOCATION_HASH, U256::ZERO),
             ]
         }
     }
@@ -182,7 +157,7 @@ impl PevmChain for PevmRise {
     // https://github.com/paradigmxyz/reth/blob/b4a1b733c93f7e262f1b774722670e08cdcb6276/crates/primitives/src/proofs.rs
     fn calculate_receipt_root(
         &self,
-        _: OpSpecId,
+        _: SpecId,
         txs: &BlockTransactions<Self::Transaction>,
         tx_results: &[PevmTxExecutionResult],
     ) -> Result<B256, CalculateReceiptRootError> {
@@ -232,8 +207,8 @@ impl PevmChain for PevmRise {
     fn get_tx_env(
         &self,
         tx: &Self::Transaction,
-    ) -> Result<OpTransaction<TxEnv>, RiseTransactionParsingError> {
-        Ok(OpTransaction {
+    ) -> Result<RiseTransaction, RiseTransactionParsingError> {
+        Ok(RiseTransaction {
             base: TxEnv {
                 tx_type: tx.inner.inner.tx_type().into(),
                 caller: tx.inner.inner.signer(),
@@ -259,18 +234,18 @@ impl PevmChain for PevmRise {
                 Some(tx.inner.inner.encoded_2718().into())
             },
             deposit: if let Some(deposit) = tx.inner.inner.as_deposit() {
-                DepositTransactionParts::new(
-                    deposit.source_hash,
-                    Some(deposit.mint),
-                    deposit.is_system_transaction,
-                )
+                DepositTransactionParts {
+                    source_hash: deposit.source_hash,
+                    mint: Some(deposit.mint),
+                    is_system_transaction: deposit.is_system_transaction,
+                }
             } else {
-                DepositTransactionParts::new(B256::ZERO, None, false)
+                DepositTransactionParts::default()
             },
         })
     }
 
-    fn tx_env<'a>(&self, tx: &'a OpTransaction<TxEnv>) -> &'a TxEnv {
+    fn tx_env<'a>(&self, tx: &'a RiseTransaction) -> &'a TxEnv {
         &tx.base
     }
 
@@ -281,11 +256,11 @@ impl PevmChain for PevmRise {
         !is_deposit
     }
 
-    fn is_eip_1559_enabled(&self, _: OpSpecId) -> bool {
+    fn is_eip_1559_enabled(&self, _: SpecId) -> bool {
         true
     }
 
-    fn is_eip_161_enabled(&self, _: OpSpecId) -> bool {
+    fn is_eip_161_enabled(&self, _: SpecId) -> bool {
         true
     }
 }

@@ -95,9 +95,12 @@ pub enum EvmCode {
 impl From<EvmCode> for Bytecode {
     fn from(code: EvmCode) -> Self {
         match code {
-            EvmCode::Legacy(code) => {
+            // SAFETY: bytecode was previously analyzed and serialized by pevm with valid
+            // PUSH-padding, so the jump table is consistent with the bytecode bytes.
+            // Reference: https://github.com/bluealloy/revm/pull/3557
+            EvmCode::Legacy(code) => unsafe {
                 Self::new_analyzed(code.bytecode, code.original_len, code.jump_table)
-            }
+            },
             EvmCode::Eip7702(delegated_address) => Self::new_eip7702(delegated_address),
         }
     }
