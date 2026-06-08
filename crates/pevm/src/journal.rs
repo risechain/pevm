@@ -20,7 +20,7 @@ use revm::{
         hints_util::unlikely,
         map::Entry,
     },
-    state::{Account, Bytecode, EvmStorageSlot, TransientStorage},
+    state::{Account, AccountStatus, Bytecode, EvmStorageSlot, TransientStorage},
 };
 
 use crate::{AddressMap, EvmState};
@@ -223,26 +223,25 @@ impl<'a, DB: Database> JournaledAccount<'a, DB> {
         key: StorageKey,
         skip_cold_load: bool,
     ) -> Result<StateLoad<&mut EvmStorageSlot>, JournalLoadError<DB::Error>> {
+        let is_cold;
         let is_newly_created = self.account.is_created();
-        let (slot, is_cold) = match self.account.storage.entry(key) {
+        let slot = match self.account.storage.entry(key) {
             Entry::Occupied(occ) => {
                 let slot = occ.into_mut();
-                let mut is_cold = false;
-                if slot.is_cold_transaction_id(self.transaction_id) {
-                    is_cold = self
+                is_cold = slot.is_cold_transaction_id(self.transaction_id)
+                    && self
                         .access_list
                         .get(&self.address)
                         .and_then(|v| v.get(&key))
                         .is_none();
-                    if is_cold && skip_cold_load {
-                        return Err(JournalLoadError::ColdLoadSkipped);
-                    }
+                if is_cold && skip_cold_load {
+                    return Err(JournalLoadError::ColdLoadSkipped);
                 }
                 slot.mark_warm_with_transaction_id(self.transaction_id);
-                (slot, is_cold)
+                slot
             }
             Entry::Vacant(vac) => {
-                let is_cold = self
+                is_cold = self
                     .access_list
                     .get(&self.address)
                     .and_then(|v| v.get(&key))
@@ -255,8 +254,7 @@ impl<'a, DB: Database> JournaledAccount<'a, DB> {
                 } else {
                     self.db.storage(self.address, key)?
                 };
-                let slot = vac.insert(EvmStorageSlot::new(value, self.transaction_id));
-                (slot, is_cold)
+                vac.insert(EvmStorageSlot::new(value, self.transaction_id))
             }
         };
         if is_cold {
@@ -549,17 +547,22 @@ impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
         address: Address,
         skip_cold_load: bool,
     ) -> Result<StateLoad<JournaledAccount<'_, DB>>, JournalLoadError<DB::Error>> {
-        let (account, is_cold) = match self.state.entry(address) {
+        let mut is_cold = false;
+        let account = match self.state.entry(address) {
             Entry::Occupied(entry) => {
                 let account = entry.into_mut();
-                let mut is_cold = account.is_cold_transaction_id(self.transaction_id);
-
-                if unlikely(is_cold) {
+                // In PEVM mode, state is cleared before each tx so transaction_id always
+                // matches — only the Cold bit (set by sub-call reverts) can make this true.
+                let is_cold_check = if IS_PEVM {
+                    account.status.contains(AccountStatus::Cold)
+                } else {
+                    account.is_cold_transaction_id(self.transaction_id)
+                };
+                if unlikely(is_cold_check) {
                     is_cold = self
                         .warm_addresses
                         .check_is_cold(&address, skip_cold_load)?;
                     account.mark_warm_with_transaction_id(self.transaction_id);
-
                     if account.is_selfdestructed_locally() {
                         account.selfdestruct();
                         account.unmark_selfdestructed_locally();
@@ -567,27 +570,24 @@ impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
                     *account.original_info = account.info.clone();
                     account.unmark_created_locally();
                     self.journal.push(JournalEntry::AccountWarmed { address });
-                }
-                (account, is_cold)
+                };
+                account
             }
             Entry::Vacant(vac) => {
-                let is_cold = self
+                is_cold = self
                     .warm_addresses
                     .check_is_cold(&address, skip_cold_load)?;
-
                 let account = if let Some(account) = self.database.basic(address)? {
-                    let mut account: Account = account.into();
+                    let mut account = Account::from(account);
                     account.transaction_id = self.transaction_id;
                     account
                 } else {
                     Account::new_not_existing(self.transaction_id)
                 };
-
                 if is_cold {
                     self.journal.push(JournalEntry::AccountWarmed { address });
                 }
-
-                (vac.insert(account), is_cold)
+                vac.insert(account)
             }
         };
 
