@@ -147,7 +147,7 @@ pub trait PevmChain: Debug {
     /// Get rewards (balance increments) to beneficiary accounts, etc.
     fn get_rewards(
         &self,
-        beneficiary_location_hash: u64,
+        beneficiary_location_hash: MemoryLocationHash,
         gas_used: U256,
         gas_price: U256,
         basefee: u64,
