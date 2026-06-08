@@ -180,7 +180,7 @@ impl PevmChain for PevmEthereum {
 
     fn get_rewards(
         &self,
-        beneficiary_location_hash: u64,
+        beneficiary_location_hash: MemoryLocationHash,
         gas_used: U256,
         gas_price: U256,
         _: u64,

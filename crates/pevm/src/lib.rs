@@ -29,7 +29,7 @@ impl Hasher for SuffixHasher {
 /// Build a suffix hasher
 pub type BuildSuffixHasher = BuildHasherDefault<SuffixHasher>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MemoryLocation {
     // TODO: Separate an account's balance and nonce?
     Basic(Address),
@@ -37,11 +37,38 @@ enum MemoryLocation {
     Storage(Address, U256),
 }
 
-// We only need the full memory location to read from storage.
-// We then identify the locations with its hash in the multi-version
-// data, write and read sets, which is much faster than rehashing
-// on every single lookup & validation.
-type MemoryLocationHash = u64;
+/// The identity of a state cell in the multi-version data, read & write sets.
+///
+/// We keep the full location and compare it for equality, so colliding locations
+/// land in the same bucket but remain distinct entries. This makes aliasing
+/// impossible (exact identity) while preserving the fast u64 path.
+#[derive(Clone, Copy, Debug)]
+pub struct MemoryLocationHash {
+    hash: u64,
+    location: MemoryLocation,
+}
+
+impl PartialEq for MemoryLocationHash {
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> bool {
+        // The [hash] compare resolves the common distinct-location case in a
+        // single register (fast duplicate checks); the [location] compare only
+        // runs on a hash hit and restores the exact identity a bare u64 discards.
+        self.hash == other.hash && self.location == other.location
+    }
+}
+
+impl Eq for MemoryLocationHash {}
+
+impl Hash for MemoryLocationHash {
+    #[inline(always)]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Only the precomputed hash drives bucket selection; [IdentityHasher]
+        // forwards it verbatim. Equality above carries the true identity, so the
+        // map resolves bucket collisions correctly.
+        state.write_u64(self.hash);
+    }
+}
 
 /// This is primarily used for memory location hash, but can also be used for
 /// transaction indexes, etc.
@@ -65,11 +92,12 @@ impl Hasher for IdentityHasher {
 /// Build an identity hasher
 pub type BuildIdentityHasher = BuildHasherDefault<IdentityHasher>;
 
-// TODO: Ensure it's not easy to hand-craft transactions and storage slots
-// that can cause a lot of collisions that destroys pevm's performance.
 #[inline(always)]
-fn hash_deterministic<T: Hash>(x: T) -> u64 {
-    FxBuildHasher.hash_one(x)
+fn hash_deterministic(location: MemoryLocation) -> MemoryLocationHash {
+    MemoryLocationHash {
+        hash: FxBuildHasher.hash_one(location),
+        location,
+    }
 }
 
 // TODO: It would be nice if we could tie the different cases of

@@ -497,7 +497,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             tx_idx: 0,
             // SAFETY: txs is non-empty (checked by the caller before spawning threads).
             tx: chain.tx_env(unsafe { txs.get_unchecked(0) }),
-            from_hash: 0,
+            from_hash: hash_deterministic(MemoryLocation::Basic(Address::ZERO)),
             to_hash: None,
             to_code_hash: None,
             is_lazy: false,
