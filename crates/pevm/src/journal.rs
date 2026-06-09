@@ -19,7 +19,7 @@ use revm::{
         hardfork::SpecId::{self, *},
         map::Entry,
     },
-    state::{Account, Bytecode, EvmStorageSlot, TransientStorage},
+    state::{Account, AccountStatus, Bytecode, EvmStorageSlot, TransientStorage},
 };
 
 use crate::{AddressMap, EvmState};
@@ -210,7 +210,6 @@ pub struct JournaledAccount<'a, DB> {
     account: &'a mut Account,
     journal_entries: &'a mut Vec<JournalEntry>,
     access_list: &'a AddressMap<HashSet<StorageKey>>,
-    transaction_id: usize,
     db: &'a mut DB,
 }
 
@@ -227,7 +226,9 @@ impl<'a, DB: Database> JournaledAccount<'a, DB> {
         let slot = match self.account.storage.entry(key) {
             Entry::Occupied(occ) => {
                 let slot = occ.into_mut();
-                is_cold = slot.is_cold_transaction_id(self.transaction_id)
+                // RISE: slot.is_cold is set by sub-call reverts (StorageWarmed revert → mark_cold).
+                // transaction_id comparison is always false since state is cleared between txs.
+                is_cold = slot.is_cold
                     && self
                         .access_list
                         .get(&self.address)
@@ -236,7 +237,7 @@ impl<'a, DB: Database> JournaledAccount<'a, DB> {
                 if is_cold && skip_cold_load {
                     return Err(JournalLoadError::ColdLoadSkipped);
                 }
-                slot.mark_warm_with_transaction_id(self.transaction_id);
+                slot.mark_warm_with_transaction_id(0);
                 slot
             }
             Entry::Vacant(vac) => {
@@ -253,7 +254,7 @@ impl<'a, DB: Database> JournaledAccount<'a, DB> {
                 } else {
                     self.db.storage(self.address, key)?
                 };
-                vac.insert(EvmStorageSlot::new(value, self.transaction_id))
+                vac.insert(EvmStorageSlot::new(value, 0))
             }
         };
         if is_cold {
@@ -467,8 +468,6 @@ pub struct Journal<DB: Database> {
     pub logs: Vec<Log>,
     pub depth: usize,
     pub journal: Vec<JournalEntry>,
-    /// Incremented on commit/discard so the same journal can serve multiple txs.
-    pub transaction_id: usize,
     pub cfg: JournalCfg,
     pub warm_addresses: WarmAddresses,
 }
@@ -482,7 +481,6 @@ impl<DB: Database> Journal<DB> {
             logs: Vec::new(),
             depth: 0,
             journal: Vec::new(),
-            transaction_id: 0,
             cfg,
             warm_addresses: WarmAddresses::new(),
         }
@@ -513,7 +511,6 @@ impl<DB: Database> Journal<DB> {
         self.transient_storage.clear();
         self.journal.clear();
         self.depth = 0;
-        self.transaction_id = 0;
 
         state
     }
@@ -550,11 +547,13 @@ impl<DB: Database> Journal<DB> {
         let account = match self.state.entry(address) {
             Entry::Occupied(entry) => {
                 let account = entry.into_mut();
-                if account.is_cold_transaction_id(self.transaction_id) {
+                // RISE: Cold bit is set by sub-call reverts (AccountWarmed revert → mark_cold).
+                // transaction_id comparison is always false since state is cleared between txs.
+                if account.status.contains(AccountStatus::Cold) {
                     is_cold = self
                         .warm_addresses
                         .check_is_cold(&address, skip_cold_load)?;
-                    account.mark_warm_with_transaction_id(self.transaction_id);
+                    account.mark_warm_with_transaction_id(0);
                     if account.is_selfdestructed_locally() {
                         account.selfdestruct();
                         account.unmark_selfdestructed_locally();
@@ -569,13 +568,9 @@ impl<DB: Database> Journal<DB> {
                 is_cold = self
                     .warm_addresses
                     .check_is_cold(&address, skip_cold_load)?;
-                let account = if let Some(account) = self.database.basic(address)? {
-                    let mut account = Account::from(account);
-                    account.transaction_id = self.transaction_id;
-                    account
-                } else {
-                    Account::new_not_existing(self.transaction_id)
-                };
+                let account = self.database.basic(address)?
+                    .map(Account::from)
+                    .unwrap_or(Account::new_not_existing(0));
                 if is_cold {
                     self.journal.push(JournalEntry::AccountWarmed { address });
                 }
@@ -590,7 +585,6 @@ impl<DB: Database> Journal<DB> {
                 journal_entries: &mut self.journal,
                 db: &mut self.database,
                 access_list: self.warm_addresses.access_list(),
-                transaction_id: self.transaction_id,
             },
             is_cold,
         ))
@@ -605,7 +599,6 @@ impl<DB: Database> Journal<DB> {
             journal_entries: &mut self.journal,
             db: &mut self.database,
             access_list: self.warm_addresses.access_list(),
-            transaction_id: self.transaction_id,
         })
     }
 }
@@ -647,20 +640,18 @@ impl<DB: Database> JournalTr for Journal<DB> {
         self.depth = 0;
         self.journal.clear();
         self.warm_addresses.clear_coinbase_and_access_list();
-        self.transaction_id += 1;
         self.logs.clear();
     }
 
     fn discard_tx(&mut self) {
-        let is_spurious_dragon_enabled = self.cfg.spec.is_enabled_in(SPURIOUS_DRAGON);
-        self.journal.drain(..).rev().for_each(|entry| {
-            entry.revert(&mut self.state, None, is_spurious_dragon_enabled);
-        });
+        // State is taken and discarded by the caller's finalize() immediately after.
+        // Journal replay is unnecessary: finalize() returns whatever is in state, and on
+        // failed txs the caller ignores that return value.
         self.transient_storage.clear();
         self.depth = 0;
-        self.logs.clear();
-        self.transaction_id += 1;
+        self.journal.clear();
         self.warm_addresses.clear_coinbase_and_access_list();
+        self.logs.clear();
     }
 
     fn finalize(&mut self) -> EvmState {
@@ -676,7 +667,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
         self.transient_storage.clear();
         self.journal.clear();
         self.depth = 0;
-        self.transaction_id = 0;
     }
 
     fn depth(&self) -> usize {
