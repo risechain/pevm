@@ -209,6 +209,8 @@ pub struct JournaledAccount<'a, DB> {
     account: &'a mut Account,
     journal_entries: &'a mut Vec<JournalEntry>,
     access_list: &'a AddressMap<HashSet<StorageKey>>,
+    // Padding to maintain 64-byte (one cache line) struct size.
+    _pad: usize,
     db: &'a mut DB,
 }
 
@@ -567,7 +569,9 @@ impl<DB: Database> Journal<DB> {
                 is_cold = self
                     .warm_addresses
                     .check_is_cold(&address, skip_cold_load)?;
-                let account = self.database.basic(address)?
+                let account = self
+                    .database
+                    .basic(address)?
                     .map(Account::from)
                     .unwrap_or_else(|| Account::new_not_existing(0));
                 if is_cold {
@@ -584,6 +588,7 @@ impl<DB: Database> Journal<DB> {
                 journal_entries: &mut self.journal,
                 db: &mut self.database,
                 access_list: self.warm_addresses.access_list(),
+                _pad: 0,
             },
             is_cold,
         ))
@@ -598,6 +603,7 @@ impl<DB: Database> Journal<DB> {
             journal_entries: &mut self.journal,
             db: &mut self.database,
             access_list: self.warm_addresses.access_list(),
+            _pad: 0,
         })
     }
 }
@@ -649,7 +655,6 @@ impl<DB: Database> JournalTr for Journal<DB> {
         self.warm_addresses.clear_coinbase_and_access_list();
         self.logs.clear();
         self.transient_storage.clear();
-        // self.journal.clear();
         self.depth = 0;
     }
 

@@ -50,7 +50,6 @@ pub enum EthereumTransactionParsingError {
     MissingGasPrice,
 }
 
-
 fn get_ethereum_gas_price(tx: &TxEnvelope) -> Result<u128, EthereumTransactionParsingError> {
     match tx.tx_type() {
         TxType::Legacy | TxType::Eip2930 => tx
