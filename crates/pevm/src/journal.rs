@@ -569,7 +569,7 @@ impl<DB: Database> Journal<DB> {
                     .check_is_cold(&address, skip_cold_load)?;
                 let account = self.database.basic(address)?
                     .map(Account::from)
-                    .unwrap_or(Account::new_not_existing(0));
+                    .unwrap_or_else(|| Account::new_not_existing(0));
                 if is_cold {
                     self.journal.push(JournalEntry::AccountWarmed { address });
                 }
