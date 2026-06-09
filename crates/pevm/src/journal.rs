@@ -515,15 +515,6 @@ impl<DB: Database> Journal<DB> {
     }
 
     #[inline]
-    fn clear_tx(&mut self) {
-        self.transient_storage.clear();
-        self.depth = 0;
-        self.journal.clear();
-        self.warm_addresses.clear_coinbase_and_access_list();
-        self.logs.clear();
-    }
-
-    #[inline]
     fn touch_account(journal: &mut Vec<JournalEntry>, address: Address, account: &mut Account) {
         if !account.is_touched() {
             journal.push(JournalEntry::AccountTouched { address });
@@ -643,13 +634,9 @@ impl<DB: Database> JournalTr for Journal<DB> {
         self.logs.push(log);
     }
 
-    fn commit_tx(&mut self) {
-        self.clear_tx();
-    }
-
-    fn discard_tx(&mut self) {
-        self.clear_tx();
-    }
+    // finalize() → extract_state() clears all per-tx state; these are no-ops for our usage.
+    fn commit_tx(&mut self) {}
+    fn discard_tx(&mut self) {}
 
     fn finalize(&mut self) -> EvmState {
         self.extract_state()
@@ -662,7 +649,7 @@ impl<DB: Database> JournalTr for Journal<DB> {
         self.warm_addresses.clear_coinbase_and_access_list();
         self.logs.clear();
         self.transient_storage.clear();
-        self.journal.clear();
+        // self.journal.clear();
         self.depth = 0;
     }
 
