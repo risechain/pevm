@@ -9,14 +9,14 @@ use revm::{
     },
     handler::{EvmTr, FrameResult, Handler},
     primitives::KECCAK_EMPTY,
-    state::{AccountInfo, Bytecode, EvmState},
+    state::{AccountInfo, Bytecode},
 };
 use smallvec::SmallVec;
 
 use crate::{
-    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, FinishExecFlags, MemoryEntry,
-    MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet, Storage,
-    TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
+    AccountBasic, BuildIdentityHasher, BuildSuffixHasher, EvmAccount, EvmState, FinishExecFlags,
+    MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, ReadOrigin, ReadOrigins, ReadSet,
+    Storage, TxIdx, TxVersion, WriteSet, chain::PevmChain, hash_deterministic, mv_memory::MvMemory,
 };
 
 /// The execution error from the underlying EVM executor.

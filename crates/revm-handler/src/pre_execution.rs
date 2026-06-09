@@ -1,0 +1,302 @@
+//! Handles related to the main function of the EVM.
+//!
+//! They handle initial setup of the EVM, call loop and the final return of the EVM
+
+use crate::{EvmTr, PrecompileProvider};
+use bytecode::Bytecode;
+use context_interface::{
+    journaled_state::{account::JournaledAccountTr, JournalTr},
+    result::InvalidTransaction,
+    transaction::{AccessListItemTr, AuthorizationTr, Transaction, TransactionType},
+    Block, Cfg, ContextTr, Database,
+};
+use core::cmp::Ordering;
+use interpreter::InitialAndFloorGas;
+use primitives::{hardfork::SpecId, AddressMap, HashSet, StorageKey, U256};
+use state::AccountInfo;
+
+/// Loads and warms accounts for execution, including precompiles and access list.
+pub fn load_accounts<
+    EVM: EvmTr<Precompiles: PrecompileProvider<EVM::Context>>,
+    ERROR: From<<<EVM::Context as ContextTr>::Db as Database>::Error>,
+>(
+    evm: &mut EVM,
+) -> Result<(), ERROR> {
+    let (context, precompiles) = evm.ctx_precompiles();
+
+    let gen_spec = context.cfg().spec();
+    let spec = gen_spec.clone().into();
+    // sets eth spec id in journal
+    context.journal_mut().set_spec_id(spec);
+    let precompiles_changed = precompiles.set_spec(gen_spec);
+    let empty_warmed_precompiles = context.journal_mut().precompile_addresses().is_empty();
+
+    if precompiles_changed || empty_warmed_precompiles {
+        // load new precompile addresses into journal.
+        // When precompiles addresses are changed we reset the warmed hashmap to those new addresses.
+        context
+            .journal_mut()
+            .warm_precompiles(precompiles.warm_addresses().collect());
+    }
+
+    // Load coinbase
+    // EIP-3651: Warm COINBASE. Starts the `COINBASE` address warm
+    if spec.is_enabled_in(SpecId::SHANGHAI) {
+        let coinbase = context.block().beneficiary();
+        context.journal_mut().warm_coinbase_account(coinbase);
+    }
+
+    // Load access list
+    let (tx, journal) = context.tx_journal_mut();
+    // legacy is only tx type that does not have access list.
+    if tx.tx_type() != TransactionType::Legacy {
+        if let Some(access_list) = tx.access_list() {
+            let mut map: AddressMap<HashSet<StorageKey>> = AddressMap::default();
+            for item in access_list {
+                map.entry(*item.address())
+                    .or_default()
+                    .extend(item.storage_slots().map(|key| U256::from_be_bytes(key.0)));
+            }
+            journal.warm_access_list(map);
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates caller account nonce and code according to EIP-3607.
+#[inline]
+pub fn validate_account_nonce_and_code_with_components(
+    caller_info: &AccountInfo,
+    tx: impl Transaction,
+    cfg: impl Cfg,
+) -> Result<(), InvalidTransaction> {
+    validate_account_nonce_and_code(
+        caller_info,
+        tx.nonce(),
+        cfg.is_eip3607_disabled(),
+        cfg.is_nonce_check_disabled(),
+    )
+}
+
+/// Validates caller account nonce and code according to EIP-3607.
+#[inline]
+pub fn validate_account_nonce_and_code(
+    caller_info: &AccountInfo,
+    tx_nonce: u64,
+    is_eip3607_disabled: bool,
+    is_nonce_check_disabled: bool,
+) -> Result<(), InvalidTransaction> {
+    // EIP-3607: Reject transactions from senders with deployed code
+    // This EIP is introduced after london but there was no collision in past
+    // so we can leave it enabled always
+    if !is_eip3607_disabled {
+        let bytecode = match caller_info.code.as_ref() {
+            Some(code) => code,
+            None => &Bytecode::default(),
+        };
+        // Allow EOAs whose code is a valid delegation designation,
+        // i.e. 0xef0100 || address, to continue to originate transactions.
+        if !bytecode.is_empty() && !bytecode.is_eip7702() {
+            return Err(InvalidTransaction::RejectCallerWithCode);
+        }
+    }
+
+    // Check that the transaction's nonce is correct
+    if !is_nonce_check_disabled {
+        let tx = tx_nonce;
+        let state = caller_info.nonce;
+        match tx.cmp(&state) {
+            Ordering::Greater => {
+                return Err(InvalidTransaction::NonceTooHigh { tx, state });
+            }
+            Ordering::Less => {
+                return Err(InvalidTransaction::NonceTooLow { tx, state });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Check maximum possible fee and deduct the effective fee.
+///
+/// Returns new balance.
+#[inline]
+pub fn calculate_caller_fee(
+    balance: U256,
+    tx: impl Transaction,
+    block: impl Block,
+    cfg: impl Cfg,
+) -> Result<U256, InvalidTransaction> {
+    // If fee charge is disabled, return the balance as-is without deducting fees.
+    // This is useful for `eth_call` and similar simulation scenarios.
+    if cfg.is_fee_charge_disabled() {
+        return Ok(balance);
+    }
+
+    let basefee = block.basefee() as u128;
+    let blob_price = block.blob_gasprice().unwrap_or_default();
+    let is_balance_check_disabled = cfg.is_balance_check_disabled();
+
+    if !is_balance_check_disabled {
+        tx.ensure_enough_balance(balance)?;
+    }
+
+    let effective_balance_spending = tx
+        .effective_balance_spending(basefee, blob_price)
+        .expect("effective balance is always smaller than max balance so it can't overflow");
+
+    let gas_balance_spending = effective_balance_spending - tx.value();
+
+    // new balance
+    let mut new_balance = balance.saturating_sub(gas_balance_spending);
+
+    if is_balance_check_disabled {
+        // Make sure the caller's balance is at least the value of the transaction.
+        new_balance = new_balance.max(tx.value());
+    }
+
+    Ok(new_balance)
+}
+
+/// Validates caller state and deducts transaction costs from the caller's balance.
+#[inline]
+pub fn validate_against_state_and_deduct_caller<
+    CTX: ContextTr,
+    ERROR: From<InvalidTransaction> + From<<CTX::Db as Database>::Error>,
+>(
+    context: &mut CTX,
+) -> Result<(), ERROR> {
+    let (block, tx, cfg, journal, _, _) = context.all_mut();
+
+    // Load caller's account.
+    let mut caller = journal.load_account_with_code_mut(tx.caller())?.data;
+
+    validate_account_nonce_and_code_with_components(&caller.account().info, tx, cfg)?;
+
+    let new_balance = calculate_caller_fee(*caller.balance(), tx, block, cfg)?;
+
+    caller.set_balance(new_balance);
+    if tx.kind().is_call() {
+        caller.bump_nonce();
+    }
+    Ok(())
+}
+
+/// Apply EIP-7702 auth list and return number gas refund on already created accounts.
+///
+/// Note that this function will do nothing if the transaction type is not EIP-7702.
+/// If you need to apply auth list for other transaction types, use [`apply_auth_list`] function.
+///
+/// Internally uses [`apply_auth_list`] function.
+#[inline]
+pub fn apply_eip7702_auth_list<
+    CTX: ContextTr,
+    ERROR: From<InvalidTransaction> + From<<CTX::Db as Database>::Error>,
+>(
+    context: &mut CTX,
+    init_and_floor_gas: &mut InitialAndFloorGas,
+) -> Result<u64, ERROR> {
+    let chain_id = context.cfg().chain_id();
+    let refund_per_auth = context.cfg().gas_params().tx_eip7702_auth_refund();
+    let (tx, journal) = context.tx_journal_mut();
+
+    // Return if not EIP-7702 transaction.
+    if tx.tx_type() != TransactionType::Eip7702 {
+        return Ok(0);
+    }
+    let eip7702_refund =
+        apply_auth_list::<_, ERROR>(chain_id, refund_per_auth, tx.authorization_list(), journal)?;
+
+    // EIP-8037: Split auth list refund into state gas and regular gas portions.
+    // The state gas portion is added to the reservoir after initial_state_gas deduction,
+    // matching the Python spec where set_delegation adds state refund directly to
+    // state_gas_reservoir. This ensures refunded state gas stays as reservoir gas
+    // (not regular gas), so it's not consumed on frame halt.
+    // The regular gas portion goes through the normal refund mechanism.
+    let (eip7702_state_refund, eip7702_regular_refund_raw) = context
+        .cfg()
+        .gas_params()
+        .split_eip7702_refund(eip7702_refund);
+    if eip7702_state_refund > 0 {
+        init_and_floor_gas.eip7702_reservoir_refund = eip7702_state_refund;
+    }
+
+    Ok(eip7702_regular_refund_raw)
+}
+
+/// Apply EIP-7702 style auth list and return number gas refund on already created accounts.
+///
+/// It is more granular function from [`apply_eip7702_auth_list`] function as it takes only the list, journal and chain id.
+///
+/// The `refund_per_auth` parameter specifies the gas refund per existing account authorization.
+/// By default this is `PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST` (25000 - 12500 = 12500),
+/// but can be configured via [`GasParams::tx_eip7702_auth_refund`](context_interface::cfg::gas_params::GasParams::tx_eip7702_auth_refund).
+#[inline]
+pub fn apply_auth_list<
+    JOURNAL: JournalTr,
+    ERROR: From<InvalidTransaction> + From<<JOURNAL::Database as Database>::Error>,
+>(
+    chain_id: u64,
+    refund_per_auth: u64,
+    auth_list: impl Iterator<Item = impl AuthorizationTr>,
+    journal: &mut JOURNAL,
+) -> Result<u64, ERROR> {
+    let mut refunded_accounts = 0;
+    for authorization in auth_list {
+        // 1. Verify the chain id is either 0 or the chain's current ID.
+        let auth_chain_id = authorization.chain_id();
+        if !auth_chain_id.is_zero() && auth_chain_id != U256::from(chain_id) {
+            continue;
+        }
+
+        // 2. Verify the `nonce` is less than `2**64 - 1`.
+        if authorization.nonce() == u64::MAX {
+            continue;
+        }
+
+        // recover authority and authorized addresses.
+        // 3. `authority = ecrecover(keccak(MAGIC || rlp([chain_id, address, nonce])), y_parity, r, s]`
+        let Some(authority) = authorization.authority() else {
+            continue;
+        };
+
+        // warm authority account and check nonce.
+        // 4. Add `authority` to `accessed_addresses` (as defined in [EIP-2929](./eip-2929.md).)
+        let mut authority_acc = journal.load_account_with_code_mut(authority)?;
+        let authority_acc_info = &authority_acc.account().info;
+
+        // 5. Verify the code of `authority` is either empty or already delegated.
+        if let Some(bytecode) = &authority_acc_info.code {
+            // if it is not empty and it is not eip7702
+            if !bytecode.is_empty() && !bytecode.is_eip7702() {
+                continue;
+            }
+        }
+
+        // 6. Verify the nonce of `authority` is equal to `nonce`. In case `authority` does not exist in the trie, verify that `nonce` is equal to `0`.
+        if authorization.nonce() != authority_acc_info.nonce {
+            continue;
+        }
+
+        // 7. Add `PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST` gas to the global refund counter if `authority` exists in the trie.
+        if !(authority_acc_info.is_empty()
+            && authority_acc
+                .account()
+                .is_loaded_as_not_existing_not_touched())
+        {
+            refunded_accounts += 1;
+        }
+
+        // 8. Set the code of `authority` to be `0xef0100 || address`. This is a delegation designation.
+        //  * As a special case, if `address` is `0x0000000000000000000000000000000000000000` do not write the designation.
+        //    Clear the accounts code and reset the account's code hash to the empty hash `0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470`.
+        // 9. Increase the nonce of `authority` by one.
+        authority_acc.delegate(authorization.address());
+    }
+
+    let refunded_gas = refunded_accounts * refund_per_auth;
+
+    Ok(refunded_gas)
+}

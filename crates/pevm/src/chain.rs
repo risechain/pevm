@@ -3,11 +3,12 @@
 use std::fmt::Debug;
 use std::{error::Error as StdError, fmt::Display};
 
+use crate::EvmState;
 use alloy_consensus::{Signed, TxLegacy, transaction::Recovered};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, Header, Transaction};
 use revm::context::result::HaltReason;
-use revm::context::{ContextSetters, JournalTr, TxEnv};
+use revm::context::{ContextSetters, TxEnv};
 use revm::context_interface::LocalContextTr;
 use revm::handler::instructions::InstructionProvider;
 use revm::handler::{EvmTr, FrameResult, FrameTr, PrecompileProvider};
@@ -15,7 +16,6 @@ use revm::interpreter::InterpreterResult;
 use revm::interpreter::interpreter::EthInterpreter;
 use revm::interpreter::interpreter_action::FrameInit;
 use revm::primitives::hardfork::SpecId;
-use revm::state::EvmState;
 use revm::{
     Database, ExecuteEvm,
     context::{
@@ -52,12 +52,12 @@ pub trait PevmChain: Debug {
     // TODO: Support more tx conversions
     type Envelope: Debug + From<Signed<TxLegacy>>;
 
-    /// The EVM type
+    /// The EVM type for sequential execution.
     type Evm<DB: Database>: EvmTr<
             Context: ContextTr<
                 Db = DB,
                 Tx = Self::EvmTx,
-                Journal: JournalTr<State = EvmState>,
+                Journal = crate::journal::Journal<DB>,
                 Local: LocalContextTr,
             > + ContextSetters,
             Frame: FrameTr<FrameInit = FrameInit, FrameResult = FrameResult>,

@@ -8,17 +8,17 @@ use hashbrown::HashMap;
 use op_alloy_consensus::{OpDepositReceipt, OpReceiptEnvelope, OpTxEnvelope, OpTxType};
 use op_alloy_network::eip2718::Encodable2718;
 use op_revm::{
-    L1BlockInfo, OpBuilder, OpContext, OpEvm, OpHaltReason, OpSpecId, OpTransaction,
-    OpTransactionError,
+    L1BlockInfo, OpBuilder, OpEvm, OpHaltReason, OpSpecId, OpTransaction, OpTransactionError,
     constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT},
     transaction::{OpTxTr, deposit::DepositTransactionParts},
 };
 use revm::{
-    Context, Database, MainContext,
-    context::{BlockEnv, CfgEnv, TxEnv},
+    Context, Database,
+    context::{BlockEnv, CfgEnv, LocalContext, TxEnv, journal::JournalCfg},
     context_interface::either::Either,
     handler::EvmTr,
 };
+
 use smallvec::SmallVec;
 
 use crate::{
@@ -65,7 +65,17 @@ impl PevmChain for PevmRise {
     type Network = op_alloy_network::Optimism;
     type Transaction = op_alloy_rpc_types::Transaction;
     type Envelope = OpTxEnvelope;
-    type Evm<DB: Database> = OpEvm<OpContext<DB>, ()>;
+    type Evm<DB: Database> = OpEvm<
+        Context<
+            BlockEnv,
+            op_revm::OpTransaction<TxEnv>,
+            CfgEnv<op_revm::OpSpecId>,
+            DB,
+            crate::journal::Journal<DB>,
+            op_revm::L1BlockInfo,
+        >,
+        (),
+    >;
     type EvmSpecId = OpSpecId;
     type EvmTx = OpTransaction<TxEnv>;
     type EvmHaltReason = OpHaltReason;
@@ -96,13 +106,22 @@ impl PevmChain for PevmRise {
         block_env: BlockEnv,
         db: DB,
     ) -> Self::Evm<DB> {
-        Context::mainnet()
-            .with_cfg(CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID))
-            .with_block(block_env)
-            .with_db(db)
-            .with_tx(OpTransaction::default())
-            .with_chain(L1BlockInfo::default())
-            .build_op()
+        let cfg = CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID);
+        let journal_cfg = JournalCfg {
+            spec: spec_id.into(),
+            eip7708_disabled: cfg.amsterdam_eip7708_disabled,
+            eip7708_delayed_burn_disabled: cfg.amsterdam_eip7708_delayed_burn_disabled,
+        };
+        Context {
+            block: block_env,
+            tx: OpTransaction::default(),
+            cfg,
+            journaled_state: crate::journal::Journal::new(db, journal_cfg),
+            chain: L1BlockInfo::default(),
+            local: LocalContext::default(),
+            error: Ok(()),
+        }
+        .build_op()
     }
 
     fn build_mv_memory(&self, block_env: &BlockEnv, txs: &[OpTransaction<TxEnv>]) -> MvMemory {
