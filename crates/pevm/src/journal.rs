@@ -92,7 +92,7 @@ impl JournalEntry {
     fn revert(
         self,
         state: &mut EvmState,
-        transient_storage: Option<&mut TransientStorage>,
+        transient_storage: &mut TransientStorage,
         is_spurious_dragon_enabled: bool,
     ) {
         match self {
@@ -185,12 +185,11 @@ impl JournalEntry {
                 key,
                 had_value,
             } => {
-                let Some(ts) = transient_storage else { return };
                 let tkey = (address, key);
                 if had_value.is_zero() {
-                    ts.remove(&tkey);
+                    transient_storage.remove(&tkey);
                 } else {
-                    ts.insert(tkey, had_value);
+                    transient_storage.insert(tkey, had_value);
                 }
             }
             Self::CodeChange { address } => {
@@ -516,6 +515,15 @@ impl<DB: Database> Journal<DB> {
     }
 
     #[inline]
+    fn clear_tx(&mut self) {
+        self.transient_storage.clear();
+        self.depth = 0;
+        self.journal.clear();
+        self.warm_addresses.clear_coinbase_and_access_list();
+        self.logs.clear();
+    }
+
+    #[inline]
     fn touch_account(journal: &mut Vec<JournalEntry>, address: Address, account: &mut Account) {
         if !account.is_touched() {
             journal.push(JournalEntry::AccountTouched { address });
@@ -636,22 +644,11 @@ impl<DB: Database> JournalTr for Journal<DB> {
     }
 
     fn commit_tx(&mut self) {
-        self.transient_storage.clear();
-        self.depth = 0;
-        self.journal.clear();
-        self.warm_addresses.clear_coinbase_and_access_list();
-        self.logs.clear();
+        self.clear_tx();
     }
 
     fn discard_tx(&mut self) {
-        // State is taken and discarded by the caller's finalize() immediately after.
-        // Journal replay is unnecessary: finalize() returns whatever is in state, and on
-        // failed txs the caller ignores that return value.
-        self.transient_storage.clear();
-        self.depth = 0;
-        self.journal.clear();
-        self.warm_addresses.clear_coinbase_and_access_list();
-        self.logs.clear();
+        self.clear_tx();
     }
 
     fn finalize(&mut self) -> EvmState {
@@ -905,7 +902,7 @@ impl<DB: Database> JournalTr for Journal<DB> {
                 .drain(checkpoint.journal_i..)
                 .rev()
                 .for_each(|entry| {
-                    entry.revert(state, Some(transient_storage), is_spurious_dragon_enabled);
+                    entry.revert(state, transient_storage, is_spurious_dragon_enabled);
                 });
         }
     }
