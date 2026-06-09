@@ -475,7 +475,7 @@ pub fn execute_revm_sequential<S: Storage + Debug, C: PevmChain>(
 ) -> PevmResult<C> {
     let db = CacheDB::new(StorageWrapper(storage));
     let is_eip_161_enabled = chain.is_eip_161_enabled(spec_id);
-    let mut evm = chain.build_pevm_evm(spec_id, block_env, db);
+    let mut evm = chain.build_evm(spec_id, block_env, db);
 
     let mut results: Vec<PevmTxExecutionResult> = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u64 = 0;

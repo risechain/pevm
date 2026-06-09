@@ -65,13 +65,13 @@ impl PevmChain for PevmRise {
     type Network = op_alloy_network::Optimism;
     type Transaction = op_alloy_rpc_types::Transaction;
     type Envelope = OpTxEnvelope;
-    type PevmEvm<DB: Database> = OpEvm<
+    type Evm<DB: Database> = OpEvm<
         Context<
             BlockEnv,
             op_revm::OpTransaction<TxEnv>,
             CfgEnv<op_revm::OpSpecId>,
             DB,
-            crate::journal::Journal<DB, true>,
+            crate::journal::Journal<DB>,
             op_revm::L1BlockInfo,
         >,
         (),
@@ -100,12 +100,12 @@ impl PevmChain for PevmRise {
         Ok(OpSpecId::JOVIAN)
     }
 
-    fn build_pevm_evm<DB: Database>(
+    fn build_evm<DB: Database>(
         &self,
         spec_id: Self::EvmSpecId,
         block_env: BlockEnv,
         db: DB,
-    ) -> Self::PevmEvm<DB> {
+    ) -> Self::Evm<DB> {
         let cfg = CfgEnv::new_with_spec(spec_id).with_chain_id(RISE_CHAIN_ID);
         let journal_cfg = JournalCfg {
             spec: spec_id.into(),
@@ -116,7 +116,7 @@ impl PevmChain for PevmRise {
             block: block_env,
             tx: OpTransaction::default(),
             cfg,
-            journaled_state: crate::journal::Journal::<DB, true>::new(db, journal_cfg),
+            journaled_state: crate::journal::Journal::new(db, journal_cfg),
             chain: L1BlockInfo::default(),
             local: LocalContext::default(),
             error: Ok(()),
@@ -293,7 +293,7 @@ impl PevmChain for PevmRise {
         &tx.base
     }
 
-    fn has_nonce<DB: Database>(&self, evm: &mut Self::PevmEvm<DB>, tx: &Self::EvmTx) -> bool {
+    fn has_nonce<DB: Database>(&self, evm: &mut Self::Evm<DB>, tx: &Self::EvmTx) -> bool {
         let is_deposit = tx.is_deposit();
         evm.ctx()
             .modify_cfg(|cfg| cfg.disable_nonce_check = is_deposit);

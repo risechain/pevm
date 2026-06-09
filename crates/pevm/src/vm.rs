@@ -477,7 +477,7 @@ pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     mv_memory: &'a MvMemory,
     beneficiary_location_hash: MemoryLocationHash,
     // Dedicated EVM for the worker, reset before each transaction exectution.
-    evm: C::PevmEvm<VmDb<'a, S>>,
+    evm: C::Evm<VmDb<'a, S>>,
 }
 
 impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
@@ -516,7 +516,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             beneficiary_location_hash: hash_deterministic(MemoryLocation::Basic(
                 block_env.beneficiary,
             )),
-            evm: chain.build_pevm_evm(spec_id, block_env.clone(), db),
+            evm: chain.build_evm(spec_id, block_env.clone(), db),
         }
     }
 
@@ -775,7 +775,7 @@ impl<C, DB> Default for NoBeneficiaryHandler<C, DB> {
 }
 
 impl<C: PevmChain, DB: Database> Handler for NoBeneficiaryHandler<C, DB> {
-    type Evm = C::PevmEvm<DB>;
+    type Evm = C::Evm<DB>;
     type Error = EVMError<DB::Error, InvalidTransaction>;
     type HaltReason = C::EvmHaltReason;
 

@@ -17,10 +17,9 @@ use revm::{
         Address, AddressSet, B256, HashSet, KECCAK_EMPTY, Log, PRECOMPILE3, StorageKey,
         StorageValue, U256,
         hardfork::SpecId::{self, *},
-        hints_util::unlikely,
         map::Entry,
     },
-    state::{Account, AccountStatus, Bytecode, EvmStorageSlot, TransientStorage},
+    state::{Account, Bytecode, EvmStorageSlot, TransientStorage},
 };
 
 use crate::{AddressMap, EvmState};
@@ -460,7 +459,7 @@ impl<'a, DB: Database> JournaledAccountTr for JournaledAccount<'a, DB> {
 /// EIP-7708 (Amsterdam) is omitted — neither Ethereum (CANCUN) nor RISE (JOVIAN=Prague) needs it.
 #[allow(missing_docs)]
 #[derive(Debug)]
-pub struct Journal<DB: Database, const IS_PEVM: bool = false> {
+pub struct Journal<DB: Database> {
     pub database: DB,
     pub state: EvmState,
     /// EIP-1153 transient storage, cleared after every transaction.
@@ -474,7 +473,7 @@ pub struct Journal<DB: Database, const IS_PEVM: bool = false> {
     pub warm_addresses: WarmAddresses,
 }
 
-impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
+impl<DB: Database> Journal<DB> {
     pub(crate) fn new(database: DB, cfg: JournalCfg) -> Self {
         Self {
             database,
@@ -489,7 +488,7 @@ impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
         }
     }
 
-    fn finalize(&mut self) -> EvmState {
+    fn extract_state(&mut self) -> EvmState {
         self.warm_addresses.clear_coinbase_and_access_list();
 
         let mut state = mem::take(&mut self.state);
@@ -541,7 +540,7 @@ impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
         Ok(load.map(|i| i.into_account()))
     }
 
-    #[inline(never)]
+    #[inline]
     fn load_account_mut_optional(
         &mut self,
         address: Address,
@@ -551,14 +550,7 @@ impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
         let account = match self.state.entry(address) {
             Entry::Occupied(entry) => {
                 let account = entry.into_mut();
-                // In PEVM mode, state is cleared before each tx so transaction_id always
-                // matches — only the Cold bit (set by sub-call reverts) can make this true.
-                let is_cold_check = if IS_PEVM {
-                    account.status.contains(AccountStatus::Cold)
-                } else {
-                    account.is_cold_transaction_id(self.transaction_id)
-                };
-                if unlikely(is_cold_check) {
+                if account.is_cold_transaction_id(self.transaction_id) {
                     is_cold = self
                         .warm_addresses
                         .check_is_cold(&address, skip_cold_load)?;
@@ -570,7 +562,7 @@ impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
                     *account.original_info = account.info.clone();
                     account.unmark_created_locally();
                     self.journal.push(JournalEntry::AccountWarmed { address });
-                };
+                }
                 account
             }
             Entry::Vacant(vac) => {
@@ -618,7 +610,7 @@ impl<DB: Database, const IS_PEVM: bool> Journal<DB, IS_PEVM> {
     }
 }
 
-impl<DB: Database, const IS_PEVM: bool> JournalTr for Journal<DB, IS_PEVM> {
+impl<DB: Database> JournalTr for Journal<DB> {
     type Database = DB;
     type State = EvmState;
     type JournaledAccount<'a>
@@ -672,24 +664,19 @@ impl<DB: Database, const IS_PEVM: bool> JournalTr for Journal<DB, IS_PEVM> {
     }
 
     fn finalize(&mut self) -> EvmState {
-        self.finalize()
+        self.extract_state()
     }
 
     fn clear(&mut self) {
-        if IS_PEVM {
-            // State is either already empty (taken by finalize on success) or leftover from
-            // a failed tx. Either way, clear in-place to retain heap allocations for reuse.
-            // Pre-Spurious-Dragon fixup in finalize() is irrelevant — state is being discarded.
-            self.state.clear();
-            self.warm_addresses.clear_coinbase_and_access_list();
-            self.logs.clear();
-            self.transient_storage.clear();
-            self.journal.clear();
-            self.depth = 0;
-            self.transaction_id = 0;
-        } else {
-            self.finalize();
-        }
+        // Clear in-place to retain heap allocations for reuse across txs.
+        // Pre-Spurious-Dragon fixup in extract_state() is only needed when returning state.
+        self.state.clear();
+        self.warm_addresses.clear_coinbase_and_access_list();
+        self.logs.clear();
+        self.transient_storage.clear();
+        self.journal.clear();
+        self.depth = 0;
+        self.transaction_id = 0;
     }
 
     fn depth(&self) -> usize {
