@@ -30,10 +30,20 @@ use super::{BlockHashes, Bytecodes, ChainState, EvmCode};
 
 /// Error type for [`RpcStorage`].
 #[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct RpcStorageError(#[from] pub TransportError);
+pub enum RpcStorageError {
+    /// RPC transport error.
+    #[error(transparent)]
+    Transport(#[from] TransportError),
+    /// The requested block does not exist.
+    #[error("block {0} not found")]
+    BlockNotFound(u64),
+}
 
 impl DBErrorMarker for RpcStorageError {}
+
+fn require_block_hash(block_hash: Option<B256>, number: u64) -> Result<B256, RpcStorageError> {
+    block_hash.ok_or(RpcStorageError::BlockNotFound(number))
+}
 
 /// A storage that fetches state data via RPC for execution.
 #[derive(Debug)]
@@ -238,8 +248,10 @@ impl<N: Network> Storage for RpcStorage<N> {
             .block_on(self.fetch(|| {
                 self.provider
                     .get_block_by_number(BlockNumberOrTag::Number(*number))
-            }))
-            .map(|block| block.unwrap().header().hash())?;
+            }))?
+            .map(|block| block.header().hash());
+
+        let block_hash = require_block_hash(block_hash, *number)?;
 
         self.cache_block_hashes
             .lock()
@@ -247,5 +259,20 @@ impl<N: Network> Storage for RpcStorage<N> {
             .insert(*number, block_hash);
 
         Ok(block_hash)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_block_hash_returns_error() {
+        let number = 123;
+
+        let err = require_block_hash(None, number).unwrap_err();
+
+        assert!(matches!(err, RpcStorageError::BlockNotFound(123)));
+        assert_eq!(err.to_string(), "block 123 not found");
     }
 }
