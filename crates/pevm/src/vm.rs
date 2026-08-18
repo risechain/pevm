@@ -596,11 +596,14 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         let read_account = ctx.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
-                        let is_new_code = has_code
-                            && read_account.is_none_or(|(_, code_hash)| code_hash.is_none());
+                        let code_changed = has_code
+                            && account.info.code.is_some()
+                            && read_account.is_none_or(|(_, code_hash)| {
+                                *code_hash != Some(account.info.code_hash)
+                            });
 
                         // Write new account changes
-                        if is_new_code
+                        if code_changed
                             || read_account.is_none()
                             || read_account.is_some_and(|(basic, _)| {
                                 basic.nonce != account.info.nonce
@@ -640,7 +643,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         }
 
                         // Write new contract
-                        if is_new_code {
+                        if code_changed {
                             write_set.push((
                                 hash_deterministic(MemoryLocation::CodeHash(*address)),
                                 MemoryValue::CodeHash(account.info.code_hash),
