@@ -85,7 +85,10 @@ impl PevmChain for PevmEthereum {
     // TODO: Better error handling & properly test this.
     // TODO: Only Ethereum Mainnet is supported at the moment.
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError> {
-        Ok(if header.timestamp >= 1710338135 {
+        // Prague (Pectra) activated at timestamp 1746616800 (May 7, 2025 10:05:11 UTC)
+        Ok(if header.timestamp >= 1746616800 {
+            SpecId::PRAGUE
+        } else if header.timestamp >= 1710338135 {
             SpecId::CANCUN
         } else if header.timestamp >= 1681338455 {
             SpecId::SHANGHAI
