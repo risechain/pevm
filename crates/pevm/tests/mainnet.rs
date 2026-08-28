@@ -68,6 +68,20 @@ async fn mainnet_blocks_from_rpc() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "rpc-storage")]
+async fn sepolia_blocks_from_rpc() {
+    test_blocks_from_rpc(
+        PevmEthereum::sepolia(),
+        get_rpc_url(
+            "ETHEREUM_SEPOLIA_RPC_URL",
+            "https://ethereum-sepolia-rpc.publicnode.com",
+        ),
+        &[9_408_576], // OSAKA
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(feature = "rpc-storage")]
 async fn rise_mainnet_blocks_from_rpc() {
     test_blocks_from_rpc(
         pevm::chain::PevmRise,
