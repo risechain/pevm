@@ -26,19 +26,91 @@ use crate::{
     hash_deterministic, mv_memory::MvMemory,
 };
 
+const SEPOLIA_CHAIN_ID: u64 = 11_155_111;
+const SEPOLIA_PARIS_BLOCK: u64 = 1_450_409;
+const SEPOLIA_SHANGHAI_TIMESTAMP: u64 = 1_677_557_088;
+const SEPOLIA_CANCUN_TIMESTAMP: u64 = 1_706_655_072;
+const SEPOLIA_PRAGUE_TIMESTAMP: u64 = 1_741_159_776;
+const SEPOLIA_OSAKA_TIMESTAMP: u64 = 1_760_427_360;
+
 /// Implementation of [`PevmChain`] for Ethereum
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PevmEthereum {
-    id: u64,
+    network: EthereumNetwork,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EthereumNetwork {
+    Mainnet,
+    Sepolia,
 }
 
 impl PevmEthereum {
     /// Ethereum Mainnet
     pub const fn mainnet() -> Self {
-        Self { id: 1 }
+        Self {
+            network: EthereumNetwork::Mainnet,
+        }
     }
 
-    // TODO: support Ethereum Sepolia and other testnets
+    /// Ethereum Sepolia
+    pub const fn sepolia() -> Self {
+        Self {
+            network: EthereumNetwork::Sepolia,
+        }
+    }
+
+    fn mainnet_block_spec(header: &Header) -> SpecId {
+        if header.timestamp >= 1710338135 {
+            SpecId::CANCUN
+        } else if header.timestamp >= 1681338455 {
+            SpecId::SHANGHAI
+        }
+        // Checking for total difficulty is more precise but many RPC providers stopped returning
+        // it.
+        else if header.number >= 15537394 {
+            SpecId::MERGE
+        } else if header.number >= 12965000 {
+            SpecId::LONDON
+        } else if header.number >= 12244000 {
+            SpecId::BERLIN
+        } else if header.number >= 9069000 {
+            SpecId::ISTANBUL
+        } else if header.number >= 7280000 {
+            SpecId::PETERSBURG
+        } else if header.number >= 4370000 {
+            SpecId::BYZANTIUM
+        } else if header.number >= 2675000 {
+            SpecId::SPURIOUS_DRAGON
+        } else if header.number >= 2463000 {
+            SpecId::TANGERINE
+        } else if header.number >= 1150000 {
+            SpecId::HOMESTEAD
+        } else {
+            SpecId::FRONTIER
+        }
+    }
+
+    fn sepolia_block_spec(header: &Header) -> SpecId {
+        // Sepolia's activation points are defined by alloy-hardforks:
+        // https://github.com/alloy-rs/hardforks/blob/a8af395408a4850fab5e0ca708cf495477c61bcc/crates/hardforks/src/ethereum/sepolia.rs
+        if header.timestamp >= SEPOLIA_OSAKA_TIMESTAMP {
+            SpecId::OSAKA
+        } else if header.timestamp >= SEPOLIA_PRAGUE_TIMESTAMP {
+            SpecId::PRAGUE
+        } else if header.timestamp >= SEPOLIA_CANCUN_TIMESTAMP {
+            SpecId::CANCUN
+        } else if header.timestamp >= SEPOLIA_SHANGHAI_TIMESTAMP {
+            SpecId::SHANGHAI
+        } else if header.number >= SEPOLIA_PARIS_BLOCK {
+            // Checking for total difficulty is more precise, but it is no longer reliably
+            // returned by RPC providers.
+            SpecId::MERGE
+        } else {
+            // All pre-merge hardforks through London were active at Sepolia genesis.
+            SpecId::LONDON
+        }
+    }
 }
 
 /// Represents errors that can occur when parsing transactions
@@ -71,7 +143,10 @@ impl PevmChain for PevmEthereum {
     type TransactionParsingError = EthereumTransactionParsingError;
 
     fn id(&self) -> u64 {
-        self.id
+        match self.network {
+            EthereumNetwork::Mainnet => 1,
+            EthereumNetwork::Sepolia => SEPOLIA_CHAIN_ID,
+        }
     }
 
     fn mock_tx(&self, envelope: Self::Envelope, from: Address) -> Self::Transaction {
@@ -79,38 +154,12 @@ impl PevmChain for PevmEthereum {
     }
 
     /// Get the REVM spec id of an Alloy block.
-    // Currently hardcoding Ethereum hardforks from these references:
-    // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/revm/config.rs#L33-L78
-    // https://github.com/paradigmxyz/reth/blob/4fa627736681289ba899b38f1c7a97d9fcf33dc6/crates/primitives/src/chain/spec.rs#L44-L68
+    // Currently hardcoding Ethereum hardforks from the canonical chain specs.
     // TODO: Better error handling & properly test this.
-    // TODO: Only Ethereum Mainnet is supported at the moment.
     fn get_block_spec(&self, header: &Header) -> Result<SpecId, Self::BlockSpecError> {
-        Ok(if header.timestamp >= 1710338135 {
-            SpecId::CANCUN
-        } else if header.timestamp >= 1681338455 {
-            SpecId::SHANGHAI
-        }
-        // Checking for total difficulty is more precise but many RPC providers stopped returning it...
-        else if header.number >= 15537394 {
-            SpecId::MERGE
-        } else if header.number >= 12965000 {
-            SpecId::LONDON
-        } else if header.number >= 12244000 {
-            SpecId::BERLIN
-        } else if header.number >= 9069000 {
-            SpecId::ISTANBUL
-        } else if header.number >= 7280000 {
-            SpecId::PETERSBURG
-        } else if header.number >= 4370000 {
-            SpecId::BYZANTIUM
-        } else if header.number >= 2675000 {
-            SpecId::SPURIOUS_DRAGON
-        } else if header.number >= 2463000 {
-            SpecId::TANGERINE
-        } else if header.number >= 1150000 {
-            SpecId::HOMESTEAD
-        } else {
-            SpecId::FRONTIER
+        Ok(match self.network {
+            EthereumNetwork::Mainnet => Self::mainnet_block_spec(header),
+            EthereumNetwork::Sepolia => Self::sepolia_block_spec(header),
         })
     }
 
@@ -120,7 +169,7 @@ impl PevmChain for PevmEthereum {
         block_env: BlockEnv,
         db: DB,
     ) -> Self::Evm<DB> {
-        let mut cfg = CfgEnv::new_with_spec(spec_id).with_chain_id(self.id);
+        let mut cfg = CfgEnv::new_with_spec(spec_id).with_chain_id(self.id());
         if spec_id >= SpecId::PRAGUE {
             cfg = cfg.with_max_blobs_per_tx(MAX_BLOB_NUMBER_PER_BLOCK_PRAGUE);
         } else if spec_id >= SpecId::CANCUN {
@@ -243,5 +292,90 @@ impl PevmChain for PevmEthereum {
 
     fn is_eip_161_enabled(&self, spec_id: SpecId) -> bool {
         spec_id >= SpecId::SPURIOUS_DRAGON
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_consensus::Header as ConsensusHeader;
+
+    use super::*;
+
+    fn header(number: u64, timestamp: u64) -> Header {
+        Header {
+            inner: ConsensusHeader {
+                number,
+                timestamp,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn sepolia_has_the_expected_chain_id() {
+        assert_eq!(PevmEthereum::sepolia().id(), SEPOLIA_CHAIN_ID);
+    }
+
+    #[test]
+    fn sepolia_uses_london_before_the_merge() {
+        let chain = PevmEthereum::sepolia();
+        assert_eq!(chain.get_block_spec(&header(0, 0)), Ok(SpecId::LONDON));
+        assert_eq!(
+            chain.get_block_spec(&header(SEPOLIA_PARIS_BLOCK - 1, 1_633_267_480)),
+            Ok(SpecId::LONDON)
+        );
+    }
+
+    #[test]
+    fn sepolia_activates_each_supported_hardfork_at_its_boundary() {
+        let chain = PevmEthereum::sepolia();
+        let cases = [
+            (SEPOLIA_PARIS_BLOCK, 0, SpecId::MERGE),
+            (
+                SEPOLIA_PARIS_BLOCK,
+                SEPOLIA_SHANGHAI_TIMESTAMP - 1,
+                SpecId::MERGE,
+            ),
+            (
+                SEPOLIA_PARIS_BLOCK,
+                SEPOLIA_SHANGHAI_TIMESTAMP,
+                SpecId::SHANGHAI,
+            ),
+            (
+                SEPOLIA_PARIS_BLOCK,
+                SEPOLIA_CANCUN_TIMESTAMP - 1,
+                SpecId::SHANGHAI,
+            ),
+            (
+                SEPOLIA_PARIS_BLOCK,
+                SEPOLIA_CANCUN_TIMESTAMP,
+                SpecId::CANCUN,
+            ),
+            (
+                SEPOLIA_PARIS_BLOCK,
+                SEPOLIA_PRAGUE_TIMESTAMP - 1,
+                SpecId::CANCUN,
+            ),
+            (
+                SEPOLIA_PARIS_BLOCK,
+                SEPOLIA_PRAGUE_TIMESTAMP,
+                SpecId::PRAGUE,
+            ),
+            (
+                SEPOLIA_PARIS_BLOCK,
+                SEPOLIA_OSAKA_TIMESTAMP - 1,
+                SpecId::PRAGUE,
+            ),
+            (SEPOLIA_PARIS_BLOCK, SEPOLIA_OSAKA_TIMESTAMP, SpecId::OSAKA),
+        ];
+
+        for (number, timestamp, expected) in cases {
+            assert_eq!(
+                chain.get_block_spec(&header(number, timestamp)),
+                Ok(expected),
+                "unexpected spec at block {number}, timestamp {timestamp}"
+            );
+        }
     }
 }
