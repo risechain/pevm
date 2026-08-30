@@ -35,6 +35,15 @@ pub struct RpcStorageError(#[from] pub TransportError);
 
 impl DBErrorMarker for RpcStorageError {}
 
+/// Returns `true` if the error is transient and the request should be retried.
+fn is_retryable(err: &TransportError) -> bool {
+    match err {
+        alloy_json_rpc::RpcError::Transport(kind) => kind.is_retry_err(),
+        alloy_json_rpc::RpcError::NullResp => true,
+        _ => false,
+    }
+}
+
 /// A storage that fetches state data via RPC for execution.
 #[derive(Debug)]
 pub struct RpcStorage<N: Network> {
@@ -84,13 +93,13 @@ impl<N: Network> RpcStorage<N> {
         }
     }
 
-    /// Send a request and retry many times if needed.
-    /// This util is made to avoid error 429 Too Many Requests
+    /// Send a request and retry on transient errors (429, 503, etc).
+    /// Permanent errors are returned immediately without retrying.
     /// <https://en.wikipedia.org/wiki/Exponential_backoff>
-    async fn fetch<T, E, R: IntoFuture<Output = Result<T, E>>>(
+    async fn fetch<T, R: IntoFuture<Output = Result<T, TransportError>>>(
         &self,
         request: impl Fn() -> R,
-    ) -> Result<T, E> {
+    ) -> Result<T, TransportError> {
         const RETRY_LIMIT: usize = 8;
         const INITIAL_DELAY_MILLIS: u64 = 125;
 
@@ -99,12 +108,14 @@ impl<N: Network> RpcStorage<N> {
 
         loop {
             let result = request().await;
-            if lives > 0 && result.is_err() {
-                tokio::time::sleep(delay).await;
-                lives -= 1;
-                delay *= 2;
-            } else {
-                return result;
+            match result {
+                Ok(_) => return result,
+                Err(err) if lives > 0 && is_retryable(&err) => {
+                    tokio::time::sleep(delay).await;
+                    lives -= 1;
+                    delay *= 2;
+                }
+                Err(_) => return result,
             }
         }
     }
