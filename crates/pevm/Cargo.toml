@@ -4,7 +4,7 @@ name = "pevm"
 version = "0.1.0"
 
 [features]
-defaults = []
+default = []
 
 rpc-storage = ["dep:alloy-transport", "dep:reqwest", "dep:tokio"]
 
