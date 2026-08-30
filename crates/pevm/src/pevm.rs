@@ -84,26 +84,70 @@ enum AbortReason {
     ExecutionError(ExecutionError),
 }
 
-// TODO: Better implementation
 #[derive(Debug)]
 struct AsyncDropper<T> {
-    sender: mpsc::Sender<T>,
-    _handle: thread::JoinHandle<()>,
+    sender: Option<mpsc::Sender<T>>,
+    handle: Option<thread::JoinHandle<()>>,
 }
 
 impl<T: Send + 'static> Default for AsyncDropper<T> {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
-            sender,
-            _handle: std::thread::spawn(move || receiver.into_iter().for_each(drop)),
+            sender: Some(sender),
+            handle: Some(std::thread::spawn(move || receiver.into_iter().for_each(drop))),
         }
     }
 }
 
 impl<T> AsyncDropper<T> {
-    fn drop(&self, t: T) {
-        let _ = self.sender.send(t);
+    fn drop_item(&self, t: T) {
+        if let Some(sender) = &self.sender {
+            let _ = sender.send(t);
+        }
+    }
+}
+
+impl<T> Drop for AsyncDropper<T> {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+// Reusable per-block execution result buffer. Each slot is an `UnsafeCell` so workers
+// can write into it while sharing a thread-safe reference to the buffer at runtime
+// without synchronisation overheads (like putting each slot behind a mutex).
+//
+// All unsafe operations are centralised here as they share the same invariant:
+// The scheduler assigns exclusive `Executing` status to exactly one worker thread
+// per slot at a time, and result collection runs only after all worker threads have
+// joined. Other worker tasks like validation don't touch these results at all.
+#[derive(Debug, Default)]
+struct ExecutionResults(Vec<UnsafeCell<Option<PevmTxExecutionResult>>>);
+
+unsafe impl Sync for ExecutionResults {}
+
+impl ExecutionResults {
+    fn grow_to(&mut self, block_size: usize) {
+        if block_size > self.0.len() {
+            self.0.resize_with(block_size, || UnsafeCell::new(None));
+        }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn slot_mut(&self, tx_idx: TxIdx) -> &mut Option<PevmTxExecutionResult> {
+        unsafe { &mut *self.0.get_unchecked(tx_idx).get() }
+    }
+
+    fn take_slot(&self, tx_idx: TxIdx) -> PevmTxExecutionResult {
+        unsafe {
+            (*self.0.get_unchecked(tx_idx).get())
+                .take()
+                .unwrap_unchecked()
+        }
     }
 }
 
@@ -265,11 +309,11 @@ impl Pevm {
         if let Some(abort_reason) = self.abort_reason.take() {
             match abort_reason {
                 AbortReason::FallbackToSequential => {
-                    self.dropper.drop((mv_memory, scheduler));
+                    self.dropper.drop_item((mv_memory, scheduler));
                     return execute_revm_sequential(chain, storage, spec_id, block_env, txs);
                 }
                 AbortReason::ExecutionError(err) => {
-                    self.dropper.drop((mv_memory, scheduler));
+                    self.dropper.drop_item((mv_memory, scheduler));
                     return Err(PevmError::ExecutionError(err));
                 }
             }
@@ -402,7 +446,7 @@ impl Pevm {
             }
         }
 
-        self.dropper.drop((mv_memory, scheduler));
+        self.dropper.drop_item((mv_memory, scheduler));
 
         Ok(fully_evaluated_results)
     }
