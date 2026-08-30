@@ -1,7 +1,8 @@
 use std::{
+    cell::UnsafeCell,
     fmt::Debug,
     num::NonZeroUsize,
-    sync::{Mutex, OnceLock, mpsc},
+    sync::{OnceLock, mpsc},
     thread,
 };
 
@@ -10,7 +11,10 @@ use alloy_rpc_types_eth::{Block, BlockTransactions};
 use hashbrown::HashMap;
 use revm::{
     DatabaseCommit, ExecuteEvm,
-    context::{BlockEnv, ContextTr, Transaction, result::InvalidTransaction},
+    context::{
+        BlockEnv, ContextTr, Transaction,
+        result::{InvalidTransaction, ResultAndState},
+    },
     database::CacheDB,
     handler::EvmTr,
 };
@@ -23,7 +27,10 @@ use crate::{
     mv_memory::MvMemory,
     scheduler::Scheduler,
     storage::StorageWrapper,
-    vm::{ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult},
+    vm::{
+        ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, receipt_from_revm,
+        state_transitions_from_revm,
+    },
 };
 
 /// Errors when executing a block with pevm.
@@ -100,11 +107,49 @@ impl<T> AsyncDropper<T> {
     }
 }
 
+// Reusable per-block execution result buffer. Each slot is an `UnsafeCell` so workers
+// can write into it while sharing a thread-safe reference to the buffer at runtime
+// without synchronisation overheads (like putting each slot behind a mutex).
+//
+// All unsafe operations are centralised here as they share the same invariant:
+// The scheduler assigns exclusive `Executing` status to exactly one worker thread
+// per slot at a time, and result collection runs only after all worker threads have
+// joined. Other worker tasks like validation don't touch these results at all.
+#[derive(Debug, Default)]
+struct ExecutionResults(Vec<UnsafeCell<Option<PevmTxExecutionResult>>>);
+
+unsafe impl Sync for ExecutionResults {}
+
+impl ExecutionResults {
+    fn grow_to(&mut self, block_size: usize) {
+        if block_size > self.0.len() {
+            self.0.resize_with(block_size, || UnsafeCell::new(None));
+        }
+        // Clear any stale results from previous aborted executions
+        for i in 0..block_size.min(self.0.len()) {
+            unsafe { *self.0[i].get() = None; }
+        }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn slot_mut(&self, tx_idx: TxIdx) -> &mut Option<PevmTxExecutionResult> {
+        unsafe { &mut *self.0.get_unchecked(tx_idx).get() }
+    }
+
+    fn take_slot(&self, tx_idx: TxIdx) -> PevmTxExecutionResult {
+        unsafe {
+            (*self.0.get_unchecked(tx_idx).get())
+                .take()
+                .unwrap_unchecked()
+        }
+    }
+}
+
 // TODO: Port more recyclable resources into here.
 #[derive(Debug, Default)]
 /// The main pevm struct that executes blocks.
 pub struct Pevm {
-    execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
+    execution_results: ExecutionResults,
     abort_reason: OnceLock<AbortReason>,
     dropper: AsyncDropper<(MvMemory, Scheduler)>,
 }
@@ -185,13 +230,7 @@ impl Pevm {
 
         let mv_memory = chain.build_mv_memory(&block_env, &txs);
 
-        let additional = block_size.saturating_sub(self.execution_results.len());
-        if additional > 0 {
-            self.execution_results.reserve(additional);
-            for _ in 0..additional {
-                self.execution_results.push(Mutex::new(None));
-            }
-        }
+        self.execution_results.grow_to(block_size);
 
         // TODO: Better thread handling
         thread::scope(|scope| {
@@ -242,8 +281,8 @@ impl Pevm {
 
         let mut fully_evaluated_results = Vec::with_capacity(block_size);
         let mut cumulative_gas_used: u64 = 0;
-        for i in 0..block_size {
-            let mut execution_result = index_mutex!(self.execution_results, i).take().unwrap();
+        for tx_idx in 0..block_size {
+            let mut execution_result = self.execution_results.take_slot(tx_idx);
             cumulative_gas_used =
                 cumulative_gas_used.saturating_add(execution_result.receipt.cumulative_gas_used);
             execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
@@ -378,8 +417,10 @@ impl Pevm {
         scheduler: &Scheduler,
         tx_version: TxVersion,
     ) -> Option<Task> {
+        let result_slot = self.execution_results.slot_mut(tx_version.tx_idx);
         loop {
-            return match vm.execute(&tx_version) {
+            return match vm.execute(&tx_version, result_slot) {
+                Ok(flags) => scheduler.finish_execution(tx_version, flags),
                 Err(VmExecutionError::Retry) => {
                     if self.abort_reason.get().is_none() {
                         continue;
@@ -407,14 +448,6 @@ impl Pevm {
                     self.abort_reason
                         .get_or_init(|| AbortReason::ExecutionError(err));
                     None
-                }
-                Ok(VmExecutionResult {
-                    execution_result,
-                    flags,
-                }) => {
-                    *index_mutex!(self.execution_results, tx_version.tx_idx) =
-                        Some(execution_result);
-                    scheduler.finish_execution(tx_version, flags)
                 }
             };
         }
@@ -445,20 +478,23 @@ pub fn execute_revm_sequential<S: Storage + Debug, C: PevmChain>(
     txs: Vec<C::EvmTx>,
 ) -> PevmResult<C> {
     let db = CacheDB::new(StorageWrapper(storage));
+    let is_eip_161_enabled = chain.is_eip_161_enabled(spec_id);
     let mut evm = chain.build_evm(spec_id, block_env, db);
 
     let mut results: Vec<PevmTxExecutionResult> = Vec::with_capacity(txs.len());
     let mut cumulative_gas_used: u64 = 0;
     for tx in txs {
         // TODO: More concrete error type
-        let result_and_state = evm
+        let ResultAndState { result, state } = evm
             .transact(tx)
             .map_err(|err| ExecutionError::Custom(err.to_string()))?;
 
-        evm.ctx().db_mut().commit(result_and_state.state.clone());
+        evm.ctx().db_mut().commit(state.clone());
 
-        let mut execution_result =
-            PevmTxExecutionResult::from_revm(chain, spec_id, result_and_state);
+        let mut execution_result = PevmTxExecutionResult {
+            receipt: receipt_from_revm(result),
+            state: state_transitions_from_revm(is_eip_161_enabled, state).collect(),
+        };
 
         cumulative_gas_used =
             cumulative_gas_used.saturating_add(execution_result.receipt.cumulative_gas_used);
