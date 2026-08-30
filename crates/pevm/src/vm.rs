@@ -648,7 +648,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             self.mv_memory
                                 .new_bytecodes
                                 .entry(account.info.code_hash)
-                                .or_insert_with(|| account.info.code.clone().unwrap());
+                                .or_insert_with(|| account.info.code.clone().unwrap_or_default());
                         }
                     }
 
