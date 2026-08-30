@@ -245,6 +245,7 @@ impl Scheduler {
                 }
                 tx.status = IncarnationStatus::Validated;
                 self.num_validated.fetch_add(1, Ordering::Relaxed);
+                return None;
             }
             // Don't need to validate anything if the current validation index is
             // lower or equal -- it will catch up later.
