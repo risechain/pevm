@@ -5,11 +5,11 @@ use revm::{
     Database,
     context::{
         BlockEnv, ContextSetters, ContextTr, DBErrorMarker, JournalTr, TxEnv,
-        result::{EVMError, InvalidTransaction, ResultAndState},
+        result::{EVMError, ExecutionResult, InvalidTransaction},
     },
     handler::{EvmTr, FrameResult, Handler},
     primitives::KECCAK_EMPTY,
-    state::{AccountInfo, Bytecode},
+    state::{AccountInfo, Bytecode, EvmState},
 };
 use smallvec::SmallVec;
 
@@ -38,36 +38,32 @@ pub struct PevmTxExecutionResult {
     pub state: EvmStateTransitions,
 }
 
-impl PevmTxExecutionResult {
-    /// Construct a Pevm execution result from a raw Revm result.
-    /// Note that [`cumulative_gas_used`] is preset to the gas used in this transaction.
-    /// It should be post-processed with the remaining transactions in the block.
-    pub fn from_revm<C: PevmChain>(
-        chain: &C,
-        spec_id: C::EvmSpecId,
-        ResultAndState { result, state }: ResultAndState<C::EvmHaltReason>,
-    ) -> Self {
-        Self {
-            receipt: Receipt {
-                status: result.is_success().into(),
-                cumulative_gas_used: result.tx_gas_used(),
-                logs: result.into_logs(),
-            },
-            state: state
-                .into_iter()
-                .filter(|(_, account)| account.is_touched())
-                .map(|(address, account)| {
-                    if account.is_selfdestructed()
-                        || account.is_empty() && chain.is_eip_161_enabled(spec_id)
-                    {
-                        (address, None)
-                    } else {
-                        (address, Some(EvmAccount::from(account)))
-                    }
-                })
-                .collect(),
-        }
+/// Convert Revm's execution result into a standard receipt.
+/// Note that the cumulative gas used in the receipt is preset to the gas used in this transaction.
+/// It should be post-processed with the remaining transactions in the block.
+pub(crate) fn receipt_from_revm<H>(result: ExecutionResult<H>) -> Receipt {
+    Receipt {
+        status: result.is_success().into(),
+        cumulative_gas_used: result.tx_gas_used(),
+        logs: result.into_logs(),
     }
+}
+
+/// Convert Revm's state transitions into PEVM's state transitions.
+pub(crate) fn state_transitions_from_revm(
+    is_eip_161_enabled: bool,
+    state: EvmState,
+) -> impl Iterator<Item = (Address, Option<EvmAccount>)> {
+    state
+        .into_iter()
+        .filter(|(_, account)| account.is_touched())
+        .map(move |(address, account)| {
+            if account.is_selfdestructed() || account.is_empty() && is_eip_161_enabled {
+                (address, None)
+            } else {
+                (address, Some(EvmAccount::from(account)))
+            }
+        })
 }
 
 pub(crate) enum VmExecutionError {
@@ -117,11 +113,6 @@ impl From<ReadError> for VmExecutionError {
             _ => Self::ExecutionError(EVMError::Database(err)),
         }
     }
-}
-
-pub(crate) struct VmExecutionResult {
-    pub(crate) execution_result: PevmTxExecutionResult,
-    pub(crate) flags: FinishExecFlags,
 }
 
 // A database interface that intercepts reads while executing a specific
@@ -480,7 +471,7 @@ impl<S: Storage> Database for VmDb<'_, S> {
 pub(crate) struct Vm<'a, S: Storage, C: PevmChain> {
     // Shared block-level state
     chain: &'a C,
-    spec_id: C::EvmSpecId,
+    is_eip_161_enabled: bool,
     block_env: &'a BlockEnv,
     txs: &'a [C::EvmTx],
     mv_memory: &'a MvMemory,
@@ -518,7 +509,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         };
         Self {
             chain,
-            spec_id,
+            is_eip_161_enabled: chain.is_eip_161_enabled(spec_id),
             block_env,
             txs,
             mv_memory,
@@ -548,7 +539,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     pub(crate) fn execute(
         &mut self,
         tx_version: &TxVersion,
-    ) -> Result<VmExecutionResult, VmExecutionError> {
+        result_slot: &mut Option<PevmTxExecutionResult>,
+    ) -> Result<FinishExecFlags, VmExecutionError> {
         // SAFETY: A correct scheduler would guarantee this index to be inbound.
         let full_tx = unsafe { self.txs.get_unchecked(tx_version.tx_idx) };
         let tx = self.chain.tx_env(full_tx);
@@ -584,11 +576,9 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 let mut write_set = WriteSet::with_capacity(6);
 
                 let ctx = self.evm.ctx();
+                let state = ctx.journal_mut().finalize();
 
-                let result_and_state =
-                    ResultAndState::new(exec_result, ctx.journal_mut().finalize());
-
-                for (address, account) in &result_and_state.state {
+                for (address, account) in &state {
                     if account.is_selfdestructed() {
                         // TODO: Also write [SelfDestructed] to the basic location?
                         // For now we are betting on [code_hash] triggering the sequential
@@ -638,9 +628,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             // and return a [None], i.e., [LoadedAsNotExisting]. Without
                             // this check it would write then read a [Some] default
                             // account, which may yield a wrong gas fee, etc.
-                            else if !self.chain.is_eip_161_enabled(self.spec_id)
-                                || !account.is_empty()
-                            {
+                            else if !self.is_eip_161_enabled || !account.is_empty() {
                                 write_set.push((
                                     account_location_hash,
                                     MemoryValue::Basic(AccountBasic {
@@ -660,7 +648,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             self.mv_memory
                                 .new_bytecodes
                                 .entry(account.info.code_hash)
-                                .or_insert_with(|| account.info.code.clone().unwrap());
+                                .or_insert_with(|| account.info.code.clone().unwrap_or_default());
                         }
                     }
 
@@ -682,12 +670,12 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 } else {
                     tx.gas_price
                 };
-                if self.chain.is_eip_1559_enabled(self.spec_id) {
+                if self.is_eip_161_enabled {
                     gas_price = gas_price.saturating_sub(self.block_env.basefee as u128);
                 }
                 let rewards = self.chain.get_rewards(
                     self.beneficiary_location_hash,
-                    U256::from(result_and_state.result.tx_gas_used()),
+                    U256::from(exec_result.tx_gas_used()),
                     U256::from(gas_price),
                     self.block_env.basefee,
                     full_tx,
@@ -734,14 +722,19 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     flags |= FinishExecFlags::WroteNewLocation;
                 }
 
-                Ok(VmExecutionResult {
-                    execution_result: PevmTxExecutionResult::from_revm(
-                        self.chain,
-                        self.spec_id,
-                        result_and_state,
-                    ),
-                    flags,
-                })
+                let receipt = receipt_from_revm(exec_result);
+                let state = state_transitions_from_revm(self.is_eip_161_enabled, state);
+                if let Some(slot) = result_slot {
+                    slot.receipt = receipt;
+                    slot.state.clear();
+                    slot.state.extend(state);
+                } else {
+                    *result_slot = Some(PevmTxExecutionResult {
+                        receipt,
+                        state: state.collect(),
+                    });
+                }
+                Ok(flags)
             }
             Err(EVMError::Database(read_error)) => Err(VmExecutionError::from(read_error)),
             Err(err) => {
