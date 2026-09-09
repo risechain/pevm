@@ -51,9 +51,9 @@ impl WETH9 {
         let mut store = StorageBuilder::new();
         store.set(0, from_short_string("Wrapped Ether"));
         store.set(1, from_short_string("WETH"));
-        store.set(3, 18);
+        store.set(2, 18);
+        store.set(3, 0); // mapping
         store.set(4, 0); // mapping
-        store.set(5, 0); // mapping
 
         EvmAccount {
             balance: U256::ZERO,
@@ -111,8 +111,8 @@ impl UniswapV3Factory {
         store.set(1, 0);
         store.set(2, 0);
         store.set(3, from_address(self.owner));
+        store.set(3, 0); // mapping
         store.set(4, 0); // mapping
-        store.set(5, 0); // mapping
 
         store.set(from_indices(4, &[500]), 10);
         store.set(from_indices(4, &[3000]), 60);
@@ -238,7 +238,7 @@ impl UniswapV3Pool {
         store.set(2, 0);
         store.set(3, 0);
         store.set(4, 111_111_000_000_010_412_955_141u128);
-        store.set(5, 0); // mapping
+        store.set(4, 0); // mapping
         store.set(6, 0); // mapping
         store.set(7, 0); // mapping
         store.set(
