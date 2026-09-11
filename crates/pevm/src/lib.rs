@@ -58,7 +58,7 @@ impl Hasher for IdentityHasher {
         self.0
     }
     fn write(&mut self, _: &[u8]) {
-        unreachable!()
+        unreachable!("IdentityHasher only supports u64/usize keys; got arbitrary bytes")
     }
 }
 
