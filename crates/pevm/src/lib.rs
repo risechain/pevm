@@ -195,10 +195,10 @@ bitflags! {
         // scheduler, meaning a [false] here will still be validated if
         // there was a lower transaction that has broken the preprocessed
         // dependency chain and returned [true]
-        const NeedValidation = 0;
+        const NeedValidation = 1;
         // We need to validate from the next transaction if this execution
         // wrote to a new location.
-        const WroteNewLocation = 1;
+        const WroteNewLocation = 2;
     }
 }
 
@@ -210,7 +210,7 @@ macro_rules! index_mutex {
         // than the block size, which is the size of all vectors we
         // index via this macro. Otherwise, DO NOT USE!
         // TODO: Better error handling for the mutex.
-        unsafe { $vec.get_unchecked($index).lock().unwrap() }
+        unsafe { $vec.get_unchecked($index).lock().unwrap_or_else(|e| e.into_inner()) }
     };
 }
 
