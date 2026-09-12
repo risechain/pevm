@@ -210,7 +210,7 @@ macro_rules! index_mutex {
         // than the block size, which is the size of all vectors we
         // index via this macro. Otherwise, DO NOT USE!
         // TODO: Better error handling for the mutex.
-        unsafe { $vec.get_unchecked($index).lock().unwrap() }
+        unsafe { $vec.get_unchecked($index).lock().unwrap_or_else(|e| e.into_inner()) }
     };
 }
 
