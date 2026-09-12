@@ -67,7 +67,7 @@ where
         })?
         .into();
 
-    let storage = RpcStorage::new(provider, spec_id, BlockId::number(block.header.number - 1));
+    let storage = RpcStorage::new(provider, spec_id, BlockId::number(block.header.number.saturating_sub(1)));
 
     // Execute the block and track the pre-state in the RPC storage.
     Pevm::default()
