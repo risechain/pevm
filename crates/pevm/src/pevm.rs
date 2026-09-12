@@ -353,7 +353,7 @@ impl Pevm {
                             nonce += 1;
                         }
                         // TODO: Better error handling
-                        _ => unreachable!(),
+                        _ => return Err(PevmError::UnreachableError),
                     }
                     // Assert that evaluated nonce is correct when address is caller.
                     if tx.caller == address {
