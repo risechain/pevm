@@ -88,7 +88,7 @@ impl Scheduler {
     }
 
     pub(crate) fn abort(&self) {
-        self.aborted.store(true, Ordering::Relaxed);
+        self.aborted.store(true, Ordering::Release);
     }
 
     fn try_execute(&self, tx_idx: TxIdx) -> Option<TxVersion> {
@@ -106,7 +106,7 @@ impl Scheduler {
     }
 
     pub(crate) fn next_task(&self) -> Option<Task> {
-        while !self.aborted.load(Ordering::Relaxed) {
+        while !self.aborted.load(Ordering::Acquire) {
             let execution_idx = self.execution_idx.load(Ordering::Relaxed);
             let validation_idx = self.validation_idx.load(Ordering::Relaxed);
             if execution_idx >= self.block_size && validation_idx >= self.block_size {
