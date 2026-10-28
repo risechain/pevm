@@ -1,14 +1,41 @@
 use alloy_primitives::Bloom;
 use alloy_rpc_types_eth::Block;
+use op_revm::OpTransaction;
 use pevm::{
     EvmAccount, Pevm, Storage,
-    chain::{CalculateReceiptRootError, PevmChain},
+    chain::{CalculateReceiptRootError, PevmChain, PevmEthereum, PevmRise},
 };
 use revm::{
-    context::BlockEnv,
+    context::{BlockEnv, TxEnv},
     primitives::{Address, U256, alloy_primitives::U160},
 };
 use std::{fmt::Debug, num::NonZeroUsize, thread};
+
+/// Chains whose EVM transactions can be mocked from a base [`TxEnv`],
+/// so the same mocked blocks can be tested on every chain.
+pub trait MockEvmTx: PevmChain {
+    /// Wrap a base [`TxEnv`] into this chain's EVM transaction.
+    fn mock_evm_tx(&self, tx: TxEnv) -> Self::EvmTx;
+}
+
+impl MockEvmTx for PevmEthereum {
+    fn mock_evm_tx(&self, tx: TxEnv) -> TxEnv {
+        tx
+    }
+}
+
+impl MockEvmTx for PevmRise {
+    fn mock_evm_tx(&self, base: TxEnv) -> OpTransaction<TxEnv> {
+        // The default carries a mock enveloped tx, which non-deposit OP transactions require.
+        OpTransaction {
+            base: TxEnv {
+                chain_id: Some(self.id()),
+                ..base
+            },
+            ..OpTransaction::default()
+        }
+    }
+}
 
 /// Mock an account from an integer index that is used as the address.
 /// Useful for mock iterations.

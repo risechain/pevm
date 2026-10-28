@@ -8,28 +8,42 @@ pub mod common;
 #[path = "./mod.rs"]
 pub mod erc20;
 
-use common::test_execute_revm;
+use common::{MockEvmTx, test_execute_revm};
 use erc20::generate_cluster;
-use pevm::chain::PevmEthereum;
+use pevm::chain::{PevmEthereum, PevmRise};
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use revm::context::TxEnv;
 use revm::primitives::Address;
 use std::sync::Arc;
 
-#[test]
-fn erc20_independent() {
+fn test_erc20_independent<C>(chain: &C)
+where
+    C: MockEvmTx + PartialEq + Send + Sync,
+{
     const N: usize = 37123;
     let (mut state, bytecodes, txs) = generate_cluster(N, 1, 1);
     state.insert(Address::ZERO, EvmAccount::default()); // Beneficiary
     test_execute_revm(
-        &PevmEthereum::mainnet(),
+        chain,
         InMemoryStorage::new(state, Arc::new(bytecodes), Default::default()),
-        txs,
+        txs.into_iter().map(|tx| chain.mock_evm_tx(tx)).collect(),
     );
 }
 
 #[test]
-fn erc20_clusters() {
+fn ethereum_erc20_independent() {
+    test_erc20_independent(&PevmEthereum::mainnet());
+}
+
+#[test]
+fn rise_erc20_independent() {
+    test_erc20_independent(&PevmRise);
+}
+
+fn test_erc20_clusters<C>(chain: &C)
+where
+    C: MockEvmTx + PartialEq + Send + Sync,
+{
     const NUM_CLUSTERS: usize = 10;
     const NUM_FAMILIES_PER_CLUSTER: usize = 15;
     const NUM_PEOPLE_PER_FAMILY: usize = 15;
@@ -49,9 +63,22 @@ fn erc20_clusters() {
         final_bytecodes.extend(bytecodes);
         final_txs.extend(txs);
     }
-    common::test_execute_revm(
-        &PevmEthereum::mainnet(),
+    test_execute_revm(
+        chain,
         InMemoryStorage::new(final_state, Arc::new(final_bytecodes), Default::default()),
-        final_txs,
+        final_txs
+            .into_iter()
+            .map(|tx| chain.mock_evm_tx(tx))
+            .collect(),
     )
+}
+
+#[test]
+fn ethereum_erc20_clusters() {
+    test_erc20_clusters(&PevmEthereum::mainnet());
+}
+
+#[test]
+fn rise_erc20_clusters() {
+    test_erc20_clusters(&PevmRise);
 }

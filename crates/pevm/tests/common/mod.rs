@@ -19,7 +19,7 @@ use pevm::{
 pub mod runner;
 
 /// runner module imports
-pub use runner::{mock_account, test_execute_alloy, test_execute_revm};
+pub use runner::{MockEvmTx, mock_account, test_execute_alloy, test_execute_revm};
 
 /// storage module
 pub mod storage;

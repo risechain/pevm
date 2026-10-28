@@ -12,14 +12,17 @@ pub mod erc20;
 pub mod uniswap;
 
 use crate::uniswap::generate_cluster;
-use pevm::chain::PevmEthereum;
+use common::MockEvmTx;
+use pevm::chain::{PevmEthereum, PevmRise};
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use revm::context::TxEnv;
 use revm::primitives::Address;
 use std::sync::Arc;
 
-#[test]
-fn uniswap_clusters() {
+fn test_uniswap_clusters<C>(chain: &C)
+where
+    C: MockEvmTx + PartialEq + Send + Sync,
+{
     const NUM_CLUSTERS: usize = 20;
     const NUM_PEOPLE_PER_CLUSTER: usize = 20;
     const NUM_SWAPS_PER_PERSON: usize = 20;
@@ -36,8 +39,21 @@ fn uniswap_clusters() {
         final_txs.extend(txs);
     }
     common::test_execute_revm(
-        &PevmEthereum::mainnet(),
+        chain,
         InMemoryStorage::new(final_state, Arc::new(final_bytecodes), Default::default()),
-        final_txs,
+        final_txs
+            .into_iter()
+            .map(|tx| chain.mock_evm_tx(tx))
+            .collect(),
     )
+}
+
+#[test]
+fn ethereum_uniswap_clusters() {
+    test_uniswap_clusters(&PevmEthereum::mainnet());
+}
+
+#[test]
+fn rise_uniswap_clusters() {
+    test_uniswap_clusters(&PevmRise);
 }

@@ -2,7 +2,11 @@
 
 use std::collections::HashMap;
 
-use pevm::{InMemoryStorage, chain::PevmEthereum};
+use common::MockEvmTx;
+use pevm::{
+    InMemoryStorage,
+    chain::{PevmEthereum, PevmRise},
+};
 use rand::random;
 use revm::{
     context::{TransactTo, TxEnv},
@@ -11,13 +15,15 @@ use revm::{
 
 pub mod common;
 
-#[test]
-fn raw_transfers_independent() {
+fn test_raw_transfers_independent<C>(chain: &C)
+where
+    C: MockEvmTx + PartialEq + Send + Sync,
+{
     let block_size = 100_000; // number of transactions
     let mut nonces = HashMap::new();
 
     common::test_execute_revm(
-        &PevmEthereum::mainnet(),
+        chain,
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new(
             (0..=block_size).map(common::mock_account).collect(),
@@ -31,7 +37,7 @@ fn raw_transfers_independent() {
                 let address = Address::from(U160::from(i));
                 let nonce = nonces.entry(address).or_insert(0);
                 *nonce += 1;
-                TxEnv {
+                chain.mock_evm_tx(TxEnv {
                     caller: address,
                     nonce: *nonce,
                     kind: TransactTo::Call(address),
@@ -39,23 +45,35 @@ fn raw_transfers_independent() {
                     gas_limit: common::RAW_TRANSFER_GAS_LIMIT,
                     gas_price: 1,
                     ..TxEnv::default()
-                }
+                })
             })
             .collect(),
     );
 }
 
+#[test]
+fn ethereum_raw_transfers_independent() {
+    test_raw_transfers_independent(&PevmEthereum::mainnet());
+}
+
+#[test]
+fn rise_raw_transfers_independent() {
+    test_raw_transfers_independent(&PevmRise);
+}
+
 // The same sender sending multiple transfers with increasing nonces.
 // These must be detected and executed in the correct order.
-#[test]
-fn raw_transfers_same_sender_multiple_txs() {
+fn test_raw_transfers_same_sender_multiple_txs<C>(chain: &C)
+where
+    C: MockEvmTx + PartialEq + Send + Sync,
+{
     let block_size = 5_000; // number of transactions
 
     let same_sender_address = Address::from(U160::from(1));
     let mut same_sender_nonce: u64 = 0;
 
     common::test_execute_revm(
-        &PevmEthereum::mainnet(),
+        chain,
         // Mock the beneficiary account (`Address:ZERO`) and the next `block_size` user accounts.
         InMemoryStorage::new(
             (0..=block_size).map(common::mock_account).collect(),
@@ -72,7 +90,7 @@ fn raw_transfers_same_sender_multiple_txs() {
                     same_sender_nonce += 1;
                     (same_sender_address, same_sender_nonce)
                 };
-                TxEnv {
+                chain.mock_evm_tx(TxEnv {
                     caller: address,
                     kind: TransactTo::Call(address),
                     value: U256::from(1),
@@ -80,10 +98,20 @@ fn raw_transfers_same_sender_multiple_txs() {
                     gas_price: 1,
                     nonce,
                     ..TxEnv::default()
-                }
+                })
             })
             .collect(),
     );
+}
+
+#[test]
+fn ethereum_raw_transfers_same_sender_multiple_txs() {
+    test_raw_transfers_same_sender_multiple_txs(&PevmEthereum::mainnet());
+}
+
+#[test]
+fn rise_raw_transfers_same_sender_multiple_txs() {
+    test_raw_transfers_same_sender_multiple_txs(&PevmRise);
 }
 
 #[test]
@@ -103,18 +131,15 @@ fn ethereum_independent_raw_transfers() {
 
 #[test]
 fn rise_empty_alloy_block() {
-    use pevm::chain::PevmRise;
     common::test_independent_raw_transfers(&PevmRise, 0);
 }
 
 #[test]
 fn rise_one_tx_alloy_block() {
-    use pevm::chain::PevmRise;
     common::test_independent_raw_transfers(&PevmRise, 1);
 }
 
 #[test]
 fn rise_independent_raw_transfers() {
-    use pevm::chain::PevmRise;
     common::test_independent_raw_transfers(&PevmRise, 100_000);
 }

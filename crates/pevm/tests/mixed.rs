@@ -1,6 +1,7 @@
 //! Test raw transfers -- A block with random raw transfers, ERC-20 transfers, and Uniswap swaps.
 
-use pevm::chain::PevmEthereum;
+use common::MockEvmTx;
+use pevm::chain::{PevmEthereum, PevmRise};
 use pevm::{Bytecodes, ChainState, EvmAccount, InMemoryStorage};
 use rand::random;
 use revm::context::{TransactTo, TxEnv};
@@ -12,8 +13,10 @@ pub mod common;
 pub mod erc20;
 pub mod uniswap;
 
-#[test]
-fn mixed_block() {
+fn test_mixed_block<C>(chain: &C)
+where
+    C: MockEvmTx + PartialEq + Send + Sync,
+{
     let target_block_size = 100_000; // number of transactions
 
     // TODO: Run a few times
@@ -67,10 +70,23 @@ fn mixed_block() {
         }
     }
     common::test_execute_revm(
-        &PevmEthereum::mainnet(),
+        chain,
         InMemoryStorage::new(final_state, Arc::new(final_bytecodes), Default::default()),
         // TODO: Shuffle transactions to scatter dependencies around the block.
         // Note that we'll need to guarantee that the nonces are increasing.
-        final_txs,
+        final_txs
+            .into_iter()
+            .map(|tx| chain.mock_evm_tx(tx))
+            .collect(),
     );
+}
+
+#[test]
+fn ethereum_mixed_block() {
+    test_mixed_block(&PevmEthereum::mainnet());
+}
+
+#[test]
+fn rise_mixed_block() {
+    test_mixed_block(&PevmRise);
 }
