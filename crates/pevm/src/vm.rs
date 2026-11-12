@@ -596,8 +596,15 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                         let read_account = ctx.db().read_accounts.get(&account_location_hash);
 
                         let has_code = !account.info.is_empty_code_hash();
+                        // Publish the new code whenever it differs from what was
+                        // read, not just on an empty -> non-empty transition.
+                        // Otherwise an EIP-7702 re-delegation (non-empty -> a
+                        // different non-empty code hash) leaves the stale code
+                        // hash in MV memory.
                         let is_new_code = has_code
-                            && read_account.is_none_or(|(_, code_hash)| code_hash.is_none());
+                            && read_account.is_none_or(|(_, code_hash)| {
+                                *code_hash != Some(account.info.code_hash)
+                            });
 
                         // Write new account changes
                         if is_new_code
